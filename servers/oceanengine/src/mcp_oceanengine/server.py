@@ -17,7 +17,7 @@ _SHARED_DIR = Path(__file__).resolve().parents[4] / "shared"
 if str(_SHARED_DIR) not in sys.path:
     sys.path.insert(0, str(_SHARED_DIR))
 
-from cn_commerce_base import CommerceAPIError, CommerceMCPBase, ConfigValidationError  # noqa: E402
+from cn_commerce_base import CommerceAPIError, CommerceMCPBase, ConfigValidationError, format_error_response  # noqa: E402
 from mcp.server import Server  # noqa: E402
 from mcp.server.stdio import stdio_server  # noqa: E402
 
@@ -59,11 +59,6 @@ def _format_response(result: dict) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-def _format_error(err: CommerceAPIError) -> str:
-    """Format a CommerceAPIError as an error JSON string."""
-    return json.dumps({"error": {"code": err.code, "message": err.msg}}, ensure_ascii=False)
-
-
 def _safe_int_list(comma_separated: str) -> list[int]:
     """Parse a comma-separated string into a list of integers, ignoring empty entries."""
     return [int(x.strip()) for x in comma_separated.split(",") if x.strip()]
@@ -88,7 +83,7 @@ async def get_advertiser_info(advertiser_ids: str) -> str:
         )
         return _format_response(result)
     except CommerceAPIError as e:
-        return _format_error(e)
+        return format_error_response(e)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 
@@ -109,7 +104,7 @@ async def get_account_balance(advertiser_id: str) -> str:
         )
         return _format_response(result)
     except CommerceAPIError as e:
-        return _format_error(e)
+        return format_error_response(e)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 
@@ -149,7 +144,7 @@ async def get_campaign_report(
         )
         return _format_response(result)
     except CommerceAPIError as e:
-        return _format_error(e)
+        return format_error_response(e)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 
@@ -186,7 +181,7 @@ async def get_ad_detail_report(
         )
         return _format_response(result)
     except CommerceAPIError as e:
-        return _format_error(e)
+        return format_error_response(e)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 
@@ -221,7 +216,7 @@ async def list_campaigns(
         result = await client._request("GET", "2/campaign/get/", params=params)
         return _format_response(result)
     except CommerceAPIError as e:
-        return _format_error(e)
+        return format_error_response(e)
     except json.JSONDecodeError as e:
         return json.dumps(
             {"error": {"message": f"Invalid filtering JSON: {e}"}}, ensure_ascii=False
@@ -253,7 +248,7 @@ async def get_campaign_detail(advertiser_id: str, campaign_id: str) -> str:
         )
         return _format_response(result)
     except CommerceAPIError as e:
-        return _format_error(e)
+        return format_error_response(e)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 
@@ -287,7 +282,7 @@ async def list_ads(
         result = await client._request("GET", "2/ad/get/", params=params)
         return _format_response(result)
     except CommerceAPIError as e:
-        return _format_error(e)
+        return format_error_response(e)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 
@@ -315,7 +310,7 @@ async def get_ad_detail(advertiser_id: str, ad_id: str) -> str:
         )
         return _format_response(result)
     except CommerceAPIError as e:
-        return _format_error(e)
+        return format_error_response(e)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 
@@ -358,7 +353,7 @@ async def get_qianchuan_report(
         )
         return _format_response(result)
     except CommerceAPIError as e:
-        return _format_error(e)
+        return format_error_response(e)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 
@@ -391,7 +386,7 @@ async def get_qianchuan_campaign_list(
         )
         return _format_response(result)
     except CommerceAPIError as e:
-        return _format_error(e)
+        return format_error_response(e)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 
@@ -434,7 +429,7 @@ async def get_star_report(
         )
         return _format_response(result)
     except CommerceAPIError as e:
-        return _format_error(e)
+        return format_error_response(e)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 
@@ -469,7 +464,7 @@ async def list_star_tasks(
         result = await client._request("GET", "2/star/task/list/", params=params)
         return _format_response(result)
     except CommerceAPIError as e:
-        return _format_error(e)
+        return format_error_response(e)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 
@@ -512,7 +507,7 @@ async def get_creative_report(
         )
         return _format_response(result)
     except CommerceAPIError as e:
-        return _format_error(e)
+        return format_error_response(e)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 
@@ -547,7 +542,7 @@ async def list_materials(
         result = await client._request("GET", "2/material/list/", params=params)
         return _format_response(result)
     except CommerceAPIError as e:
-        return _format_error(e)
+        return format_error_response(e)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 
@@ -584,7 +579,7 @@ async def list_audience_packages(
         )
         return _format_response(result)
     except CommerceAPIError as e:
-        return _format_error(e)
+        return format_error_response(e)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 
@@ -624,7 +619,7 @@ async def get_audience_report(
         )
         return _format_response(result)
     except CommerceAPIError as e:
-        return _format_error(e)
+        return format_error_response(e)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 
@@ -655,7 +650,7 @@ async def get_bid_suggestion(advertiser_id: str, campaign_id: str) -> str:
         )
         return _format_response(result)
     except CommerceAPIError as e:
-        return _format_error(e)
+        return format_error_response(e)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 
@@ -683,7 +678,7 @@ async def get_diagnosis(advertiser_id: str, campaign_id: str) -> str:
         )
         return _format_response(result)
     except CommerceAPIError as e:
-        return _format_error(e)
+        return format_error_response(e)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 

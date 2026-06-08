@@ -1,0 +1,113 @@
+# ─────────────────────────────────────────────────────────────
+# mcp-cn-commerce — Docker Compose for Local Development
+# ─────────────────────────────────────────────────────────────
+# Usage:
+#   docker compose up test          # Run all tests
+#   docker compose up lint          # Run linting
+#   docker compose run --rm shell   # Interactive shell
+#
+# All platform credentials are read from .env (see .env.example)
+# ─────────────────────────────────────────────────────────────
+
+services:
+  # ── Run full test suite ───────────────────────────────────
+  test:
+    build: .
+    command: make test
+    env_file: .env
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  # ── Run tests with coverage ───────────────────────────────
+  test-cov:
+    build: .
+    command: make test-cov
+    env_file: .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./htmlcov:/app/htmlcov
+
+  # ── Lint & format check ───────────────────────────────────
+  lint:
+    build: .
+    command: make lint
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  # ── Interactive development shell ─────────────────────────
+  shell:
+    build: .
+    command: /bin/bash
+    env_file: .env
+    stdin_open: true
+    tty: true
+    volumes:
+      - .:/app
+      - /app/.venv  # Exclude host venv
+
+  # ── Individual platform servers (stdio MCP) ───────────────
+  # These run as MCP servers via stdin/stdout.
+  # Connect your MCP client (Claude Desktop, etc.) to them.
+  #
+  # Example with Claude Desktop config:
+  #   "oceanengine": {
+  #     "command": "docker",
+  #     "args": ["compose", "run", "--rm", "oceanengine"]
+  #   }
+
+  oceanengine:
+    build: .
+    command: ["mcp-cn-oceanengine"]
+    env_file: .env
+    stdin_open: true
+    tty: true
+
+  doudian:
+    build: .
+    command: ["mcp-cn-doudian"]
+    env_file: .env
+    stdin_open: true
+    tty: true
+
+  jd:
+    build: .
+    command: ["mcp-cn-jd"]
+    env_file: .env
+    stdin_open: true
+    tty: true
+
+  taobao:
+    build: .
+    command: ["mcp-cn-taobao"]
+    env_file: .env
+    stdin_open: true
+    tty: true
+
+  pinduoduo:
+    build: .
+    command: ["mcp-cn-pinduoduo"]
+    env_file: .env
+    stdin_open: true
+    tty: true
+
+  kuaishou:
+    build: .
+    command: ["mcp-cn-kuaishou"]
+    env_file: .env
+    stdin_open: true
+    tty: true
+
+  xiaohongshu:
+    build: .
+    command: ["mcp-cn-xiaohongshu"]
+    env_file: .env
+    stdin_open: true
+    tty: true
+
+  weixin-store:
+    build: .
+    command: ["mcp-cn-weixin-store"]
+    env_file: .env
+    stdin_open: true
+    tty: true

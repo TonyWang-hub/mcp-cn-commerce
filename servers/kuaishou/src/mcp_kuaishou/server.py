@@ -22,7 +22,7 @@ _project_root = Path(__file__).resolve().parents[4]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from shared.cn_commerce_base import CommerceMCPBase, CommerceAPIError, SignMethod
+from shared.cn_commerce_base import CommerceMCPBase, CommerceAPIError, ConfigValidationError, SignMethod
 
 
 # ── Kuaishou client ───────────────────────────────────────────────────────────
@@ -80,14 +80,22 @@ class KuaishouMCP(CommerceMCPBase):
         return await self._request("GET", path, params=params)
 
 
-# ── Instantiate client from env ───────────────────────────────────────────────
+# ── Instantiate client from env ────────────────────────────────────────────
 
-ks = KuaishouMCP(
-    app_key=os.environ.get("KUAISHOU_APP_KEY", ""),
-    app_secret=os.environ.get("KUAISHOU_APP_SECRET", ""),
-    sign_secret=os.environ.get("KUAISHOU_SIGN_SECRET", ""),
-    access_token=os.environ.get("KUAISHOU_ACCESS_TOKEN", ""),
-)
+def _create_kuaishou_client() -> KuaishouMCP:
+    """Create kuaishou client with configuration validation."""
+    try:
+        return KuaishouMCP.from_env("KUAISHOU", ["APP_KEY", "APP_SECRET", "SIGN_SECRET", "ACCESS_TOKEN"])
+    except ConfigValidationError:
+        # Fallback to direct instantiation for backward compatibility
+        return KuaishouMCP(
+            app_key=os.environ.get("KUAISHOU_APP_KEY", ""),
+            app_secret=os.environ.get("KUAISHOU_APP_SECRET", ""),
+            sign_secret=os.environ.get("KUAISHOU_SIGN_SECRET", ""),
+            access_token=os.environ.get("KUAISHOU_ACCESS_TOKEN", ""),
+        )
+
+ks = _create_kuaishou_client()
 
 
 # ── MCP server ────────────────────────────────────────────────────────────────

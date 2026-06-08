@@ -10,6 +10,8 @@ import pytest
 # Must patch env BEFORE importing the server module (it reads env at import time)
 import os
 
+os.environ.setdefault("WX_APP_ID", "test_app_id")
+os.environ.setdefault("WX_APP_SECRET", "test_app_secret")
 os.environ.setdefault("WX_ACCESS_TOKEN", "test_access_token_123456")
 
 from mcp_weixin_store.server import (

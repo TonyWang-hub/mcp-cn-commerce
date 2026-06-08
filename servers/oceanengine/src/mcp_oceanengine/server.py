@@ -18,10 +18,8 @@ if str(_SHARED_DIR) not in sys.path:
     sys.path.insert(0, str(_SHARED_DIR))
 
 from cn_commerce_base import (
-    CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,
-    format_error_response,
     handle_tool_errors,
 )  # noqa: E402
 from mcp.server import Server  # noqa: E402

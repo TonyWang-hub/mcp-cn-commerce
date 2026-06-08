@@ -21,20 +21,20 @@ if str(_shared_dir) not in sys.path:
     sys.path.insert(0, str(_shared_dir))
 
 from cn_commerce_base import (
+    DEFAULT_RETRY,
+    RATE_LIMIT_RETRY,
     BatchRequestItem,
     BatchResultItem,
     BatchSummary,
     CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,
-    DEFAULT_RETRY,
     EndpointMetrics,
     MetricsCollector,
-    RATE_LIMIT_RETRY,
     RateLimiter,
     ResponseCache,
-    RetryConfig,
     RetryableError,
+    RetryConfig,
     SignMethod,
     format_error_response,
     with_retry,
@@ -632,10 +632,7 @@ class TestBatchRequest:
         client = CommerceMCPBase(app_key="k", app_secret="s")
         with patch.object(client, "_request", new_callable=AsyncMock) as mock_req:
             mock_req.return_value = {"result": "ok"}
-            requests = [
-                BatchRequestItem("GET", "/api/a", request_id=f"r{i}")
-                for i in range(5)
-            ]
+            requests = [BatchRequestItem("GET", "/api/a", request_id=f"r{i}") for i in range(5)]
             summary = await client._batch_request(requests, max_concurrency=3)
         assert summary.total == 5
         assert summary.succeeded == 5
@@ -655,10 +652,7 @@ class TestBatchRequest:
             return {"result": "ok"}
 
         with patch.object(client, "_request", side_effect=_side_effect):
-            requests = [
-                BatchRequestItem("GET", "/api/a", request_id=f"r{i}")
-                for i in range(3)
-            ]
+            requests = [BatchRequestItem("GET", "/api/a", request_id=f"r{i}") for i in range(3)]
             summary = await client._batch_request(requests)
 
         assert summary.total == 3
@@ -688,10 +682,7 @@ class TestBatchRequest:
             return {"result": "ok"}
 
         with patch.object(client, "_request", side_effect=_side_effect):
-            requests = [
-                BatchRequestItem("GET", "/api/a", request_id=f"r{i}")
-                for i in range(5)
-            ]
+            requests = [BatchRequestItem("GET", "/api/a", request_id=f"r{i}") for i in range(5)]
             summary = await client._batch_request(requests, fail_fast=True)
 
         assert summary.failed >= 1
@@ -746,10 +737,7 @@ class TestBatchRequest:
             return {"result": "ok"}
 
         with patch.object(client, "_request", side_effect=_side_effect):
-            requests = [
-                BatchRequestItem("GET", "/api", request_id=f"r{i}")
-                for i in range(4)
-            ]
+            requests = [BatchRequestItem("GET", "/api", request_id=f"r{i}") for i in range(4)]
             summary = await client._batch_request(requests)
 
         assert summary.total == 4
@@ -844,7 +832,9 @@ class TestRetryConfig:
 
     def test_should_retry_exception_http_status_error(self):
         cfg = RetryConfig()
-        assert cfg.should_retry_exception(httpx.HTTPStatusError("400", request=AsyncMock(), response=AsyncMock())) is False
+        assert (
+            cfg.should_retry_exception(httpx.HTTPStatusError("400", request=AsyncMock(), response=AsyncMock())) is False
+        )
 
     def test_should_retry_exception_commerce_api_error_retryable(self):
         cfg = RetryConfig(retryable_api_codes={40001})
@@ -1012,12 +1002,14 @@ class TestWithRetryDecorator:
     async def test_retry_with_commerce_api_error(self):
         call_count = 0
 
-        @with_retry(RetryConfig(
-            max_retries=2,
-            base_delay=0.01,
-            jitter=False,
-            retryable_api_codes={40001},
-        ))
+        @with_retry(
+            RetryConfig(
+                max_retries=2,
+                base_delay=0.01,
+                jitter=False,
+                retryable_api_codes={40001},
+            )
+        )
         async def api_fail_then_succeed():
             nonlocal call_count
             call_count += 1
@@ -1033,11 +1025,13 @@ class TestWithRetryDecorator:
     async def test_retry_does_not_catch_non_retryable_api_code(self):
         call_count = 0
 
-        @with_retry(RetryConfig(
-            max_retries=3,
-            base_delay=0.01,
-            retryable_api_codes={40001},
-        ))
+        @with_retry(
+            RetryConfig(
+                max_retries=3,
+                base_delay=0.01,
+                retryable_api_codes={40001},
+            )
+        )
         async def api_fail_wrong_code():
             nonlocal call_count
             call_count += 1
@@ -1066,7 +1060,8 @@ class TestRequestRetry:
 
         with patch.object(client, "_get_client", return_value=mock_client):
             result = await client._request(
-                "GET", "/api/test",
+                "GET",
+                "/api/test",
                 retry_config=RetryConfig(max_retries=2, base_delay=0.01, jitter=False),
             )
 
@@ -1089,7 +1084,8 @@ class TestRequestRetry:
 
         with patch.object(client, "_get_client", return_value=mock_client):
             result = await client._request(
-                "GET", "/api/test",
+                "GET",
+                "/api/test",
                 retry_config=RetryConfig(max_retries=3, base_delay=0.01, jitter=False),
             )
 
@@ -1106,7 +1102,8 @@ class TestRequestRetry:
         with patch.object(client, "_get_client", return_value=mock_client):
             with pytest.raises(httpx.ConnectError):
                 await client._request(
-                    "GET", "/api/test",
+                    "GET",
+                    "/api/test",
                     retry_config=RetryConfig(max_retries=2, base_delay=0.01, jitter=False),
                 )
 
@@ -1137,7 +1134,8 @@ class TestRequestRetry:
 
         with patch.object(client, "_get_client", return_value=mock_client):
             await client._request(
-                "GET", "/api/test",
+                "GET",
+                "/api/test",
                 retry_config=RetryConfig(max_retries=1, base_delay=0.01, jitter=False),
             )
 
@@ -1155,7 +1153,8 @@ class TestRequestRetry:
         with patch.object(client, "_get_client", return_value=mock_client):
             with pytest.raises(httpx.ConnectError):
                 await client._request(
-                    "GET", "/api/fail",
+                    "GET",
+                    "/api/fail",
                     retry_config=RetryConfig(max_retries=1, base_delay=0.01, jitter=False),
                 )
 
@@ -1181,9 +1180,12 @@ class TestRequestRetry:
 
         with patch.object(client, "_get_client", return_value=mock_client):
             result = await client._request(
-                "GET", "/api/test",
+                "GET",
+                "/api/test",
                 retry_config=RetryConfig(
-                    max_retries=2, base_delay=0.01, jitter=False,
+                    max_retries=2,
+                    base_delay=0.01,
+                    jitter=False,
                     retryable_api_codes={40001},
                 ),
             )
@@ -1204,9 +1206,12 @@ class TestRequestRetry:
         with patch.object(client, "_get_client", return_value=mock_client):
             with pytest.raises(CommerceAPIError) as exc_info:
                 await client._request(
-                    "GET", "/api/test",
+                    "GET",
+                    "/api/test",
                     retry_config=RetryConfig(
-                        max_retries=3, base_delay=0.01, jitter=False,
+                        max_retries=3,
+                        base_delay=0.01,
+                        jitter=False,
                         retryable_api_codes={40001},
                     ),
                 )
@@ -1240,7 +1245,8 @@ class TestRequestRetry:
 
         with patch.object(client, "_get_client", return_value=mock_client):
             await client._request(
-                "GET", "/api/test",
+                "GET",
+                "/api/test",
                 retry_config=RetryConfig(max_retries=2, base_delay=0.1, jitter=False),
             )
 
@@ -1281,6 +1287,7 @@ class TestResponseCache:
         cache = ResponseCache(default_ttl=0.01)
         cache.put("key1", "value1")
         import time
+
         time.sleep(0.02)
         found, value = cache.get("key1")
         assert found is False
@@ -1290,6 +1297,7 @@ class TestResponseCache:
         cache = ResponseCache(default_ttl=300.0)
         cache.put("key1", "value1", ttl=0.01)
         import time
+
         time.sleep(0.02)
         found, _ = cache.get("key1")
         assert found is False
@@ -1372,6 +1380,7 @@ class TestResponseCache:
         cache = ResponseCache(default_ttl=0.01)
         cache.put("a", 1)
         import time
+
         time.sleep(0.02)
         cache.get("a")  # expired = miss
         stats = cache.stats
@@ -1510,6 +1519,7 @@ class TestRequestCacheIntegration:
         with patch.object(client, "_get_client", return_value=mock_client):
             await client._request("GET", "/api/test", use_cache=True, cache_ttl=0.01)
             import time
+
             time.sleep(0.02)
             await client._request("GET", "/api/test", use_cache=True, cache_ttl=0.01)
 

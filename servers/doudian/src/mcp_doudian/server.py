@@ -91,9 +91,7 @@ class DouDianClient:
         # Sort by key alphabetically
         sorted_params = dict(sorted(clean.items()))
         # Compact JSON (no spaces, no ASCII escaping)
-        param_json = json.dumps(
-            sorted_params, separators=(",", ":"), ensure_ascii=False
-        )
+        param_json = json.dumps(sorted_params, separators=(",", ":"), ensure_ascii=False)
         # Build the sign string: app_key + JSON + app_secret
         sign_str = f"{self.app_key}{param_json}{self.app_secret}"
         return hashlib.md5(sign_str.encode()).hexdigest()
@@ -187,9 +185,7 @@ def _get_client() -> DouDianClient:
         missing.append("DOUDIAN_ACCESS_TOKEN")
 
     if missing:
-        raise ConfigError(
-            f"Missing required environment variables: {', '.join(missing)}"
-        )
+        raise ConfigError(f"Missing required environment variables: {', '.join(missing)}")
 
     _client = DouDianClient(
         app_key=app_key,
@@ -357,7 +353,6 @@ async def get_order_detail(
             "buyer_words": _safe_get(raw, "buyer_words"),
             "seller_words": _safe_get(raw, "seller_words"),
             "is_comment": _safe_get(raw, "is_comment"),
-
             # Logistics
             "logistics": {
                 "company": _safe_get(raw, "logistics_info", "company"),
@@ -368,13 +363,11 @@ async def get_order_detail(
                 "ship_time": _safe_get(raw, "logistics_info", "ship_time"),
                 "delivery_time": _safe_get(raw, "logistics_info", "delivery_time"),
             },
-
             # Refund / after-sale
             "refund_status": _safe_get(raw, "refund_status"),
             "refund_amount": _safe_get(raw, "refund_amount"),
             "refund_type": _safe_get(raw, "refund_type"),
             "after_sale_id": _safe_get(raw, "after_sale_id"),
-
             # Products
             "products": [
                 {
@@ -388,7 +381,6 @@ async def get_order_detail(
                 }
                 for p in _safe_get(raw, "product_info", "list", default=[])
             ],
-
             # Buyer
             "buyer": {
                 "name": _safe_get(raw, "buyer_info", "name"),
@@ -400,7 +392,6 @@ async def get_order_detail(
                 "town": _safe_get(raw, "buyer_info", "town", "name"),
                 "street": _safe_get(raw, "buyer_info", "street", "name"),
             },
-
             # Additional
             "order_tags": _safe_get(raw, "order_tags"),
             "appointment_delivery_time": _safe_get(raw, "appointment_delivery_time"),

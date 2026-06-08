@@ -19,10 +19,10 @@ _project_root = Path(__file__).resolve().parents[4]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from shared.cn_commerce_base import CommerceMCPBase, CommerceAPIError, ConfigValidationError, SignMethod
-
+from shared.cn_commerce_base import CommerceAPIError, CommerceMCPBase, ConfigValidationError, SignMethod
 
 # ── Taobao client ───────────────────────────────────────────────────────────────
+
 
 class TaobaoMCP(CommerceMCPBase):
     """Taobao Open Platform (TOP) client.
@@ -59,6 +59,7 @@ class TaobaoMCP(CommerceMCPBase):
 
 # ── Instantiate client from env ────────────────────────────────────────────────
 
+
 def _create_taobao_client() -> TaobaoMCP:
     """Create Taobao client with configuration validation."""
     try:
@@ -70,6 +71,7 @@ def _create_taobao_client() -> TaobaoMCP:
             app_secret=os.environ.get("TAOBAO_APP_SECRET", ""),
             access_token=os.environ.get("TAOBAO_ACCESS_TOKEN", ""),
         )
+
 
 taobao = _create_taobao_client()
 
@@ -354,9 +356,7 @@ async def list_promotions(
     if status:
         biz_params["status"] = status
 
-    result = await taobao._call(
-        "taobao.promotionmisc.activity.range.list.get", biz_params
-    )
+    result = await taobao._call("taobao.promotionmisc.activity.range.list.get", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 

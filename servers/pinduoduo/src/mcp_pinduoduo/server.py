@@ -22,10 +22,10 @@ _project_root = Path(__file__).resolve().parents[4]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from shared.cn_commerce_base import CommerceMCPBase, CommerceAPIError, ConfigValidationError, SignMethod
-
+from shared.cn_commerce_base import CommerceAPIError, CommerceMCPBase, ConfigValidationError, SignMethod
 
 # ── Pinduoduo client ────────────────────────────────────────────────────────
+
 
 class PinduoduoMCP(CommerceMCPBase):
     """Pinduoduo-specific client.
@@ -76,6 +76,7 @@ class PinduoduoMCP(CommerceMCPBase):
 
 # ── Instantiate client from env ────────────────────────────────────────────
 
+
 def _create_pinduoduo_client() -> PinduoduoMCP:
     """Create pinduoduo client with configuration validation."""
     try:
@@ -87,6 +88,7 @@ def _create_pinduoduo_client() -> PinduoduoMCP:
             client_secret=os.environ.get("PINDUODUO_CLIENT_SECRET", ""),
             access_token=os.environ.get("PINDUODUO_ACCESS_TOKEN", ""),
         )
+
 
 pdd = _create_pinduoduo_client()
 

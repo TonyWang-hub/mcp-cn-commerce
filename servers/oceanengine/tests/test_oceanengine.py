@@ -125,10 +125,10 @@ class TestFormatHelpers:
         assert result["data"]["name"] == "测试"
 
     def test_format_error_structure(self):
-        from mcp_oceanengine.server import _format_error
+        from cn_commerce_base import format_error_response
 
         err = CommerceAPIError(40001, "Invalid parameters")
-        result = json.loads(_format_error(err))
+        result = json.loads(format_error_response(err))
         assert result["error"]["code"] == 40001
         assert result["error"]["message"] == "Invalid parameters"
 

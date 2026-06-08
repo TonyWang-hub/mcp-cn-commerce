@@ -195,3 +195,23 @@ class CommerceAPIError(Exception):
         self.code = code
         self.msg = msg
         super().__init__(f"[{code}] {msg}")
+
+
+def format_error_response(error: Exception) -> str:
+    """Format an error into a standardized JSON response string.
+
+    Args:
+        error: The exception to format.
+
+    Returns:
+        A JSON string with error details.
+    """
+    if isinstance(error, CommerceAPIError):
+        return json.dumps(
+            {"error": {"code": error.code, "message": error.msg}},
+            ensure_ascii=False,
+        )
+    return json.dumps(
+        {"error": {"message": str(error)}},
+        ensure_ascii=False,
+    )

@@ -27,16 +27,11 @@ from cn_commerce_base import (
     CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,
-    DEFAULT_RETRY,
     EndpointMetrics,
     MetricsCollector,
-    RATE_LIMIT_RETRY,
     RateLimiter,
-    RetryConfig,
-    RetryableError,
     SignMethod,
     format_error_response,
-    with_retry,
 )
 
 # ── SignMethod Tests ──────────────────────────────────────
@@ -641,10 +636,7 @@ class TestBatchRequest:
         client = CommerceMCPBase(app_key="k", app_secret="s")
         with patch.object(client, "_request", new_callable=AsyncMock) as mock_req:
             mock_req.return_value = {"result": "ok"}
-            requests = [
-                BatchRequestItem("GET", "/api/a", request_id=f"r{i}")
-                for i in range(5)
-            ]
+            requests = [BatchRequestItem("GET", "/api/a", request_id=f"r{i}") for i in range(5)]
             summary = await client._batch_request(requests, max_concurrency=3)
         assert summary.total == 5
         assert summary.succeeded == 5
@@ -664,10 +656,7 @@ class TestBatchRequest:
             return {"result": "ok"}
 
         with patch.object(client, "_request", side_effect=_side_effect):
-            requests = [
-                BatchRequestItem("GET", "/api/a", request_id=f"r{i}")
-                for i in range(3)
-            ]
+            requests = [BatchRequestItem("GET", "/api/a", request_id=f"r{i}") for i in range(3)]
             summary = await client._batch_request(requests)
 
         assert summary.total == 3
@@ -701,10 +690,7 @@ class TestBatchRequest:
             return {"result": "ok"}
 
         with patch.object(client, "_request", side_effect=_side_effect):
-            requests = [
-                BatchRequestItem("GET", "/api/a", request_id=f"r{i}")
-                for i in range(5)
-            ]
+            requests = [BatchRequestItem("GET", "/api/a", request_id=f"r{i}") for i in range(5)]
             summary = await client._batch_request(requests, fail_fast=True)
 
         assert summary.failed >= 1
@@ -764,10 +750,7 @@ class TestBatchRequest:
             return {"result": "ok"}
 
         with patch.object(client, "_request", side_effect=_side_effect):
-            requests = [
-                BatchRequestItem("GET", "/api", request_id=f"r{i}")
-                for i in range(4)
-            ]
+            requests = [BatchRequestItem("GET", "/api", request_id=f"r{i}") for i in range(4)]
             summary = await client._batch_request(requests)
 
         assert summary.total == 4

@@ -237,7 +237,7 @@ If you use mcp-cn-commerce in your research or project:
 @software{mcp-cn-commerce,
   author = {Wang, Zhuo},
   title = {mcp-cn-commerce: MCP Servers for Chinese E-Commerce Platforms},
-  year = {2025},
+  year = {2026},
   url = {https://github.com/TonyWang-hub/mcp-cn-commerce}
 }
 ```

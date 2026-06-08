@@ -73,12 +73,26 @@ class CommerceMCPBase:
     app_secret: str = ""
     access_token: str = ""
     rate_limiter: RateLimiter | None = None
+    _client: httpx.AsyncClient | None = None
 
     def __init__(self, app_key: str = "", app_secret: str = "", access_token: str = "") -> None:
         self.app_key = app_key
         self.app_secret = app_secret
         self.access_token = access_token
         self.rate_limiter = RateLimiter()
+
+    def _get_client(self) -> httpx.AsyncClient:
+        """Get or create an HTTP client with connection pooling."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=30,
+                limits=httpx.Limits(
+                    max_connections=10,
+                    max_keepalive_connections=5,
+                    keepalive_expiry=30,
+                ),
+            )
+        return self._client
 
     @classmethod
     def from_env(cls, platform: str, required_vars: list[str]) -> CommerceMCPBase:
@@ -137,11 +151,11 @@ class CommerceMCPBase:
         url = f"{self.BASE_URL}{path}"
         logger.debug(f"Request: {method} {url}")
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            if method == "GET":
-                resp = await client.get(url, params={**params, **data})
-            else:
-                resp = await client.post(url, params=params, json=data)
+        client = self._get_client()
+        if method == "GET":
+            resp = await client.get(url, params={**params, **data})
+        else:
+            resp = await client.post(url, params=params, json=data)
 
         result = resp.json()
         if "error_response" in result:
@@ -188,6 +202,12 @@ class CommerceMCPBase:
                 break
         logger.info(f"Pagination complete: {len(results)} total items")
         return results
+
+    async def close(self) -> None:
+        """Close the HTTP client."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
 
 
 class CommerceAPIError(Exception):

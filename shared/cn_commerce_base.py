@@ -555,83 +555,6 @@ def with_retry(config: RetryConfig | None = None) -> Callable[..., Any]:
     return decorator
 
 
-class ResponseCache:
-    """Simple in-memory response cache with TTL and max size.
-
-    Thread-safe via a lock. Evicts oldest entries (LRU) when max_size is reached.
-    """
-
-    def __init__(self, max_size: int = 256, default_ttl: float = 300.0) -> None:
-        self.max_size = max_size
-        self.default_ttl = default_ttl
-        self._cache: OrderedDict[str, tuple[Any, float]] = OrderedDict()
-        self._lock = threading.Lock()
-        self._hits = 0
-        self._misses = 0
-
-    def _make_key(self, method: str, url: str, params: dict[str, Any], data: dict[str, Any]) -> str:
-        """Build a stable cache key from request components."""
-        key_parts = [method, url, json.dumps(params, sort_keys=True), json.dumps(data, sort_keys=True)]
-        raw = "|".join(key_parts)
-        return hashlib.md5(raw.encode()).hexdigest()
-
-    def get(self, key: str) -> tuple[bool, Any]:
-        """Look up a key in the cache. Returns (found, value)."""
-        with self._lock:
-            if key not in self._cache:
-                self._misses += 1
-                return False, None
-            value, expiry = self._cache[key]
-            if time.time() > expiry:
-                del self._cache[key]
-                self._misses += 1
-                return False, None
-            self._cache.move_to_end(key)
-            self._hits += 1
-            return True, value
-
-    def put(self, key: str, value: Any, ttl: float | None = None) -> None:
-        """Store a value in the cache."""
-        if self.max_size <= 0:
-            return
-        ttl = ttl if ttl is not None else self.default_ttl
-        expiry = time.time() + ttl
-        with self._lock:
-            if key in self._cache:
-                self._cache.move_to_end(key)
-            self._cache[key] = (value, expiry)
-            while len(self._cache) > self.max_size:
-                self._cache.popitem(last=False)
-
-    def clear(self) -> None:
-        with self._lock:
-            self._cache.clear()
-
-    @property
-    def size(self) -> int:
-        with self._lock:
-            return len(self._cache)
-
-    @property
-    def stats(self) -> dict[str, Any]:
-        """Cache statistics including hit rate, size, etc."""
-        with self._lock:
-            total = self._hits + self._misses
-            return {
-                "size": len(self._cache),
-                "max_size": self.max_size,
-                "hits": self._hits,
-                "misses": self._misses,
-                "hit_rate": round(self._hits / total, 4) if total > 0 else 0.0,
-                "default_ttl": self.default_ttl,
-            }
-
-    def reset_stats(self) -> None:
-        with self._lock:
-            self._hits = 0
-            self._misses = 0
-
-
 class CommerceMCPBase:
     """Base class for Chinese e-commerce platform MCP servers.
 
@@ -655,7 +578,6 @@ class CommerceMCPBase:
         self.access_token = access_token
         self.rate_limiter = RateLimiter()
         self.metrics = MetricsCollector()
-        self.cache = ResponseCache()
 
     def _get_client(self) -> httpx.AsyncClient:
         """Get or create an HTTP client with connection pooling."""
@@ -710,8 +632,6 @@ class CommerceMCPBase:
         params: dict | None = None,
         data: dict | None = None,
         retry_config: RetryConfig | None = None,
-        use_cache: bool = False,
-        cache_ttl: float | None = None,
     ) -> dict[str, Any]:
         """Make a signed API request with optional retry support.
 
@@ -732,15 +652,6 @@ class CommerceMCPBase:
         params = params or {}
         data = data or {}
 
-        # Check cache for GET requests (compute key before auth params are injected)
-        cache_key = None
-        if use_cache and method == "GET" and self.cache:
-            cache_key = self.cache._make_key(method, f"{self.BASE_URL}{path}", params, data)
-            found, cached = self.cache.get(cache_key)
-            if found:
-                logger.debug(f"Cache hit for {method} {path}")
-                return cached
-
         # Snapshot auth params for retry (timestamp must be regenerated each attempt)
         auth_params: dict[str, str] = {}
         auth_params["app_key"] = self.app_key
@@ -751,7 +662,6 @@ class CommerceMCPBase:
         max_attempts = (retry_config.max_retries + 1) if retry_config else 1
 
         for attempt in range(max_attempts):
-            start_time = time.monotonic()
             try:
                 # Rate limiting
                 if self.rate_limiter:
@@ -780,41 +690,16 @@ class CommerceMCPBase:
                     raise CommerceAPIError(code=error_code, msg=error_msg)
 
                 logger.debug(f"Response: {resp.status_code}")
-
-                # Record metrics on success
-                elapsed_ms = (time.monotonic() - start_time) * 1000
-                self.metrics.record_request(path, latency_ms=elapsed_ms, success=True)
-
-                # Cache the response for GET requests
-                if cache_key is not None:
-                    self.cache.put(cache_key, result, ttl=cache_ttl)
-                    logger.debug(f"Cached response for {method} {path}")
-
                 return result
 
             except Exception as exc:
                 last_exc = exc
-
-                # If no retry config or not retryable, record metrics and re-raise
+                # If no retry config or not retryable, re-raise immediately
                 if not retry_config or not retry_config.should_retry_exception(exc):
-                    elapsed_ms = (time.monotonic() - start_time) * 1000
-                    if isinstance(exc, CommerceAPIError):
-                        self.metrics.record_request(
-                            path, latency_ms=elapsed_ms, success=False, error_code=exc.code, error_msg=exc.msg
-                        )
-                    else:
-                        self.metrics.record_request(path, latency_ms=elapsed_ms, success=False)
                     raise
 
-                # If this was the last attempt, record metrics and re-raise
+                # If this was the last attempt, re-raise
                 if attempt == max_attempts - 1:
-                    elapsed_ms = (time.monotonic() - start_time) * 1000
-                    if isinstance(exc, CommerceAPIError):
-                        self.metrics.record_request(
-                            path, latency_ms=elapsed_ms, success=False, error_code=exc.code, error_msg=exc.msg
-                        )
-                    else:
-                        self.metrics.record_request(path, latency_ms=elapsed_ms, success=False)
                     logger.error(f"Max retries ({retry_config.max_retries}) exhausted for {path}")
                     raise
 
@@ -871,82 +756,6 @@ class CommerceMCPBase:
             await self._client.aclose()
             self._client = None
 
-    # ── Batch Operations ──────────────────────────────────
-
-    async def _batch_request(
-        self,
-        requests: list[BatchRequestItem],
-        max_concurrency: int = 5,
-        fail_fast: bool = False,
-    ) -> BatchSummary:
-        """Execute multiple API requests concurrently with controlled concurrency."""
-        if not requests:
-            raise ValueError("requests list cannot be empty")
-        max_concurrency = max(1, min(max_concurrency, 20))
-        semaphore = asyncio.Semaphore(max_concurrency)
-
-        async def _execute_one(item: BatchRequestItem) -> BatchResultItem:
-            async with semaphore:
-                start = time.monotonic()
-                try:
-                    result = await self._request(
-                        method=item.method,
-                        path=item.path,
-                        params=dict(item.params),
-                        data=dict(item.data),
-                    )
-                    elapsed = (time.monotonic() - start) * 1000
-                    return BatchResultItem(
-                        request_id=item.request_id,
-                        success=True,
-                        data=result,
-                        latency_ms=elapsed,
-                    )
-                except Exception as exc:
-                    elapsed = (time.monotonic() - start) * 1000
-                    logger.warning(f"Batch request '{item.request_id}' failed: {exc}")
-                    return BatchResultItem(
-                        request_id=item.request_id,
-                        success=False,
-                        error=exc,
-                        latency_ms=elapsed,
-                    )
-
-        batch_start = time.monotonic()
-        if fail_fast:
-            results: list[BatchResultItem] = []
-            for coro in asyncio.as_completed([_execute_one(r) for r in requests]):
-                result = await coro
-                results.append(result)
-                if not result.success:
-                    break
-        else:
-            results = list(await asyncio.gather(*[_execute_one(r) for r in requests]))
-        total_ms = (time.monotonic() - batch_start) * 1000
-        return self._batch_aggregate(results, total_ms)
-
-    @staticmethod
-    def _batch_aggregate(
-        results: list[BatchResultItem],
-        total_latency_ms: float,
-    ) -> BatchSummary:
-        """Aggregate batch results into a summary."""
-        succeeded = sum(1 for r in results if r.success)
-        failed = len(results) - succeeded
-        error_summary: dict[str, int] = {}
-        for r in results:
-            if r.error:
-                key = type(r.error).__name__
-                error_summary[key] = error_summary.get(key, 0) + 1
-        return BatchSummary(
-            total=len(results),
-            succeeded=succeeded,
-            failed=failed,
-            results=results,
-            total_latency_ms=total_latency_ms,
-            error_summary=error_summary,
-        )
-
     async def health_check(self) -> dict[str, Any]:
         """Check API reachability and client configuration.
 
@@ -959,7 +768,6 @@ class CommerceMCPBase:
             "has_token": bool(self.access_token),
             "api_reachable": False,
             "metrics": self.metrics.get_summary(),
-            "cache": self.cache.stats,
         }
         if not self.BASE_URL:
             return result
@@ -980,34 +788,6 @@ class CommerceAPIError(Exception):
         self.code = code
         self.msg = msg
         super().__init__(f"[{code}] {msg}")
-
-
-@dataclass
-class BatchRequestItem:
-    method: str
-    path: str
-    params: dict[str, Any] = field(default_factory=dict)
-    data: dict[str, Any] = field(default_factory=dict)
-    request_id: str = ""
-
-
-@dataclass
-class BatchResultItem:
-    request_id: str
-    success: bool
-    data: dict[str, Any] | None = None
-    error: Exception | None = None
-    latency_ms: float = 0.0
-
-
-@dataclass
-class BatchSummary:
-    total: int
-    succeeded: int
-    failed: int
-    results: list[BatchResultItem]
-    total_latency_ms: float
-    error_summary: dict[str, int] = field(default_factory=dict)
 
 
 def format_error_response(error: Exception) -> str:

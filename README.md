@@ -25,6 +25,7 @@
 - [Architecture](#architecture)
 - [Tools Reference](#tools-per-server)
 - [Security](#security)
+- [Examples](docs/examples.md) - 使用示例和场景
 - [FAQ](README_zh.md#常见问题)
 - [Contributing](CONTRIBUTING.md)
 - [Roadmap](#roadmap)

@@ -22,7 +22,7 @@ _project_root = Path(__file__).resolve().parents[4]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from shared.cn_commerce_base import CommerceMCPBase, CommerceAPIError, SignMethod
+from shared.cn_commerce_base import CommerceMCPBase, CommerceAPIError, ConfigValidationError, SignMethod
 
 
 # ── Xiaohongshu client ────────────────────────────────────────────────────────
@@ -76,13 +76,21 @@ class XiaohongshuMCP(CommerceMCPBase):
         return result
 
 
-# ── Instantiate client from env ────────────────────────────────────────────────
+# ── Instantiate client from env ────────────────────────────────────────────
 
-xhs = XiaohongshuMCP(
-    app_key=os.environ.get("XHS_CLIENT_ID", ""),
-    app_secret=os.environ.get("XHS_CLIENT_SECRET", ""),
-    access_token=os.environ.get("XHS_ACCESS_TOKEN", ""),
-)
+def _create_xiaohongshu_client() -> XiaohongshuMCP:
+    """Create xiaohongshu client with configuration validation."""
+    try:
+        return XiaohongshuMCP.from_env("XHS", ["CLIENT_ID", "CLIENT_SECRET", "ACCESS_TOKEN"])
+    except ConfigValidationError:
+        # Fallback to direct instantiation for backward compatibility
+        return XiaohongshuMCP(
+            client_id=os.environ.get("XHS_CLIENT_ID", ""),
+            client_secret=os.environ.get("XHS_CLIENT_SECRET", ""),
+            access_token=os.environ.get("XHS_ACCESS_TOKEN", ""),
+        )
+
+xhs = _create_xiaohongshu_client()
 
 
 # ── MCP server ─────────────────────────────────────────────────────────────────

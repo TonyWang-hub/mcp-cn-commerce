@@ -19,7 +19,7 @@ _project_root = Path(__file__).resolve().parents[4]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from shared.cn_commerce_base import CommerceMCPBase, CommerceAPIError, SignMethod
+from shared.cn_commerce_base import CommerceMCPBase, CommerceAPIError, ConfigValidationError, SignMethod
 
 
 # ── Taobao client ───────────────────────────────────────────────────────────────
@@ -59,11 +59,19 @@ class TaobaoMCP(CommerceMCPBase):
 
 # ── Instantiate client from env ────────────────────────────────────────────────
 
-taobao = TaobaoMCP(
-    app_key=os.environ.get("TAOBAO_APP_KEY", ""),
-    app_secret=os.environ.get("TAOBAO_APP_SECRET", ""),
-    access_token=os.environ.get("TAOBAO_ACCESS_TOKEN", ""),
-)
+def _create_taobao_client() -> TaobaoMCP:
+    """Create Taobao client with configuration validation."""
+    try:
+        return TaobaoMCP.from_env("TAOBAO", ["APP_KEY", "APP_SECRET", "ACCESS_TOKEN"])
+    except ConfigValidationError:
+        # Fallback to direct instantiation for backward compatibility
+        return TaobaoMCP(
+            app_key=os.environ.get("TAOBAO_APP_KEY", ""),
+            app_secret=os.environ.get("TAOBAO_APP_SECRET", ""),
+            access_token=os.environ.get("TAOBAO_ACCESS_TOKEN", ""),
+        )
+
+taobao = _create_taobao_client()
 
 
 # ── MCP server ─────────────────────────────────────────────────────────────────

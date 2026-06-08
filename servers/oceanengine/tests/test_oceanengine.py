@@ -33,16 +33,18 @@ import mcp.server  # noqa: E402
 _orig_server_cls = mcp.server.Server
 
 if not hasattr(_orig_server_cls, "tool"):
+
     def _mock_tool(self, *args, **kwargs):
         """Pass-through decorator — returns the function unchanged."""
+
         def decorator(func):
             return func
+
         return decorator
 
     _orig_server_cls.tool = _mock_tool  # type: ignore[attr-defined]
 
 from cn_commerce_base import CommerceAPIError  # noqa: E402
-
 
 # ── Fixtures ────────────────────────────────────────────────
 
@@ -118,9 +120,7 @@ class TestFormatHelpers:
     def test_format_response_pretty_json(self):
         from mcp_oceanengine.server import _format_response
 
-        result = json.loads(
-            _format_response({"code": 0, "data": {"name": "测试"}})
-        )
+        result = json.loads(_format_response({"code": 0, "data": {"name": "测试"}}))
         assert result["code"] == 0
         assert result["data"]["name"] == "测试"
 
@@ -173,9 +173,7 @@ class TestGetAdvertiserInfo:
         assert data["data"]["list"][0]["advertiser_name"] == "测试广告主"
 
     @pytest.mark.asyncio
-    async def test_empty_advertiser_ids_returns_error_gracefully(
-        self, mock_client, mock_request
-    ):
+    async def test_empty_advertiser_ids_returns_error_gracefully(self, mock_client, mock_request):
         """When advertiser_ids is an empty string the function does not crash
         and returns a JSON error string when the API rejects the request."""
         mock_request.side_effect = CommerceAPIError(40001, "advertiser_ids is required")
@@ -209,9 +207,7 @@ class TestGetCampaignReport:
     """Tests for get_campaign_report."""
 
     @pytest.mark.asyncio
-    async def test_returns_report_with_correct_fields(
-        self, mock_client, mock_request
-    ):
+    async def test_returns_report_with_correct_fields(self, mock_client, mock_request):
         """Report response includes impressions, clicks, cost, and CTR."""
         mock_request.return_value = {
             "code": 0,
@@ -377,9 +373,7 @@ class TestListCampaigns:
     """Tests for list_campaigns."""
 
     @pytest.mark.asyncio
-    async def test_returns_campaign_list_with_status(
-        self, mock_client, mock_request
-    ):
+    async def test_returns_campaign_list_with_status(self, mock_client, mock_request):
         """Normal call returns campaigns including their status field."""
         mock_request.return_value = {
             "code": 0,
@@ -439,22 +433,16 @@ class TestListCampaigns:
         # The filtering JSON should have been decoded and passed to _request.
         call_kwargs = mock_request.call_args[1]
         assert "filtering" in call_kwargs["params"]
-        assert call_kwargs["params"]["filtering"] == {
-            "status": "CAMPAIGN_STATUS_ENABLE"
-        }
+        assert call_kwargs["params"]["filtering"] == {"status": "CAMPAIGN_STATUS_ENABLE"}
 
     @pytest.mark.asyncio
-    async def test_invalid_filter_json_returns_graceful_error(
-        self, mock_client, mock_request
-    ):
+    async def test_invalid_filter_json_returns_graceful_error(self, mock_client, mock_request):
         """Malformed filtering JSON is caught (JSONDecodeError) and returned
         as a structured error string — no exception propagates."""
         with _patch_get_client(mock_client):
             from mcp_oceanengine.server import list_campaigns
 
-            result = await list_campaigns(
-                advertiser_id="123", filtering='{"status": BROKEN'
-            )
+            result = await list_campaigns(advertiser_id="123", filtering='{"status": BROKEN')
 
         # _request should NOT have been called because JSON parsing failed.
         mock_request.assert_not_called()
@@ -477,9 +465,7 @@ class TestListCampaigns:
         assert call_kwargs["params"]["page_size"] == 100
 
     @pytest.mark.asyncio
-    async def test_no_filtering_param_when_empty_string(
-        self, mock_client, mock_request
-    ):
+    async def test_no_filtering_param_when_empty_string(self, mock_client, mock_request):
         """When filtering is an empty string it is NOT added to the params."""
         mock_request.return_value = {"code": 0, "data": {"list": []}}
 
@@ -914,9 +900,7 @@ class TestGetCampaignDetail:
         with _patch_get_client(mock_client):
             from mcp_oceanengine.server import get_campaign_detail
 
-            result = await get_campaign_detail(
-                advertiser_id="123", campaign_id="1001"
-            )
+            result = await get_campaign_detail(advertiser_id="123", campaign_id="1001")
 
         data = json.loads(result)
         assert data["data"]["campaign_id"] == 1001
@@ -932,9 +916,7 @@ class TestGetCampaignDetail:
         with _patch_get_client(mock_client):
             from mcp_oceanengine.server import get_campaign_detail
 
-            result = await get_campaign_detail(
-                advertiser_id="123", campaign_id="99999"
-            )
+            result = await get_campaign_detail(advertiser_id="123", campaign_id="99999")
 
         data = json.loads(result)
         assert data["error"]["code"] == 40100
@@ -1467,9 +1449,7 @@ class TestGetBidSuggestion:
         with _patch_get_client(mock_client):
             from mcp_oceanengine.server import get_bid_suggestion
 
-            result = await get_bid_suggestion(
-                advertiser_id="123", campaign_id="1001"
-            )
+            result = await get_bid_suggestion(advertiser_id="123", campaign_id="1001")
 
         data = json.loads(result)
         assert data["data"]["campaign_id"] == 1001
@@ -1487,9 +1467,7 @@ class TestGetBidSuggestion:
         with _patch_get_client(mock_client):
             from mcp_oceanengine.server import get_bid_suggestion
 
-            result = await get_bid_suggestion(
-                advertiser_id="123", campaign_id="99999"
-            )
+            result = await get_bid_suggestion(advertiser_id="123", campaign_id="99999")
 
         data = json.loads(result)
         assert data["error"]["code"] == 40100
@@ -1613,13 +1591,12 @@ class TestPaginationCapping:
             ),
         ],
     )
-    async def test_page_size_always_capped(
-        self, mock_client, mock_request, tool_name, call_kwargs
-    ):
+    async def test_page_size_always_capped(self, mock_client, mock_request, tool_name, call_kwargs):
         """With page_size > 100, every tool passes min(page_size, 100) to _request."""
         mock_request.return_value = {"code": 0, "data": {"list": []}}
 
         import importlib
+
         module = importlib.import_module("mcp_oceanengine.server")
 
         with _patch_get_client(mock_client):
@@ -1627,6 +1604,4 @@ class TestPaginationCapping:
             await tool_fn(**call_kwargs)
 
         actual_page_size = mock_request.call_args[1]["params"]["page_size"]
-        assert actual_page_size == 100, (
-            f"{tool_name} passed page_size={actual_page_size}, expected 100"
-        )
+        assert actual_page_size == 100, f"{tool_name} passed page_size={actual_page_size}, expected 100"

@@ -3,37 +3,38 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, patch
-
-import pytest
 
 # Must patch env BEFORE importing the server module (it reads env at import time)
 import os
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 os.environ.setdefault("XHS_CLIENT_ID", "test_client_id")
 os.environ.setdefault("XHS_CLIENT_SECRET", "test_client_secret")
 os.environ.setdefault("XHS_ACCESS_TOKEN", "test_access_token")
 
 from mcp_xiaohongshu.server import (
-    get_order_list,
-    get_order_detail,
-    get_product_list,
-    get_product_detail,
-    get_refund_list,
-    get_refund_detail,
+    get_bill_list,
+    get_inventory,
     get_logistics_tracking,
+    get_order_detail,
+    get_order_list,
+    get_product_detail,
+    get_product_list,
+    get_refund_detail,
+    get_refund_list,
     get_review_list,
     get_shop_info,
-    list_promotions,
     list_coupons,
-    get_inventory,
-    get_bill_list,
+    list_promotions,
     xhs,
 )
+
 from shared.cn_commerce_base import CommerceAPIError
 
-
 # ── Helpers ─────────────────────────────────────────────────────────────────────
+
 
 def _mock_response(data: dict) -> dict:
     """Shallow wrapper for a successful XHS API response."""
@@ -41,6 +42,7 @@ def _mock_response(data: dict) -> dict:
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def mock_call():
@@ -50,6 +52,7 @@ def mock_call():
 
 
 # ── Fixtures: Orders ────────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def order_list_payload() -> dict:
@@ -113,6 +116,7 @@ def order_detail_payload() -> dict:
 
 
 # ── Fixtures: Products ──────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def product_list_payload() -> dict:
@@ -179,6 +183,7 @@ def product_detail_payload() -> dict:
 
 # ── Fixtures: After-Sale ────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def refund_list_payload() -> dict:
     return {
@@ -233,6 +238,7 @@ def refund_detail_payload() -> dict:
 
 # ── Fixtures: Logistics ─────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def logistics_tracking_payload() -> dict:
     return {
@@ -254,6 +260,7 @@ def logistics_tracking_payload() -> dict:
 
 
 # ── Fixtures: Reviews ───────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def review_list_payload() -> dict:
@@ -286,6 +293,7 @@ def review_list_payload() -> dict:
 
 # ── Fixtures: Shop ──────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def shop_info_payload() -> dict:
     return {
@@ -304,6 +312,7 @@ def shop_info_payload() -> dict:
 
 
 # ── Fixtures: Marketing ─────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def promotion_list_payload() -> dict:
@@ -371,6 +380,7 @@ def coupon_list_payload() -> dict:
 
 # ── Fixtures: Inventory ─────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def inventory_payload() -> dict:
     return {
@@ -399,6 +409,7 @@ def inventory_payload() -> dict:
 
 
 # ── Fixtures: Finance ───────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def bill_list_payload() -> dict:
@@ -435,10 +446,9 @@ def bill_list_payload() -> dict:
 # Tests: get_order_list
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.asyncio
-async def test_get_order_list_returns_orders_with_correct_fields(
-    mock_call, order_list_payload
-):
+async def test_get_order_list_returns_orders_with_correct_fields(mock_call, order_list_payload):
     """get_order_list should return a list of orders with expected fields."""
     mock_call.return_value = order_list_payload
 
@@ -500,10 +510,9 @@ async def test_get_order_list_without_status_omits_field(mock_call, order_list_p
 # Tests: get_order_detail
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.asyncio
-async def test_get_order_detail_returns_single_order_with_all_fields(
-    mock_call, order_detail_payload
-):
+async def test_get_order_detail_returns_single_order_with_all_fields(mock_call, order_detail_payload):
     """get_order_detail should return a single order with full details."""
     mock_call.return_value = order_detail_payload
 
@@ -533,10 +542,9 @@ async def test_get_order_detail_returns_single_order_with_all_fields(
 # Tests: get_product_list
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.asyncio
-async def test_get_product_list_returns_products_with_stock_sold(
-    mock_call, product_list_payload
-):
+async def test_get_product_list_returns_products_with_stock_sold(mock_call, product_list_payload):
     """get_product_list should return products with stock and sold count."""
     mock_call.return_value = product_list_payload
 
@@ -565,10 +573,9 @@ async def test_get_product_list_returns_products_with_stock_sold(
 # Tests: get_product_detail
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.asyncio
-async def test_get_product_detail_returns_full_product_info(
-    mock_call, product_detail_payload
-):
+async def test_get_product_detail_returns_full_product_info(mock_call, product_detail_payload):
     """get_product_detail should return a single product with SKUs and images."""
     mock_call.return_value = product_detail_payload
 
@@ -598,10 +605,9 @@ async def test_get_product_detail_returns_full_product_info(
 # Tests: get_refund_list
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.asyncio
-async def test_get_refund_list_returns_refunds_with_expected_fields(
-    mock_call, refund_list_payload
-):
+async def test_get_refund_list_returns_refunds_with_expected_fields(mock_call, refund_list_payload):
     """get_refund_list should return refund records with correct fields."""
     mock_call.return_value = refund_list_payload
 
@@ -633,10 +639,9 @@ async def test_get_refund_list_returns_refunds_with_expected_fields(
 # Tests: get_refund_detail
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.asyncio
-async def test_get_refund_detail_returns_full_refund_record(
-    mock_call, refund_detail_payload
-):
+async def test_get_refund_detail_returns_full_refund_record(mock_call, refund_detail_payload):
     """get_refund_detail should return a single refund record with full details."""
     mock_call.return_value = refund_detail_payload
 
@@ -665,10 +670,9 @@ async def test_get_refund_detail_returns_full_refund_record(
 # Tests: get_logistics_tracking
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.asyncio
-async def test_get_logistics_tracking_returns_tracking_nodes(
-    mock_call, logistics_tracking_payload
-):
+async def test_get_logistics_tracking_returns_tracking_nodes(mock_call, logistics_tracking_payload):
     """get_logistics_tracking should return tracking with ordered nodes."""
     mock_call.return_value = logistics_tracking_payload
 
@@ -695,10 +699,9 @@ async def test_get_logistics_tracking_returns_tracking_nodes(
 # Tests: get_review_list
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.asyncio
-async def test_get_review_list_returns_reviews_with_expected_fields(
-    mock_call, review_list_payload
-):
+async def test_get_review_list_returns_reviews_with_expected_fields(mock_call, review_list_payload):
     """get_review_list should return reviews with content, score, and user info."""
     mock_call.return_value = review_list_payload
 
@@ -727,10 +730,9 @@ async def test_get_review_list_returns_reviews_with_expected_fields(
 # Tests: get_shop_info
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.asyncio
-async def test_get_shop_info_returns_shop_details(
-    mock_call, shop_info_payload
-):
+async def test_get_shop_info_returns_shop_details(mock_call, shop_info_payload):
     """get_shop_info should return shop details."""
     mock_call.return_value = shop_info_payload
 
@@ -753,10 +755,9 @@ async def test_get_shop_info_returns_shop_details(
 # Tests: list_promotions
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.asyncio
-async def test_list_promotions_returns_promotions_with_expected_fields(
-    mock_call, promotion_list_payload
-):
+async def test_list_promotions_returns_promotions_with_expected_fields(mock_call, promotion_list_payload):
     """list_promotions should return promotion activities with timing and type."""
     mock_call.return_value = promotion_list_payload
 
@@ -785,10 +786,9 @@ async def test_list_promotions_returns_promotions_with_expected_fields(
 # Tests: list_coupons
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.asyncio
-async def test_list_coupons_returns_coupons_with_expected_fields(
-    mock_call, coupon_list_payload
-):
+async def test_list_coupons_returns_coupons_with_expected_fields(mock_call, coupon_list_payload):
     """list_coupons should return coupons with discount and usage info."""
     mock_call.return_value = coupon_list_payload
 
@@ -836,10 +836,9 @@ async def test_list_coupons_with_status_filter(mock_call, coupon_list_payload):
 # Tests: get_inventory
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.asyncio
-async def test_get_inventory_returns_inventory_with_sku_details(
-    mock_call, inventory_payload
-):
+async def test_get_inventory_returns_inventory_with_sku_details(mock_call, inventory_payload):
     """get_inventory should return inventory with SKU-level stock data."""
     mock_call.return_value = inventory_payload
 
@@ -892,10 +891,9 @@ async def test_get_inventory_without_product_id_omits_field(mock_call, inventory
 # Tests: get_bill_list
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.asyncio
-async def test_get_bill_list_returns_bills_with_expected_fields(
-    mock_call, bill_list_payload
-):
+async def test_get_bill_list_returns_bills_with_expected_fields(mock_call, bill_list_payload):
     """get_bill_list should return bill records with amount and settlement info."""
     mock_call.return_value = bill_list_payload
 
@@ -926,6 +924,7 @@ async def test_get_bill_list_returns_bills_with_expected_fields(
 # ═══════════════════════════════════════════════════════════════════════════════════
 # Tests: Error handling
 # ═══════════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.asyncio
 async def test_missing_order_id_returned_in_result(mock_call):
@@ -985,6 +984,7 @@ async def test_refund_api_error_propagates(mock_call):
 # ═══════════════════════════════════════════════════════════════════════════════════
 # Tests: Pagination edge cases
 # ═══════════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.asyncio
 async def test_pagination_default_page_and_size(mock_call, order_list_payload):
@@ -1069,6 +1069,7 @@ async def test_pagination_review_list_custom(mock_call, review_list_payload):
 # Tests: JSON output format
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.asyncio
 async def test_output_is_valid_json_string(mock_call, order_list_payload):
     """All tool return values should be valid JSON strings."""
@@ -1113,6 +1114,7 @@ async def test_shop_info_output_is_valid_json_string(mock_call, shop_info_payloa
 # ═══════════════════════════════════════════════════════════════════════════════════
 # Tests: _call passthrough
 # ═══════════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.asyncio
 async def test_call_passthrough_with_minimal_params(mock_call):

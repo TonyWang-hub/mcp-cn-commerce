@@ -17,10 +17,14 @@ _SHARED_DIR = Path(__file__).resolve().parents[4] / "shared"
 if str(_SHARED_DIR) not in sys.path:
     sys.path.insert(0, str(_SHARED_DIR))
 
-from cn_commerce_base import CommerceAPIError, CommerceMCPBase, ConfigValidationError, format_error_response  # noqa: E402
+from cn_commerce_base import (
+    CommerceAPIError,
+    CommerceMCPBase,
+    ConfigValidationError,
+    format_error_response,
+)  # noqa: E402
 from mcp.server import Server  # noqa: E402
 from mcp.server.stdio import stdio_server  # noqa: E402
-
 
 # ── Ocean Engine API Client ──────────────────────────────
 
@@ -218,9 +222,7 @@ async def list_campaigns(
     except CommerceAPIError as e:
         return format_error_response(e)
     except json.JSONDecodeError as e:
-        return json.dumps(
-            {"error": {"message": f"Invalid filtering JSON: {e}"}}, ensure_ascii=False
-        )
+        return json.dumps({"error": {"message": f"Invalid filtering JSON: {e}"}}, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 
@@ -688,6 +690,7 @@ async def get_diagnosis(advertiser_id: str, campaign_id: str) -> str:
 
 def main() -> None:
     """Entry point: run the MCP server over stdio."""
+
     async def _run() -> None:
         async with stdio_server() as (read, write):
             await server.run(read, write)

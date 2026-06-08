@@ -15,22 +15,22 @@ os.environ.setdefault("KUAISHOU_SIGN_SECRET", "test_sign_secret")
 os.environ.setdefault("KUAISHOU_ACCESS_TOKEN", "test_access_token")
 
 from mcp_kuaishou.server import (  # noqa: E402
-    get_order_list,
-    get_order_detail,
-    get_product_list,
-    get_product_detail,
-    get_refund_list,
-    get_refund_detail,
     get_logistics_tracking,
-    list_logistics_companies,
+    get_order_detail,
+    get_order_list,
+    get_product_detail,
+    get_product_list,
+    get_refund_detail,
+    get_refund_list,
     get_review_list,
     get_shop_info,
-    list_promotions,
-    list_coupons,
     ks,
+    list_coupons,
+    list_logistics_companies,
+    list_promotions,
 )
-from shared.cn_commerce_base import CommerceAPIError  # noqa: E402
 
+from shared.cn_commerce_base import CommerceAPIError  # noqa: E402
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -421,9 +421,7 @@ def coupon_list_payload() -> dict:
 
 
 @pytest.mark.asyncio
-async def test_get_order_list_returns_orders_with_correct_fields(
-    mock_call, order_list_payload
-):
+async def test_get_order_list_returns_orders_with_correct_fields(mock_call, order_list_payload):
     """get_order_list should return a list of orders with expected fields."""
     mock_call.return_value = order_list_payload
 
@@ -486,9 +484,7 @@ async def test_get_order_list_without_status_omits_field(mock_call, order_list_p
 
 
 @pytest.mark.asyncio
-async def test_get_order_detail_returns_single_order_with_all_fields(
-    mock_call, order_detail_payload
-):
+async def test_get_order_detail_returns_single_order_with_all_fields(mock_call, order_detail_payload):
     """get_order_detail should return a single order with full details."""
     mock_call.return_value = order_detail_payload
 
@@ -519,9 +515,7 @@ async def test_get_order_detail_returns_single_order_with_all_fields(
 
 
 @pytest.mark.asyncio
-async def test_get_product_list_returns_products_with_stock_sold(
-    mock_call, product_list_payload
-):
+async def test_get_product_list_returns_products_with_stock_sold(mock_call, product_list_payload):
     """get_product_list should return products with stock and sold count."""
     mock_call.return_value = product_list_payload
 
@@ -551,9 +545,7 @@ async def test_get_product_list_returns_products_with_stock_sold(
 
 
 @pytest.mark.asyncio
-async def test_get_product_detail_returns_full_product_info(
-    mock_call, product_detail_payload
-):
+async def test_get_product_detail_returns_full_product_info(mock_call, product_detail_payload):
     """get_product_detail should return a single product with SKUs and images."""
     mock_call.return_value = product_detail_payload
 
@@ -584,9 +576,7 @@ async def test_get_product_detail_returns_full_product_info(
 
 
 @pytest.mark.asyncio
-async def test_get_refund_list_returns_refunds_with_expected_fields(
-    mock_call, refund_list_payload
-):
+async def test_get_refund_list_returns_refunds_with_expected_fields(mock_call, refund_list_payload):
     """get_refund_list should return refund records with correct fields."""
     mock_call.return_value = refund_list_payload
 
@@ -619,9 +609,7 @@ async def test_get_refund_list_returns_refunds_with_expected_fields(
 
 
 @pytest.mark.asyncio
-async def test_get_refund_detail_returns_full_refund_record(
-    mock_call, refund_detail_payload
-):
+async def test_get_refund_detail_returns_full_refund_record(mock_call, refund_detail_payload):
     """get_refund_detail should return a single refund record with full details."""
     mock_call.return_value = refund_detail_payload
 
@@ -650,9 +638,7 @@ async def test_get_refund_detail_returns_full_refund_record(
 
 
 @pytest.mark.asyncio
-async def test_get_logistics_tracking_returns_tracking_nodes(
-    mock_call, logistics_tracking_payload
-):
+async def test_get_logistics_tracking_returns_tracking_nodes(mock_call, logistics_tracking_payload):
     """get_logistics_tracking should return tracking with ordered nodes."""
     mock_call.return_value = logistics_tracking_payload
 
@@ -680,9 +666,7 @@ async def test_get_logistics_tracking_returns_tracking_nodes(
 
 
 @pytest.mark.asyncio
-async def test_list_logistics_companies_returns_companies(
-    mock_call, logistics_companies_payload
-):
+async def test_list_logistics_companies_returns_companies(mock_call, logistics_companies_payload):
     """list_logistics_companies should return available logistics companies."""
     mock_call.return_value = logistics_companies_payload
 
@@ -707,9 +691,7 @@ async def test_list_logistics_companies_returns_companies(
 
 
 @pytest.mark.asyncio
-async def test_get_review_list_returns_reviews_with_expected_fields(
-    mock_call, review_list_payload
-):
+async def test_get_review_list_returns_reviews_with_expected_fields(mock_call, review_list_payload):
     """get_review_list should return reviews with content, score, and user info."""
     mock_call.return_value = review_list_payload
 
@@ -739,9 +721,7 @@ async def test_get_review_list_returns_reviews_with_expected_fields(
 
 
 @pytest.mark.asyncio
-async def test_get_shop_info_returns_shop_details(
-    mock_call, shop_info_payload
-):
+async def test_get_shop_info_returns_shop_details(mock_call, shop_info_payload):
     """get_shop_info should return shop details."""
     mock_call.return_value = shop_info_payload
 
@@ -766,9 +746,7 @@ async def test_get_shop_info_returns_shop_details(
 
 
 @pytest.mark.asyncio
-async def test_list_promotions_returns_promotions_with_expected_fields(
-    mock_call, promotion_list_payload
-):
+async def test_list_promotions_returns_promotions_with_expected_fields(mock_call, promotion_list_payload):
     """list_promotions should return promotion activities with timing and type."""
     mock_call.return_value = promotion_list_payload
 
@@ -798,9 +776,7 @@ async def test_list_promotions_returns_promotions_with_expected_fields(
 
 
 @pytest.mark.asyncio
-async def test_list_coupons_returns_coupons_with_expected_fields(
-    mock_call, coupon_list_payload
-):
+async def test_list_coupons_returns_coupons_with_expected_fields(mock_call, coupon_list_payload):
     """list_coupons should return coupon activities with discount details."""
     mock_call.return_value = coupon_list_payload
 

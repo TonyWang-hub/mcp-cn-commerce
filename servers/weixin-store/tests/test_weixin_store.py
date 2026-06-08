@@ -3,33 +3,33 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, patch
-
-import pytest
 
 # Must patch env BEFORE importing the server module (it reads env at import time)
 import os
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 os.environ.setdefault("WX_APP_ID", "test_app_id")
 os.environ.setdefault("WX_APP_SECRET", "test_app_secret")
 os.environ.setdefault("WX_ACCESS_TOKEN", "test_access_token_123456")
 
 from mcp_weixin_store.server import (
-    get_order_list,
-    get_order_detail,
-    get_product_list,
-    get_product_detail,
-    get_refund_list,
-    get_refund_detail,
+    _wx,
     get_logistics_tracking,
+    get_order_detail,
+    get_order_list,
+    get_product_detail,
+    get_product_list,
+    get_refund_detail,
+    get_refund_list,
     get_shop_info,
-    list_coupons,
     get_supply_order_list,
     list_categories,
-    _wx,
+    list_coupons,
 )
-from shared.cn_commerce_base import CommerceAPIError
 
+from shared.cn_commerce_base import CommerceAPIError
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -455,9 +455,7 @@ def categories_payload() -> dict:
 
 
 @pytest.mark.asyncio
-async def test_get_order_list_returns_orders_with_correct_fields(
-    mock_request, order_list_payload
-):
+async def test_get_order_list_returns_orders_with_correct_fields(mock_request, order_list_payload):
     """get_order_list should return a list of orders with expected fields."""
     mock_request.return_value = order_list_payload
 
@@ -527,9 +525,7 @@ async def test_get_order_list_without_status_omits_field(mock_request, order_lis
 
 
 @pytest.mark.asyncio
-async def test_get_order_detail_returns_single_order_with_all_fields(
-    mock_request, order_detail_payload
-):
+async def test_get_order_detail_returns_single_order_with_all_fields(mock_request, order_detail_payload):
     """get_order_detail should return a single order with full details."""
     mock_request.return_value = order_detail_payload
 
@@ -561,9 +557,7 @@ async def test_get_order_detail_returns_single_order_with_all_fields(
 
 
 @pytest.mark.asyncio
-async def test_get_product_list_returns_products_with_stock_sold(
-    mock_request, product_list_payload
-):
+async def test_get_product_list_returns_products_with_stock_sold(mock_request, product_list_payload):
     """get_product_list should return products with stock and sold count."""
     mock_request.return_value = product_list_payload
 
@@ -595,9 +589,7 @@ async def test_get_product_list_returns_products_with_stock_sold(
 
 
 @pytest.mark.asyncio
-async def test_get_product_detail_returns_full_product_info(
-    mock_request, product_detail_payload
-):
+async def test_get_product_detail_returns_full_product_info(mock_request, product_detail_payload):
     """get_product_detail should return a single product with SKUs and images."""
     mock_request.return_value = product_detail_payload
 
@@ -630,9 +622,7 @@ async def test_get_product_detail_returns_full_product_info(
 
 
 @pytest.mark.asyncio
-async def test_get_refund_list_returns_refunds_with_expected_fields(
-    mock_request, refund_list_payload
-):
+async def test_get_refund_list_returns_refunds_with_expected_fields(mock_request, refund_list_payload):
     """get_refund_list should return after-sale records with correct fields."""
     mock_request.return_value = refund_list_payload
 
@@ -672,15 +662,11 @@ async def test_get_refund_list_returns_refunds_with_expected_fields(
 
 
 @pytest.mark.asyncio
-async def test_get_refund_detail_returns_full_refund_record(
-    mock_request, refund_detail_payload
-):
+async def test_get_refund_detail_returns_full_refund_record(mock_request, refund_detail_payload):
     """get_refund_detail should return a single after-sale record with full details."""
     mock_request.return_value = refund_detail_payload
 
-    result_json = await get_refund_detail(
-        after_sale_order_id="3705115058471207123"
-    )
+    result_json = await get_refund_detail(after_sale_order_id="3705115058471207123")
     result = json.loads(result_json)
 
     assert result["errcode"] == 0
@@ -708,9 +694,7 @@ async def test_get_refund_detail_returns_full_refund_record(
 
 
 @pytest.mark.asyncio
-async def test_get_logistics_tracking_returns_tracking_nodes(
-    mock_request, logistics_tracking_payload
-):
+async def test_get_logistics_tracking_returns_tracking_nodes(mock_request, logistics_tracking_payload):
     """get_logistics_tracking should return tracking with ordered nodes."""
     mock_request.return_value = logistics_tracking_payload
 
@@ -740,9 +724,7 @@ async def test_get_logistics_tracking_returns_tracking_nodes(
 
 
 @pytest.mark.asyncio
-async def test_get_shop_info_returns_shop_details(
-    mock_request, shop_info_payload
-):
+async def test_get_shop_info_returns_shop_details(mock_request, shop_info_payload):
     """get_shop_info should return shop details."""
     mock_request.return_value = shop_info_payload
 
@@ -772,9 +754,7 @@ async def test_get_shop_info_returns_shop_details(
 
 
 @pytest.mark.asyncio
-async def test_list_coupons_returns_coupons_with_expected_fields(
-    mock_request, coupon_list_payload
-):
+async def test_list_coupons_returns_coupons_with_expected_fields(mock_request, coupon_list_payload):
     """list_coupons should return coupon activities with timing and stock info."""
     mock_request.return_value = coupon_list_payload
 
@@ -807,9 +787,7 @@ async def test_list_coupons_returns_coupons_with_expected_fields(
 
 
 @pytest.mark.asyncio
-async def test_get_supply_order_list_returns_supply_orders(
-    mock_request, supply_order_list_payload
-):
+async def test_get_supply_order_list_returns_supply_orders(mock_request, supply_order_list_payload):
     """get_supply_order_list should return supply chain orders with pricing."""
     mock_request.return_value = supply_order_list_payload
 
@@ -851,9 +829,7 @@ async def test_get_supply_order_list_returns_supply_orders(
 
 
 @pytest.mark.asyncio
-async def test_list_categories_returns_top_level_categories(
-    mock_request, categories_payload
-):
+async def test_list_categories_returns_top_level_categories(mock_request, categories_payload):
     """list_categories should return top-level categories with has_child flag."""
     mock_request.return_value = categories_payload
 
@@ -913,9 +889,7 @@ async def test_missing_order_id_returned_in_result(mock_request):
 @pytest.mark.asyncio
 async def test_api_error_propagates(mock_request):
     """When _request raises CommerceAPIError, it should propagate."""
-    mock_request.side_effect = CommerceAPIError(
-        code=40001, msg="invalid access_token"
-    )
+    mock_request.side_effect = CommerceAPIError(code=40001, msg="invalid access_token")
 
     with pytest.raises(CommerceAPIError) as exc_info:
         await get_order_list(
@@ -939,9 +913,7 @@ async def test_timeout_propagates(mock_request):
 @pytest.mark.asyncio
 async def test_refund_api_error_propagates(mock_request):
     """CommerceAPIError from refund tools should propagate."""
-    mock_request.side_effect = CommerceAPIError(
-        code=50001, msg="After-sale record not found"
-    )
+    mock_request.side_effect = CommerceAPIError(code=50001, msg="After-sale record not found")
 
     with pytest.raises(CommerceAPIError) as exc_info:
         await get_refund_detail(after_sale_order_id="99999999")
@@ -953,9 +925,7 @@ async def test_refund_api_error_propagates(mock_request):
 @pytest.mark.asyncio
 async def test_supply_order_api_error_propagates(mock_request):
     """CommerceAPIError from supply chain tools should propagate."""
-    mock_request.side_effect = CommerceAPIError(
-        code=60001, msg="Supply order not found"
-    )
+    mock_request.side_effect = CommerceAPIError(code=60001, msg="Supply order not found")
 
     with pytest.raises(CommerceAPIError) as exc_info:
         await get_supply_order_list(

@@ -21,7 +21,7 @@ _project_root = Path(__file__).resolve().parents[4]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from shared.cn_commerce_base import CommerceMCPBase, CommerceAPIError, SignMethod
+from shared.cn_commerce_base import CommerceMCPBase, CommerceAPIError, ConfigValidationError, SignMethod
 
 
 # ── JD client ───────────────────────────────────────────────────────────────
@@ -67,11 +67,19 @@ class JDMCP(CommerceMCPBase):
 
 # ── Instantiate client from env ────────────────────────────────────────────
 
-jd = JDMCP(
-    app_key=os.environ.get("JD_APP_KEY", ""),
-    app_secret=os.environ.get("JD_APP_SECRET", ""),
-    access_token=os.environ.get("JD_ACCESS_TOKEN", ""),
-)
+def _create_jd_client() -> JDMCP:
+    """Create JD client with configuration validation."""
+    try:
+        return JDMCP.from_env("JD", ["APP_KEY", "APP_SECRET", "ACCESS_TOKEN"])
+    except ConfigValidationError:
+        # Fallback to direct instantiation for backward compatibility
+        return JDMCP(
+            app_key=os.environ.get("JD_APP_KEY", ""),
+            app_secret=os.environ.get("JD_APP_SECRET", ""),
+            access_token=os.environ.get("JD_ACCESS_TOKEN", ""),
+        )
+
+jd = _create_jd_client()
 
 
 # ── MCP server ─────────────────────────────────────────────────────────────

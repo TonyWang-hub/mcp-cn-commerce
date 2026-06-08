@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import time
 import urllib.parse
 from typing import Any
@@ -19,6 +20,16 @@ class SignMethod:
     MD5 = "md5"
     HMAC_SHA256 = "hmac_sha256"
     HMAC_MD5 = "hmac_md5"
+
+
+class ConfigValidationError(Exception):
+    """Raised when required configuration is missing."""
+
+    def __init__(self, platform: str, missing_vars: list[str]):
+        self.platform = platform
+        self.missing_vars = missing_vars
+        msg = f"[{platform}] Missing required environment variables: {', '.join(missing_vars)}"
+        super().__init__(msg)
 
 
 class CommerceMCPBase:
@@ -40,6 +51,35 @@ class CommerceMCPBase:
         self.app_key = app_key
         self.app_secret = app_secret
         self.access_token = access_token
+
+    @classmethod
+    def from_env(cls, platform: str, required_vars: list[str]) -> "CommerceMCPBase":
+        """Create client from environment variables with validation.
+
+        Args:
+            platform: Platform name (e.g., "OCEANENGINE", "TAOBAO")
+            required_vars: List of required env var suffixes (e.g., ["APP_KEY", "APP_SECRET", "ACCESS_TOKEN"])
+
+        Raises:
+            ConfigValidationError: If any required variable is missing.
+        """
+        missing = []
+        values = {}
+        for var in required_vars:
+            env_name = f"{platform}_{var}"
+            value = os.environ.get(env_name, "")
+            if not value:
+                missing.append(env_name)
+            values[var] = value
+
+        if missing:
+            raise ConfigValidationError(platform, missing)
+
+        return cls(
+            app_key=values.get("APP_KEY", values.get("CLIENT_ID", "")),
+            app_secret=values.get("APP_SECRET", values.get("CLIENT_SECRET", "")),
+            access_token=values.get("ACCESS_TOKEN", ""),
+        )
 
     # ── HTTP ──────────────────────────────────────────────
 

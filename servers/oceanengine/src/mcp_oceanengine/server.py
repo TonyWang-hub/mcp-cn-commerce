@@ -17,7 +17,7 @@ _SHARED_DIR = Path(__file__).resolve().parents[4] / "shared"
 if str(_SHARED_DIR) not in sys.path:
     sys.path.insert(0, str(_SHARED_DIR))
 
-from cn_commerce_base import CommerceAPIError, CommerceMCPBase  # noqa: E402
+from cn_commerce_base import CommerceAPIError, CommerceMCPBase, ConfigValidationError  # noqa: E402
 from mcp.server import Server  # noqa: E402
 from mcp.server.stdio import stdio_server  # noqa: E402
 
@@ -34,11 +34,15 @@ class OceanEngine(CommerceMCPBase):
 
 def _get_client() -> OceanEngine:
     """Create an OceanEngine client from OCEANENGINE_* environment variables."""
-    return OceanEngine(
-        app_key=os.environ.get("OCEANENGINE_APP_KEY", ""),
-        app_secret=os.environ.get("OCEANENGINE_APP_SECRET", ""),
-        access_token=os.environ.get("OCEANENGINE_ACCESS_TOKEN", ""),
-    )
+    try:
+        return OceanEngine.from_env("OCEANENGINE", ["APP_KEY", "APP_SECRET", "ACCESS_TOKEN"])
+    except ConfigValidationError:
+        # Fallback to direct instantiation for backward compatibility
+        return OceanEngine(
+            app_key=os.environ.get("OCEANENGINE_APP_KEY", ""),
+            app_secret=os.environ.get("OCEANENGINE_APP_SECRET", ""),
+            access_token=os.environ.get("OCEANENGINE_ACCESS_TOKEN", ""),
+        )
 
 
 # ── MCP Server ───────────────────────────────────────────

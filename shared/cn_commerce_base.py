@@ -14,8 +14,8 @@ import logging
 import os
 import random
 import re
-import time
 import threading
+import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -477,7 +477,7 @@ class RetryConfig:
         Returns:
             Delay in seconds.
         """
-        delay = min(self.base_delay * (2 ** attempt), self.max_delay)
+        delay = min(self.base_delay * (2**attempt), self.max_delay)
         if self.jitter:
             delay = delay * (0.5 + random.random())
         return delay
@@ -538,9 +538,7 @@ def with_retry(config: RetryConfig | None = None) -> Callable[..., Any]:
                     if not retry_config.should_retry_exception(exc):
                         raise
                     if attempt == retry_config.max_retries:
-                        logger.error(
-                            f"Max retries ({retry_config.max_retries}) exhausted for {func.__name__}"
-                        )
+                        logger.error(f"Max retries ({retry_config.max_retries}) exhausted for {func.__name__}")
                         raise
                     delay = retry_config.compute_delay(attempt)
                     logger.warning(
@@ -555,7 +553,6 @@ def with_retry(config: RetryConfig | None = None) -> Callable[..., Any]:
         return wrapper
 
     return decorator
-
 
 
 class ResponseCache:
@@ -802,7 +799,9 @@ class CommerceMCPBase:
                 if not retry_config or not retry_config.should_retry_exception(exc):
                     elapsed_ms = (time.monotonic() - start_time) * 1000
                     if isinstance(exc, CommerceAPIError):
-                        self.metrics.record_request(path, latency_ms=elapsed_ms, success=False, error_code=exc.code, error_msg=exc.msg)
+                        self.metrics.record_request(
+                            path, latency_ms=elapsed_ms, success=False, error_code=exc.code, error_msg=exc.msg
+                        )
                     else:
                         self.metrics.record_request(path, latency_ms=elapsed_ms, success=False)
                     raise
@@ -811,7 +810,9 @@ class CommerceMCPBase:
                 if attempt == max_attempts - 1:
                     elapsed_ms = (time.monotonic() - start_time) * 1000
                     if isinstance(exc, CommerceAPIError):
-                        self.metrics.record_request(path, latency_ms=elapsed_ms, success=False, error_code=exc.code, error_msg=exc.msg)
+                        self.metrics.record_request(
+                            path, latency_ms=elapsed_ms, success=False, error_code=exc.code, error_msg=exc.msg
+                        )
                     else:
                         self.metrics.record_request(path, latency_ms=elapsed_ms, success=False)
                     logger.error(f"Max retries ({retry_config.max_retries}) exhausted for {path}")
@@ -819,8 +820,7 @@ class CommerceMCPBase:
 
                 delay = retry_config.compute_delay(attempt)
                 logger.warning(
-                    f"Retry {attempt + 1}/{retry_config.max_retries} for {path} "
-                    f"after {delay:.2f}s: {exc}"
+                    f"Retry {attempt + 1}/{retry_config.max_retries} for {path} " f"after {delay:.2f}s: {exc}"
                 )
                 await asyncio.sleep(delay)
 
@@ -871,7 +871,6 @@ class CommerceMCPBase:
             await self._client.aclose()
             self._client = None
 
-
     # ── Batch Operations ──────────────────────────────────
 
     async def _batch_request(
@@ -905,7 +904,7 @@ class CommerceMCPBase:
                     )
                 except Exception as exc:
                     elapsed = (time.monotonic() - start) * 1000
-                    logger.warning(f"Batch request \'{item.request_id}\' failed: {exc}")
+                    logger.warning(f"Batch request '{item.request_id}' failed: {exc}")
                     return BatchResultItem(
                         request_id=item.request_id,
                         success=False,
@@ -981,8 +980,6 @@ class CommerceAPIError(Exception):
         self.code = code
         self.msg = msg
         super().__init__(f"[{code}] {msg}")
-
-
 
 
 @dataclass

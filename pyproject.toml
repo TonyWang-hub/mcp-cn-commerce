@@ -54,7 +54,21 @@ urls = {Repository = "https://github.com/TonyWang-hub/mcp-cn-commerce", Issues =
 oceanengine = ["mcp-cn-oceanengine"]
 doudian = ["mcp-cn-doudian"]
 jd = ["mcp-cn-jd"]
-all = ["mcp-cn-oceanengine", "mcp-cn-doudian", "mcp-cn-jd"]
+taobao = ["mcp-cn-taobao"]
+pinduoduo = ["mcp-cn-pinduoduo"]
+kuaishou = ["mcp-cn-kuaishou"]
+xiaohongshu = ["mcp-cn-xiaohongshu"]
+weixin-store = ["mcp-cn-weixin-store"]
+all = [
+    "mcp-cn-oceanengine",
+    "mcp-cn-doudian",
+    "mcp-cn-jd",
+    "mcp-cn-taobao",
+    "mcp-cn-pinduoduo",
+    "mcp-cn-kuaishou",
+    "mcp-cn-xiaohongshu",
+    "mcp-cn-weixin-store",
+]
 dev = ["pytest>=7.0", "pytest-asyncio"]
 
 [tool.setuptools.packages.find]

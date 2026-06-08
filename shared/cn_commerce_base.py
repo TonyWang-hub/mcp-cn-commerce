@@ -8,12 +8,16 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import time
 import urllib.parse
 from typing import Any
 
 import httpx
+
+# Configure logging
+logger = logging.getLogger("mcp-cn-commerce")
 
 
 class SignMethod:
@@ -73,8 +77,10 @@ class CommerceMCPBase:
             values[var] = value
 
         if missing:
+            logger.error(f"Missing config for {platform}: {missing}")
             raise ConfigValidationError(platform, missing)
 
+        logger.info(f"Client initialized for {platform}")
         return cls(
             app_key=values.get("APP_KEY", values.get("CLIENT_ID", "")),
             app_secret=values.get("APP_SECRET", values.get("CLIENT_SECRET", "")),
@@ -99,6 +105,8 @@ class CommerceMCPBase:
         params["sign_method"] = self.sign_method
 
         url = f"{self.BASE_URL}{path}"
+        logger.debug(f"Request: {method} {url}")
+
         async with httpx.AsyncClient(timeout=30) as client:
             if method == "GET":
                 resp = await client.get(url, params={**params, **data})
@@ -107,10 +115,12 @@ class CommerceMCPBase:
 
         result = resp.json()
         if "error_response" in result:
-            raise CommerceAPIError(
-                code=result["error_response"].get("code", -1),
-                msg=result["error_response"].get("msg", "unknown"),
-            )
+            error_code = result["error_response"].get("code", -1)
+            error_msg = result["error_response"].get("msg", "unknown")
+            logger.warning(f"API error: [{error_code}] {error_msg}")
+            raise CommerceAPIError(code=error_code, msg=error_msg)
+
+        logger.debug(f"Response: {resp.status_code}")
         return result
 
     # ── Signing ───────────────────────────────────────────
@@ -137,8 +147,10 @@ class CommerceMCPBase:
             data = await fetch_fn(page=page, page_size=page_size)
             items = data.get("result", data.get("list", []))
             results.extend(items)
+            logger.debug(f"Pagination: page {page}, got {len(items)} items")
             if len(items) < page_size:
                 break
+        logger.info(f"Pagination complete: {len(results)} total items")
         return results
 
 

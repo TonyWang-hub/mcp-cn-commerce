@@ -85,14 +85,28 @@
 
 ### 安装
 
-```bash
-# 安装单个平台
-pip install mcp-cn-commerce[oceanengine]   # 巨量引擎广告
-pip install mcp-cn-commerce[doudian]        # 抖店
-pip install mcp-cn-commerce[jd]              # 京东
+#### 从 GitHub Releases 下载（推荐 — 无需注册）
 
-# 或安装所有 Phase 1 平台
-pip install mcp-cn-commerce[all]
+```bash
+# 下载最新 Release 的 .whl 文件安装
+# https://github.com/TonyWang-hub/mcp-cn-commerce/releases/latest
+
+# 或直接安装：
+pip install https://github.com/TonyWang-hub/mcp-cn-commerce/releases/latest/download/mcp_cn_commerce-0.1.0-py3-none-any.whl
+```
+
+#### 从 Git 安装（始终最新）
+
+```bash
+pip install git+https://github.com/TonyWang-hub/mcp-cn-commerce.git
+```
+
+#### 开发模式
+
+```bash
+git clone https://github.com/TonyWang-hub/mcp-cn-commerce.git
+cd mcp-cn-commerce
+pip install -e ".[dev]"
 ```
 
 ### 配置凭证

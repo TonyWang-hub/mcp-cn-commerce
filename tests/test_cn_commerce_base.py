@@ -20,16 +20,16 @@ if str(_shared_dir) not in sys.path:
     sys.path.insert(0, str(_shared_dir))
 
 from cn_commerce_base import (
+    DEFAULT_RETRY,
+    RATE_LIMIT_RETRY,
     CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,
-    DEFAULT_RETRY,
     EndpointMetrics,
     MetricsCollector,
-    RATE_LIMIT_RETRY,
     RateLimiter,
-    RetryConfig,
     RetryableError,
+    RetryConfig,
     SignMethod,
     format_error_response,
     with_retry,
@@ -553,7 +553,9 @@ class TestRetryConfig:
     def test_should_retry_exception_http_status_error(self):
         cfg = RetryConfig()
         # HTTPStatusError is NOT in default retryable_exceptions
-        assert cfg.should_retry_exception(httpx.HTTPStatusError("400", request=AsyncMock(), response=AsyncMock())) is False
+        assert (
+            cfg.should_retry_exception(httpx.HTTPStatusError("400", request=AsyncMock(), response=AsyncMock())) is False
+        )
 
     def test_should_retry_exception_commerce_api_error_retryable(self):
         cfg = RetryConfig(retryable_api_codes={40001})
@@ -721,12 +723,14 @@ class TestWithRetryDecorator:
     async def test_retry_with_commerce_api_error(self):
         call_count = 0
 
-        @with_retry(RetryConfig(
-            max_retries=2,
-            base_delay=0.01,
-            jitter=False,
-            retryable_api_codes={40001},
-        ))
+        @with_retry(
+            RetryConfig(
+                max_retries=2,
+                base_delay=0.01,
+                jitter=False,
+                retryable_api_codes={40001},
+            )
+        )
         async def api_fail_then_succeed():
             nonlocal call_count
             call_count += 1
@@ -742,11 +746,13 @@ class TestWithRetryDecorator:
     async def test_retry_does_not_catch_non_retryable_api_code(self):
         call_count = 0
 
-        @with_retry(RetryConfig(
-            max_retries=3,
-            base_delay=0.01,
-            retryable_api_codes={40001},
-        ))
+        @with_retry(
+            RetryConfig(
+                max_retries=3,
+                base_delay=0.01,
+                retryable_api_codes={40001},
+            )
+        )
         async def api_fail_wrong_code():
             nonlocal call_count
             call_count += 1
@@ -775,7 +781,8 @@ class TestRequestRetry:
 
         with patch.object(client, "_get_client", return_value=mock_client):
             result = await client._request(
-                "GET", "/api/test",
+                "GET",
+                "/api/test",
                 retry_config=RetryConfig(max_retries=2, base_delay=0.01, jitter=False),
             )
 
@@ -798,7 +805,8 @@ class TestRequestRetry:
 
         with patch.object(client, "_get_client", return_value=mock_client):
             result = await client._request(
-                "GET", "/api/test",
+                "GET",
+                "/api/test",
                 retry_config=RetryConfig(max_retries=3, base_delay=0.01, jitter=False),
             )
 
@@ -815,7 +823,8 @@ class TestRequestRetry:
         with patch.object(client, "_get_client", return_value=mock_client):
             with pytest.raises(httpx.ConnectError):
                 await client._request(
-                    "GET", "/api/test",
+                    "GET",
+                    "/api/test",
                     retry_config=RetryConfig(max_retries=2, base_delay=0.01, jitter=False),
                 )
 
@@ -852,9 +861,12 @@ class TestRequestRetry:
 
         with patch.object(client, "_get_client", return_value=mock_client):
             result = await client._request(
-                "GET", "/api/test",
+                "GET",
+                "/api/test",
                 retry_config=RetryConfig(
-                    max_retries=2, base_delay=0.01, jitter=False,
+                    max_retries=2,
+                    base_delay=0.01,
+                    jitter=False,
                     retryable_api_codes={40001},
                 ),
             )
@@ -875,9 +887,12 @@ class TestRequestRetry:
         with patch.object(client, "_get_client", return_value=mock_client):
             with pytest.raises(CommerceAPIError) as exc_info:
                 await client._request(
-                    "GET", "/api/test",
+                    "GET",
+                    "/api/test",
                     retry_config=RetryConfig(
-                        max_retries=3, base_delay=0.01, jitter=False,
+                        max_retries=3,
+                        base_delay=0.01,
+                        jitter=False,
                         retryable_api_codes={40001},
                     ),
                 )
@@ -912,7 +927,8 @@ class TestRequestRetry:
 
         with patch.object(client, "_get_client", return_value=mock_client):
             await client._request(
-                "GET", "/api/test",
+                "GET",
+                "/api/test",
                 retry_config=RetryConfig(max_retries=2, base_delay=0.1, jitter=False),
             )
 

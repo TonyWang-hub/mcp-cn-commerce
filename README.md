@@ -143,65 +143,36 @@ Once connected, you can ask your AI agent questions like:
 
 ```
 mcp-cn-commerce/
-├── .github/
-│   ├── workflows/test.yml        # CI: pytest on push + PR (Python 3.11/12/13)
-│   ├── ISSUE_TEMPLATE/           # Bug, feature, platform request templates
-│   ├── PULL_REQUEST_TEMPLATE.md
-│   └── dependabot.yml            # Auto dependency updates
-├── shared/                        # Shared auth/signing/pagination/error handling
-│   └── cn_commerce_base.py       # CommerceMCPBase — extend for new platforms
+├── .github/workflows/test.yml       # CI: pytest on push (3.11/3.12/3.13)
+├── shared/                           # Shared auth/signing/pagination
+│   └── cn_commerce_base.py           # CommerceMCPBase — extend for new platforms
 ├── servers/
-│   ├── oceanengine/               # 巨量引擎 MCP server (5 tools)
-│   │   ├── src/mcp_oceanengine/
-│   │   └── tests/
-│   ├── doudian/                   # 抖店 MCP server (5 tools)
-│   │   ├── src/mcp_doudian/
-│   │   └── tests/
-│   └── jd/                        # 京东 MCP server (4 tools)
-│       ├── src/mcp_jd/
-│       └── tests/
-├── docs/
-│   └── platforms.md               # 8-platform API comparison & auth matrix
-├── README.md                      # English documentation
-├── README_zh.md                   # 中文文档
-├── CONTRIBUTING.md                # Contribution guide
-├── SECURITY.md                    # Security policy
-├── CHANGELOG.md                   # Version history
-├── CITATION.cff                   # Academic citation
-├── CODE_OF_CONDUCT.md
-└── LICENSE                        # MIT
+│   ├── oceanengine/  17 tools        ├── doudian/    20 tools
+│   ├── jd/           14 tools        ├── taobao/     13 tools
+│   ├── pinduoduo/    13 tools        ├── kuaishou/   12 tools
+│   ├── xiaohongshu/  12 tools        └── weixin-store/ 11 tools
+├── docs/platforms.md                 # 8-platform API comparison & auth matrix
+├── README.md / README_zh.md          # English / 简体中文
+└── LICENSE                           # MIT
 ```
 
-Each `servers/<platform>/` is an **independent MCP server** with its own `pyproject.toml`. Users install only what they need. The `shared/` module provides common authentication, request signing (MD5/HMAC-MD5), pagination, and error handling — so adding a new platform only requires setting the base URL, sign method, and defining the tool functions.
+Each `servers/<platform>/` is an **independent MCP server**. Users install only what they need.
 
-## Tools per Server
+## Tools Summary
 
-### 巨量引擎 (Ocean Engine) — Advertising Platform
-
-| Tool | Description | API |
+| Server | Tools | Categories |
 |---|---|---|
-| `get_advertiser_info` | Advertiser account details, status, industry | `/open_api/2/advertiser/info/` |
-| `get_campaign_report` | Campaign performance: impressions, clicks, conversions, spend, ROAS | `/open_api/2/report/campaign/get/` |
-| `get_ad_detail_report` | Ad-creative-level granular report data | `/open_api/2/report/ad/get/` |
-| `list_campaigns` | List all ad campaigns with status and budget | `/open_api/2/campaign/get/` |
-| `get_account_balance` | Account balance and daily spend summary | `/open_api/2/account/fund/get/` |
+| oceanengine | 17 | Ads, Qianchuan, Star, Creative, Audience, Optimization |
+| doudian | 20 | Orders, Products, Refunds, Logistics, Reviews, Live, Traffic, Marketing, Billing, Shop |
+| jd | 14 | Orders, Products, After-Sale, Logistics, Reviews, Pricing, Inventory, Marketing, Shop |
+| taobao | 13 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Categories |
+| pinduoduo | 13 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Affiliate |
+| kuaishou | 12 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing |
+| xiaohongshu | 12 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Inventory, Finance |
+| weixin-store | 11 | Orders, Products, Refunds, Logistics, Shop, Marketing, Supply Chain, Categories |
+| **Total** | **112** | All read-only by default |
 
-### 抖店 (Douyin Shop) — TikTok Shop China
-
-| Tool | Description | API |
-|---|---|---|
-| `get_order_list` | Order listing with filters (status, date range, keyword) | `/order/searchList` |
-| `get_order_detail` | Order detail including logistics tracking, buyer info, after-sale status | `/order/orderDetail` |
-| `get_product_list` | Product listing with inventory, price, status | `/product/list` |
-| `get_refund_list` | Refund and after-sale request listing | `/refund/orderList` |
-| `get_shop_info` | Store/shop basic information and statistics | `/shop/brandList` |
-
-### 京东 (JD.com) — Jingdong E-Commerce
-
-| Tool | Description | API |
-|---|---|---|
-| `get_order_list` | Order listing with status, date, and keyword filters | `/order/query` |
-| `get_order_detail` | Complete order details | `/order/detail` |
+For full tool details, see the source code in each `servers/<platform>/src/` directory.
 | `get_product_list` | Product catalog with pricing and stock | `/product/list` |
 | `get_shop_info` | Merchant shop information | `/shop/info` |
 

@@ -145,71 +145,40 @@ export JD_ACCESS_TOKEN="你的 Access Token"
 > "对比巨量引擎上个月和这个月的 ROAS 趋势"
 > "导出今天所有平台的订单汇总"
 
-## 每个 Server 的工具
+## 工具汇总
 
-### 巨量引擎 / 千川 — 广告投放
-
-| 工具 | 说明 | API |
+| Server | 工具数 | 覆盖类别 |
 |---|---|---|
-| `get_advertiser_info` | 广告主账户信息、行业、状态 | `/open_api/2/advertiser/info/` |
-| `get_campaign_report` | 广告计划报表（曝光/点击/转化/消耗/ROAS） | `/open_api/2/report/campaign/get/` |
-| `get_ad_detail_report` | 广告创意级详细报表 | `/open_api/2/report/ad/get/` |
-| `list_campaigns` | 广告计划列表（含状态、预算） | `/open_api/2/campaign/get/` |
-| `get_account_balance` | 账户余额与日消耗汇总 | `/open_api/2/account/fund/get/` |
+| oceanengine | 17 | 广告、千川、星图、素材、人群、优化 |
+| doudian | 20 | 订单、商品、售后、物流、评价、直播、流量、营销、资金、店铺 |
+| jd | 14 | 订单、商品、售后、物流、评价、价格、库存、营销、店铺 |
+| taobao | 13 | 订单、商品、售后、物流、评价、店铺、营销、类目 |
+| pinduoduo | 13 | 订单、商品、售后、物流、评价、店铺、营销、多多客 |
+| kuaishou | 12 | 订单、商品、售后、物流、评价、店铺、营销 |
+| xiaohongshu | 12 | 订单、商品、售后、物流、评价、店铺、营销、库存、财务 |
+| weixin-store | 11 | 订单、商品、售后、物流、店铺、营销、供货、类目 |
+| **合计** | **112** | 全部默认只读 |
 
-### 抖店 — 电商店铺
-
-| 工具 | 说明 | API |
-|---|---|---|
-| `get_order_list` | 订单列表（支持状态、时间、关键词筛选） | `/order/searchList` |
-| `get_order_detail` | 订单详情（物流追踪、买家信息、售后状态） | `/order/orderDetail` |
-| `get_product_list` | 商品列表（库存、价格、状态） | `/product/list` |
-| `get_refund_list` | 退款/售后单列表 | `/refund/orderList` |
-| `get_shop_info` | 店铺基本信息与数据统计 | `/shop/brandList` |
-
-### 京东 — 电商店铺
-
-| 工具 | 说明 | API |
-|---|---|---|
-| `get_order_list` | 订单列表（状态、时间、关键词筛选） | `/order/query` |
-| `get_order_detail` | 订单详细信息 | `/order/detail` |
-| `get_product_list` | 商品目录（价格、库存） | `/product/list` |
-| `get_shop_info` | 商家店铺信息 | `/shop/info` |
+每个工具的具体用法见各 `servers/<平台>/src/` 目录下的源码。
 
 ## 架构
 
 ```
 mcp-cn-commerce/
-├── .github/
-│   ├── workflows/test.yml        # CI: push/PR 自动跑 pytest
-│   ├── ISSUE_TEMPLATE/           # Bug/功能/平台请求模板
-│   ├── PULL_REQUEST_TEMPLATE.md
-│   └── dependabot.yml            # 自动依赖更新
-├── shared/                        # 共享基类：签名/请求/分页/错误处理
-│   └── cn_commerce_base.py       # CommerceMCPBase — 新平台只需继承此基类
+├── .github/workflows/test.yml       # CI: push 自动跑 pytest
+├── shared/                           # 共享基类：签名/请求/分页
+│   └── cn_commerce_base.py           # 继承此基类即可新建平台
 ├── servers/
-│   ├── oceanengine/               # 巨量引擎 MCP（5 tools）
-│   │   ├── src/mcp_oceanengine/
-│   │   └── tests/
-│   ├── doudian/                   # 抖店 MCP（5 tools）
-│   │   ├── src/mcp_doudian/
-│   │   └── tests/
-│   └── jd/                        # 京东 MCP（4 tools）
-│       ├── src/mcp_jd/
-│       └── tests/
-├── docs/
-│   └── platforms.md               # 8 平台 API 对比 & 认证方式矩阵
-├── README.md                      # English
-├── README_zh.md                   # 简体中文
-├── CONTRIBUTING.md                # 贡献指南
-├── SECURITY.md                    # 安全政策
-├── CHANGELOG.md                   # 更新日志
-├── CITATION.cff                   # 学术引用
-├── CODE_OF_CONDUCT.md
-└── LICENSE                        # MIT
+│   ├── oceanengine/  17 tools        ├── doudian/    20 tools
+│   ├── jd/           14 tools        ├── taobao/     13 tools
+│   ├── pinduoduo/    13 tools        ├── kuaishou/   12 tools
+│   ├── xiaohongshu/  12 tools        └── weixin-store/ 11 tools
+├── docs/platforms.md                 # 8 平台 API 对比 & 认证方式矩阵
+├── README.md / README_zh.md          # 英文 / 简体中文
+└── LICENSE                           # MIT
 ```
 
-Monorepo 架构：每个平台是一个独立的 MCP Server，用户按需安装。共享 `CommerceMCPBase` 基类封装了签名（MD5/HMAC-MD5）、分页、错误处理等通用逻辑 — 新增平台只需设置 `BASE_URL` 和 `sign_method`，然后定义工具函数即可。
+Monorepo 架构：每个平台是一个独立的 MCP Server，用户按需安装。
 
 ## 安全
 

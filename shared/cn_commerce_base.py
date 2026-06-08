@@ -11,14 +11,12 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
-
-import re
-from typing import Any
 
 # ── Security: Sensitive Data Masking ─────────────────────
 
@@ -85,9 +83,7 @@ def mask_dict_sensitive_keys(data: dict[str, Any]) -> dict[str, Any]:
         elif isinstance(value, dict):
             masked[key] = mask_dict_sensitive_keys(value)
         elif isinstance(value, list):
-            masked[key] = [
-                mask_dict_sensitive_keys(item) if isinstance(item, dict) else item for item in value
-            ]
+            masked[key] = [mask_dict_sensitive_keys(item) if isinstance(item, dict) else item for item in value]
         else:
             masked[key] = value
     return masked
@@ -108,9 +104,11 @@ def mask_log_message(message: str) -> str:
     message = _SENSITIVE_VALUE_PATTERNS[0].sub(lambda m: mask_sensitive_value(m.group()), message)
     # Mask Bearer tokens
     message = _SENSITIVE_VALUE_PATTERNS[1].sub(
-        lambda m: m.group().split()[0] + " " + mask_sensitive_value(m.group().split()[1])
-        if len(m.group().split()) > 1
-        else m.group(),
+        lambda m: (
+            m.group().split()[0] + " " + mask_sensitive_value(m.group().split()[1])
+            if len(m.group().split()) > 1
+            else m.group()
+        ),
         message,
     )
     return message
@@ -131,9 +129,7 @@ class SensitiveDataFilter(logging.Filter):
             if isinstance(record.args, dict):
                 record.args = mask_dict_sensitive_keys(record.args)
             elif isinstance(record.args, tuple | list):
-                record.args = tuple(
-                    mask_log_message(str(a)) if isinstance(a, str) else a for a in record.args
-                )
+                record.args = tuple(mask_log_message(str(a)) if isinstance(a, str) else a for a in record.args)
         return True
 
 
@@ -170,9 +166,7 @@ def validate_platform_name(platform: str) -> str:
     if not platform:
         raise ValueError("Platform name cannot be empty")
     if not re.match(r"^[A-Z][A-Z0-9_]*$", platform):
-        raise ValueError(
-            f"Invalid platform name '{platform}': must be uppercase alphanumeric with underscores"
-        )
+        raise ValueError(f"Invalid platform name '{platform}': must be uppercase alphanumeric with underscores")
     if len(platform) > 64:
         raise ValueError(f"Platform name too long ({len(platform)} > 64)")
     return platform
@@ -229,9 +223,7 @@ def validate_env_var_name(name: str) -> str:
     if not name:
         raise ValueError("Environment variable name cannot be empty")
     if not re.match(r"^[A-Z][A-Z0-9_]*$", name):
-        raise ValueError(
-            f"Invalid env var name '{name}': must be uppercase alphanumeric with underscores"
-        )
+        raise ValueError(f"Invalid env var name '{name}': must be uppercase alphanumeric with underscores")
     return name
 
 
@@ -245,6 +237,7 @@ def sanitize_log_context(**kwargs: Any) -> dict[str, Any]:
         A dictionary safe for logging with sensitive values masked.
     """
     return mask_dict_sensitive_keys(kwargs)
+
 
 # Configure logging
 logger = logging.getLogger("mcp-cn-commerce")

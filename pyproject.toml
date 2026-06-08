@@ -69,7 +69,7 @@ all = [
     "mcp-cn-xiaohongshu",
     "mcp-cn-weixin-store",
 ]
-dev = ["pytest>=7.0", "pytest-asyncio", "black", "ruff"]
+dev = ["pytest>=7.0", "pytest-asyncio", "pytest-cov", "black", "ruff"]
 
 [tool.setuptools.packages.find]
 include = ["shared*"]

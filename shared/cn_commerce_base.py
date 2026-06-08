@@ -5,6 +5,7 @@ Provides unified auth signing, request handling, and error normalization.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -36,6 +37,25 @@ class ConfigValidationError(Exception):
         super().__init__(msg)
 
 
+class RateLimiter:
+    """Simple rate limiter to prevent API throttling."""
+
+    def __init__(self, requests_per_second: float = 10.0):
+        self.requests_per_second = requests_per_second
+        self.min_interval = 1.0 / requests_per_second
+        self.last_request_time = 0.0
+
+    async def acquire(self):
+        """Wait if necessary to respect rate limit."""
+        now = time.time()
+        time_since_last = now - self.last_request_time
+        if time_since_last < self.min_interval:
+            wait_time = self.min_interval - time_since_last
+            logger.debug(f"Rate limit: waiting {wait_time:.2f}s")
+            await asyncio.sleep(wait_time)
+        self.last_request_time = time.time()
+
+
 class CommerceMCPBase:
     """Base class for Chinese e-commerce platform MCP servers.
 
@@ -50,11 +70,13 @@ class CommerceMCPBase:
     app_key: str = ""
     app_secret: str = ""
     access_token: str = ""
+    rate_limiter: RateLimiter | None = None
 
     def __init__(self, app_key: str = "", app_secret: str = "", access_token: str = ""):
         self.app_key = app_key
         self.app_secret = app_secret
         self.access_token = access_token
+        self.rate_limiter = RateLimiter()
 
     @classmethod
     def from_env(cls, platform: str, required_vars: list[str]) -> "CommerceMCPBase":
@@ -93,6 +115,10 @@ class CommerceMCPBase:
         """Make a signed API request."""
         params = params or {}
         data = data or {}
+
+        # Rate limiting
+        if self.rate_limiter:
+            await self.rate_limiter.acquire()
 
         # Inject auth params
         params["app_key"] = self.app_key

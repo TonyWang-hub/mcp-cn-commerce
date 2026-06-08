@@ -1,24 +1,395 @@
 """Shared base for Chinese e-commerce platform MCP servers.
 
 Provides unified auth signing, request handling, and error normalization.
+Includes monitoring: request counters, latency tracking, and health checks.
+Includes security: sensitive data masking, input validation, and logging filters.
 """
 
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import hmac
 import json
 import logging
 import os
+import re
 import time
+from collections import defaultdict
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 # Configure logging
 logger = logging.getLogger("mcp-cn-commerce")
+
+
+# ── Security: Sensitive Data Masking ─────────────────────
+
+# Patterns for sensitive fields that should be masked in logs
+_SENSITIVE_FIELD_PATTERNS = re.compile(
+    r"(app_key|app_secret|access_token|client_id|client_secret|"
+    r"refresh_token|api_key|secret_key|password|token|sign)",
+    re.IGNORECASE,
+)
+
+# Regex patterns to detect sensitive values in strings
+_SENSITIVE_VALUE_PATTERNS = [
+    # JWT tokens
+    re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
+    # Bearer tokens
+    re.compile(r"Bearer\s+[A-Za-z0-9._~+/-]+=*", re.IGNORECASE),
+]
+
+
+def mask_sensitive_value(value: str, visible_prefix: int = 4, visible_suffix: int = 4) -> str:
+    """Mask a sensitive value, showing only prefix and suffix.
+
+    Args:
+        value: The sensitive string to mask.
+        visible_prefix: Number of characters to show at the start.
+        visible_suffix: Number of characters to show at the end.
+
+    Returns:
+        Masked string like "abcd****efgh".
+
+    Examples:
+        >>> mask_sensitive_value("abcdefghijklmnop")
+        'abcd****mnop'
+        >>> mask_sensitive_value("short")
+        's****t'
+        >>> mask_sensitive_value("")
+        '****'
+    """
+    if not value:
+        return "****"
+    if len(value) <= visible_prefix + visible_suffix:
+        return value[0] + "****" + value[-1] if len(value) > 1 else "****"
+    return f"{value[:visible_prefix]}****{value[-visible_suffix:]}"
+
+
+def mask_dict_sensitive_keys(data: dict[str, Any]) -> dict[str, Any]:
+    """Create a copy of a dict with sensitive keys masked.
+
+    Recursively processes nested dicts and lists.
+
+    Args:
+        data: Dictionary that may contain sensitive keys.
+
+    Returns:
+        A new dictionary with sensitive values masked.
+    """
+    masked: dict[str, Any] = {}
+    for key, value in data.items():
+        if _SENSITIVE_FIELD_PATTERNS.search(key):
+            if isinstance(value, str):
+                masked[key] = mask_sensitive_value(value)
+            else:
+                masked[key] = "***MASKED***"
+        elif isinstance(value, dict):
+            masked[key] = mask_dict_sensitive_keys(value)
+        elif isinstance(value, list):
+            masked[key] = [
+                mask_dict_sensitive_keys(item) if isinstance(item, dict) else item for item in value
+            ]
+        else:
+            masked[key] = value
+    return masked
+
+
+def mask_log_message(message: str) -> str:
+    """Mask sensitive values that may appear in log message strings.
+
+    Scans for patterns that look like JWTs or Bearer tokens.
+
+    Args:
+        message: Log message string.
+
+    Returns:
+        Message with sensitive values masked.
+    """
+    # Mask JWT tokens
+    message = _SENSITIVE_VALUE_PATTERNS[0].sub(lambda m: mask_sensitive_value(m.group()), message)
+    # Mask Bearer tokens
+    message = _SENSITIVE_VALUE_PATTERNS[1].sub(
+        lambda m: m.group().split()[0] + " " + mask_sensitive_value(m.group().split()[1])
+        if len(m.group().split()) > 1
+        else m.group(),
+        message,
+    )
+    return message
+
+
+class SensitiveDataFilter(logging.Filter):
+    """Logging filter that masks sensitive data in log records.
+
+    Usage:
+        logger.addFilter(SensitiveDataFilter())
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Filter log record, masking any sensitive data."""
+        if isinstance(record.msg, str):
+            record.msg = mask_log_message(record.msg)
+        if record.args:
+            if isinstance(record.args, dict):
+                record.args = mask_dict_sensitive_keys(record.args)
+            elif isinstance(record.args, tuple | list):
+                record.args = tuple(
+                    mask_log_message(str(a)) if isinstance(a, str) else a for a in record.args
+                )
+        return True
+
+
+# ── Security: Input Validation ────────────────────────────
+
+_SQL_INJECTION_PATTERNS = re.compile(
+    r"(\b(UNION|SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|EXEC|EXECUTE)\b"
+    r"|--|/\*|\*/|;.*\b(DROP|DELETE|UPDATE|INSERT)\b"
+    r"|'\s*(OR|AND)\s*'?\d*"
+    r"|'\s*;\s*)",
+    re.IGNORECASE,
+)
+_PATH_TRAVERSAL_PATTERN = re.compile(r"(\.\./|\.\.\\|%2e%2e[/\\]|%252e%252e)", re.IGNORECASE)
+_XSS_PATTERN = re.compile(
+    r"(<script[^>]*>|javascript:|on\w+\s*=|<iframe|<object|<embed|<form)",
+    re.IGNORECASE,
+)
+
+
+def validate_platform_name(platform: str) -> str:
+    """Validate and sanitize a platform name.
+
+    Platform names must be uppercase alphanumeric with underscores only.
+
+    Args:
+        platform: The platform name to validate.
+
+    Returns:
+        The validated platform name.
+
+    Raises:
+        ValueError: If the platform name contains invalid characters.
+    """
+    if not platform:
+        raise ValueError("Platform name cannot be empty")
+    if not re.match(r"^[A-Z][A-Z0-9_]*$", platform):
+        raise ValueError(
+            f"Invalid platform name '{platform}': must be uppercase alphanumeric with underscores"
+        )
+    if len(platform) > 64:
+        raise ValueError(f"Platform name too long ({len(platform)} > 64)")
+    return platform
+
+
+def validate_api_param(name: str, value: str, max_length: int = 4096) -> str:
+    """Validate an API parameter value for injection attacks.
+
+    Checks for SQL injection, path traversal, and XSS patterns.
+
+    Args:
+        name: Parameter name (for error messages).
+        value: Parameter value to validate.
+        max_length: Maximum allowed length.
+
+    Returns:
+        The validated value.
+
+    Raises:
+        ValueError: If the value contains suspicious patterns.
+    """
+    if not isinstance(value, str):
+        return value  # type: ignore[return-value]
+
+    if len(value) > max_length:
+        raise ValueError(f"Parameter '{name}' exceeds maximum length ({len(value)} > {max_length})")
+
+    if _SQL_INJECTION_PATTERNS.search(value):
+        raise ValueError(f"Parameter '{name}' contains suspicious SQL patterns")
+
+    if _PATH_TRAVERSAL_PATTERN.search(value):
+        raise ValueError(f"Parameter '{name}' contains path traversal patterns")
+
+    if _XSS_PATTERN.search(value):
+        raise ValueError(f"Parameter '{name}' contains suspicious script patterns")
+
+    return value
+
+
+def validate_env_var_name(name: str) -> str:
+    """Validate an environment variable name.
+
+    Env var names must be uppercase alphanumeric with underscores.
+
+    Args:
+        name: The environment variable name.
+
+    Returns:
+        The validated name.
+
+    Raises:
+        ValueError: If the name is invalid.
+    """
+    if not name:
+        raise ValueError("Environment variable name cannot be empty")
+    if not re.match(r"^[A-Z][A-Z0-9_]*$", name):
+        raise ValueError(
+            f"Invalid env var name '{name}': must be uppercase alphanumeric with underscores"
+        )
+    return name
+
+
+def sanitize_log_context(**kwargs: Any) -> dict[str, Any]:
+    """Create a sanitized context dict for logging, masking sensitive values.
+
+    Args:
+        **kwargs: Key-value pairs to include in the context.
+
+    Returns:
+        A dictionary safe for logging with sensitive values masked.
+    """
+    return mask_dict_sensitive_keys(kwargs)
+
+
+# ── Monitoring ────────────────────────────────────────────
+
+
+@dataclass
+class EndpointMetrics:
+    """Per-endpoint performance metrics."""
+
+    request_count: int = 0
+    error_count: int = 0
+    total_latency_ms: float = 0.0
+    min_latency_ms: float = float("inf")
+    max_latency_ms: float = 0.0
+    last_request_time: float = 0.0
+    last_error_time: float = 0.0
+    last_error_code: int | None = None
+    last_error_msg: str = ""
+
+    @property
+    def avg_latency_ms(self) -> float:
+        """Average latency in milliseconds."""
+        if self.request_count == 0:
+            return 0.0
+        return self.total_latency_ms / self.request_count
+
+    @property
+    def error_rate(self) -> float:
+        """Error rate as a fraction (0.0 to 1.0)."""
+        if self.request_count == 0:
+            return 0.0
+        return self.error_count / self.request_count
+
+
+class MetricsCollector:
+    """Collects and aggregates request performance metrics.
+
+    Thread-safe for async usage. Tracks per-endpoint and global stats.
+    """
+
+    def __init__(self) -> None:
+        self._endpoints: dict[str, EndpointMetrics] = defaultdict(EndpointMetrics)
+        self._global = EndpointMetrics()
+        self._start_time: float = time.time()
+
+    def record_request(
+        self,
+        endpoint: str,
+        latency_ms: float,
+        success: bool,
+        error_code: int | None = None,
+        error_msg: str = "",
+    ) -> None:
+        """Record a completed request.
+
+        Args:
+            endpoint: The API endpoint path.
+            latency_ms: Request latency in milliseconds.
+            success: Whether the request succeeded.
+            error_code: API error code if request failed.
+            error_msg: API error message if request failed.
+        """
+        now = time.time()
+        ep = self._endpoints[endpoint]
+        ep.request_count += 1
+        ep.total_latency_ms += latency_ms
+        ep.min_latency_ms = min(ep.min_latency_ms, latency_ms)
+        ep.max_latency_ms = max(ep.max_latency_ms, latency_ms)
+        ep.last_request_time = now
+
+        self._global.request_count += 1
+        self._global.total_latency_ms += latency_ms
+        self._global.min_latency_ms = min(self._global.min_latency_ms, latency_ms)
+        self._global.max_latency_ms = max(self._global.max_latency_ms, latency_ms)
+        self._global.last_request_time = now
+
+        if not success:
+            ep.error_count += 1
+            ep.last_error_time = now
+            ep.last_error_code = error_code
+            ep.last_error_msg = error_msg
+
+            self._global.error_count += 1
+            self._global.last_error_time = now
+            self._global.last_error_code = error_code
+            self._global.last_error_msg = error_msg
+
+    def get_endpoint_metrics(self, endpoint: str) -> EndpointMetrics:
+        """Get metrics for a specific endpoint."""
+        return self._endpoints.get(endpoint, EndpointMetrics())
+
+    def get_global_metrics(self) -> EndpointMetrics:
+        """Get aggregated metrics across all endpoints."""
+        return self._global
+
+    def get_all_metrics(self) -> dict[str, EndpointMetrics]:
+        """Get metrics for all tracked endpoints."""
+        return dict(self._endpoints)
+
+    def get_summary(self) -> dict[str, Any]:
+        """Get a human-readable summary of all metrics."""
+        uptime = time.time() - self._start_time
+        return {
+            "uptime_seconds": round(uptime, 1),
+            "global": {
+                "total_requests": self._global.request_count,
+                "total_errors": self._global.error_count,
+                "error_rate": round(self._global.error_rate, 4),
+                "avg_latency_ms": round(self._global.avg_latency_ms, 2),
+                "min_latency_ms": (
+                    round(self._global.min_latency_ms, 2)
+                    if self._global.min_latency_ms != float("inf")
+                    else 0
+                ),
+                "max_latency_ms": round(self._global.max_latency_ms, 2),
+            },
+            "endpoints": {
+                ep: {
+                    "requests": m.request_count,
+                    "errors": m.error_count,
+                    "error_rate": round(m.error_rate, 4),
+                    "avg_latency_ms": round(m.avg_latency_ms, 2),
+                    "min_latency_ms": (
+                        round(m.min_latency_ms, 2)
+                        if m.min_latency_ms != float("inf")
+                        else 0
+                    ),
+                    "max_latency_ms": round(m.max_latency_ms, 2),
+                }
+                for ep, m in self._endpoints.items()
+            },
+        }
+
+    def reset(self) -> None:
+        """Reset all collected metrics."""
+        self._endpoints.clear()
+        self._global = EndpointMetrics()
+        self._start_time = time.time()
 
 
 class SignMethod:
@@ -80,6 +451,7 @@ class CommerceMCPBase:
         self.app_secret = app_secret
         self.access_token = access_token
         self.rate_limiter = RateLimiter()
+        self.metrics = MetricsCollector()
 
     def _get_client(self) -> httpx.AsyncClient:
         """Get or create an HTTP client with connection pooling."""
@@ -130,7 +502,7 @@ class CommerceMCPBase:
     async def _request(
         self, method: str, path: str, params: dict | None = None, data: dict | None = None
     ) -> dict[str, Any]:
-        """Make a signed API request."""
+        """Make a signed API request with metrics collection."""
         params = params or {}
         data = data or {}
 
@@ -152,20 +524,35 @@ class CommerceMCPBase:
         logger.debug(f"Request: {method} {url}")
 
         client = self._get_client()
-        if method == "GET":
-            resp = await client.get(url, params={**params, **data})
-        else:
-            resp = await client.post(url, params=params, json=data)
+        start_time = time.time()
+        try:
+            if method == "GET":
+                resp = await client.get(url, params={**params, **data})
+            else:
+                resp = await client.post(url, params=params, json=data)
 
-        result = resp.json()
-        if "error_response" in result:
-            error_code = result["error_response"].get("code", -1)
-            error_msg = result["error_response"].get("msg", "unknown")
-            logger.warning(f"API error: [{error_code}] {error_msg}")
-            raise CommerceAPIError(code=error_code, msg=error_msg)
+            latency_ms = (time.time() - start_time) * 1000
+            result = resp.json()
+            if "error_response" in result:
+                error_code = result["error_response"].get("code", -1)
+                error_msg = result["error_response"].get("msg", "unknown")
+                logger.warning(f"API error: [{error_code}] {error_msg}")
+                self.metrics.record_request(
+                    path, latency_ms, success=False, error_code=error_code, error_msg=error_msg,
+                )
+                raise CommerceAPIError(code=error_code, msg=error_msg)
 
-        logger.debug(f"Response: {resp.status_code}")
-        return result
+            self.metrics.record_request(path, latency_ms, success=True)
+            logger.debug(f"Response: {resp.status_code}")
+            return result
+        except CommerceAPIError:
+            raise
+        except Exception as exc:
+            latency_ms = (time.time() - start_time) * 1000
+            self.metrics.record_request(
+                path, latency_ms, success=False, error_code=-1, error_msg=str(exc),
+            )
+            raise
 
     # ── Signing ───────────────────────────────────────────
 
@@ -203,6 +590,46 @@ class CommerceMCPBase:
         logger.info(f"Pagination complete: {len(results)} total items")
         return results
 
+    # ── Health Check ───────────────────────────────────────
+
+    async def health_check(self) -> dict[str, Any]:
+        """Check API connectivity and return health status.
+
+        Attempts a lightweight HEAD request to the platform base URL.
+        Returns a dict with status, latency, and diagnostic info.
+        """
+        status: dict[str, Any] = {
+            "platform": self.BASE_URL,
+            "configured": bool(self.app_key and self.app_secret),
+            "has_token": bool(self.access_token),
+            "metrics": self.metrics.get_summary(),
+        }
+
+        if not self.BASE_URL:
+            status["api_reachable"] = False
+            status["error"] = "No BASE_URL configured"
+            return status
+
+        try:
+            client = self._get_client()
+            start = time.time()
+            resp = await client.head(self.BASE_URL, timeout=10)
+            latency_ms = (time.time() - start) * 1000
+            status["api_reachable"] = resp.status_code < 500
+            status["status_code"] = resp.status_code
+            status["latency_ms"] = round(latency_ms, 2)
+        except httpx.TimeoutException:
+            status["api_reachable"] = False
+            status["error"] = "Connection timeout"
+        except httpx.ConnectError as exc:
+            status["api_reachable"] = False
+            status["error"] = f"Connection failed: {exc}"
+        except Exception as exc:
+            status["api_reachable"] = False
+            status["error"] = str(exc)
+
+        return status
+
     async def close(self) -> None:
         """Close the HTTP client."""
         if self._client and not self._client.is_closed:
@@ -237,3 +664,59 @@ def format_error_response(error: Exception) -> str:
         {"error": {"message": str(error)}},
         ensure_ascii=False,
     )
+
+
+def format_response(result: Any) -> str:
+    """Format a successful API response as a pretty-printed JSON string.
+
+    Args:
+        result: The response data to format (dict, list, or any JSON-serializable type).
+
+    Returns:
+        A pretty-printed JSON string.
+    """
+    if isinstance(result, str):
+        return result
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+def handle_tool_errors(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[str]]:
+    """Decorator to handle common MCP tool errors and format responses.
+
+    This decorator wraps an async tool function to:
+    - Catch CommerceAPIError and format it as a structured error response
+    - Catch any other exceptions and format them as generic error responses
+    - Automatically format successful dict/list results as pretty-printed JSON
+
+    Usage:
+        @handle_tool_errors
+        async def my_tool(param: str) -> str:
+            result = await client._request("GET", "path/", params={...})
+            return result  # Will be auto-formatted as JSON
+
+    Args:
+        func: The async tool function to wrap.
+
+    Returns:
+        Wrapped function with error handling and response formatting.
+    """
+
+    @functools.wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> str:
+        try:
+            result = await func(*args, **kwargs)
+            return format_response(result)
+        except CommerceAPIError as e:
+            return format_error_response(e)
+        except json.JSONDecodeError as e:
+            return json.dumps(
+                {"error": {"message": f"Invalid JSON: {e}"}},
+                ensure_ascii=False,
+            )
+        except Exception as e:
+            return json.dumps(
+                {"error": {"message": str(e)}},
+                ensure_ascii=False,
+            )
+
+    return wrapper

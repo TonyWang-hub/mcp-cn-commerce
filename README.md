@@ -196,7 +196,7 @@ This project handles sensitive e-commerce API credentials. Our security guarante
 
 - 🔒 **Runs locally** — API keys and secrets never leave your machine
 - 📖 **Open source** — every line of code is auditable
-- 👁️ **Read-only by default** — all 14 tools only read data; zero write/modify/delete operations
+- 👁️ **Read-only by default** — all 112 tools only read data; zero write/modify/delete operations
 - 📡 **No telemetry** — no usage data is collected, tracked, or transmitted
 - 🖥️ **Direct API calls** — connects directly to platform APIs; no intermediate server or proxy
 - 🔑 **Env-var config** — credentials are loaded from environment variables, never hardcoded

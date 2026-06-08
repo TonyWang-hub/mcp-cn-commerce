@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-cn-commerce"
+version = "0.1.0"
+description = "Chinese e-commerce platform MCP servers — let AI agents read merchant business data"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "Wang Zhuo"}]
+
+[project.optional-dependencies]
+oceanengine = ["mcp-cn-oceanengine"]
+doudian = ["mcp-cn-doudian"]
+jd = ["mcp-cn-jd"]
+all = ["mcp-cn-oceanengine", "mcp-cn-doudian", "mcp-cn-jd"]
+dev = ["pytest>=7.0", "pytest-asyncio"]
+
+[tool.setuptools.packages.find]
+include = ["shared*"]

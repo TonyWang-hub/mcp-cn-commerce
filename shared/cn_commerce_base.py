@@ -1,0 +1,111 @@
+"""Shared base for Chinese e-commerce platform MCP servers.
+
+Provides unified auth signing, request handling, and error normalization.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import time
+import urllib.parse
+from typing import Any
+
+import httpx
+
+
+class SignMethod:
+    MD5 = "md5"
+    HMAC_SHA256 = "hmac_sha256"
+    HMAC_MD5 = "hmac_md5"
+
+
+class CommerceMCPBase:
+    """Base class for Chinese e-commerce platform MCP servers.
+
+    Each platform server inherits this and defines:
+      - BASE_URL
+      - sign_method
+      - FIELD_MAP (platform field -> internal field)
+    """
+
+    BASE_URL: str = ""
+    sign_method: str = SignMethod.MD5
+    app_key: str = ""
+    app_secret: str = ""
+    access_token: str = ""
+
+    def __init__(self, app_key: str = "", app_secret: str = "", access_token: str = ""):
+        self.app_key = app_key
+        self.app_secret = app_secret
+        self.access_token = access_token
+
+    # ── HTTP ──────────────────────────────────────────────
+
+    async def _request(self, method: str, path: str, params: dict | None = None, data: dict | None = None) -> dict[str, Any]:
+        """Make a signed API request."""
+        params = params or {}
+        data = data or {}
+
+        # Inject auth params
+        params["app_key"] = self.app_key
+        params["timestamp"] = str(int(time.time() * 1000))
+        if self.access_token:
+            params["access_token"] = self.access_token
+
+        # Sign
+        params["sign"] = self._sign(params)
+        params["sign_method"] = self.sign_method
+
+        url = f"{self.BASE_URL}{path}"
+        async with httpx.AsyncClient(timeout=30) as client:
+            if method == "GET":
+                resp = await client.get(url, params={**params, **data})
+            else:
+                resp = await client.post(url, params=params, json=data)
+
+        result = resp.json()
+        if "error_response" in result:
+            raise CommerceAPIError(
+                code=result["error_response"].get("code", -1),
+                msg=result["error_response"].get("msg", "unknown"),
+            )
+        return result
+
+    # ── Signing ───────────────────────────────────────────
+
+    def _sign(self, params: dict) -> str:
+        """Generate signature for request params."""
+        # Remove sign and sign_method, sort by key
+        to_sign = {k: v for k, v in params.items() if k not in ("sign", "sign_method") and v != ""}
+        sorted_keys = sorted(to_sign.keys())
+        raw = self.app_secret + "".join(f"{k}{to_sign[k]}" for k in sorted_keys) + self.app_secret
+
+        if self.sign_method == SignMethod.MD5:
+            return hashlib.md5(raw.encode()).hexdigest().upper()
+        elif self.sign_method == SignMethod.HMAC_SHA256:
+            return hmac.new(self.app_secret.encode(), raw.encode(), hashlib.sha256).hexdigest().upper()
+        raise ValueError(f"Unknown sign method: {self.sign_method}")
+
+    # ── Pagination ────────────────────────────────────────
+
+    async def _paginate(self, fetch_fn, page_key: str = "page", page_size: int = 50, max_pages: int = 50) -> list[dict]:
+        """Generic pagination helper."""
+        results = []
+        for page in range(1, max_pages + 1):
+            data = await fetch_fn(page=page, page_size=page_size)
+            items = data.get("result", data.get("list", []))
+            results.extend(items)
+            if len(items) < page_size:
+                break
+        return results
+
+
+class CommerceAPIError(Exception):
+    """Normalized API error across all platforms."""
+
+    def __init__(self, code: int, msg: str):
+        self.code = code
+        self.msg = msg
+        super().__init__(f"[{code}] {msg}")

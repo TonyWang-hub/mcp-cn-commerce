@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-cn-jd"
+version = "0.1.0"
+description = "JD (京东) MCP server — let AI agents read merchant business data"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "Wang Zhuo"}]
+dependencies = [
+    "mcp>=1.0",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+mcp-cn-jd = "mcp_jd.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

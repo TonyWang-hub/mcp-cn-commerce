@@ -1,54 +1,103 @@
-# mcp-cn-commerce
+# mcp-cn-commerce — 中国电商平台 MCP Server
 
 [![Test](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/workflows/test.yml/badge.svg)](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/workflows/test.yml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![MCP](https://img.shields.io/badge/Model_Context_Protocol-MCP-blueviolet)](https://modelcontextprotocol.io/)
+[![PyPI version](https://img.shields.io/pypi/v/mcp-cn-commerce)](https://pypi.org/project/mcp-cn-commerce/)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-> 让 AI Agent 直接读取中国电商平台的商家经营数据。不做内容发布，只做**经营数据**的 MCP 连接器。
+> 🛒 **让 AI Agent 直接读取中国电商平台的商家经营数据。** 不做内容发布，只做**经营数据**的 MCP 连接器。
+>
+> 国内首个面向中国电商商家经营场景的开源 MCP Server 套件。支持 Claude、ChatGPT、Gemini 等 AI Agent 接入。
+>
+> **搜索关键词**: MCP Server, Model Context Protocol, 电商 MCP, AI Agent, 电商数据, 抖店 MCP, 京东 MCP, 巨量引擎 MCP, 淘宝 MCP, 拼多多 MCP, Python MCP, MCP 中国电商, 商家经营数据, 电商经营分析, AI 电商, Claude MCP
 
 [English](README.md) | **简体中文**
 
-## 平台覆盖
+---
 
-| 平台 | 类型 | Phase | 状态 | 测试 |
-|---|---|---|---|---|
-| 巨量引擎 | 广告投放 | 1 | ✅ | 24 |
-| 巨量千川 | 电商广告 | 1 | ✅ | (同上) |
-| 抖店 | 电商店铺 | 1 | ✅ | 31 |
-| 京东 | 电商店铺 | 1 | ✅ | 19 |
-| 淘宝 | 电商店铺 | 2 | ⬜ | - |
-| 拼多多 | 电商店铺 | 2 | ⬜ | - |
-| 快手 | 电商店铺 | 3 | ⬜ | - |
-| 小红书 | 电商店铺 | 3 | ⬜ | - |
-| 微信小店 | 电商店铺 | 3 | ⬜ | - |
+## 目录
 
-> Phase 4: 闲鱼、美团、饿了么（API 受限，待政策明朗）
-> **77 个测试**，Phase 1 三平台全部通过
+- [这是什么？](#这是什么)
+- [为什么选择这个项目？](#为什么选择这个项目)
+- [平台覆盖](#平台覆盖)
+- [快速开始](#快速开始)
+- [工具参考](#每个-server-的工具)
+- [架构](#架构)
+- [安全](#安全)
+- [常见问题](#常见问题)
+- [参与贡献](CONTRIBUTING.md)
+- [路线图](#路线图)
 
-## 为什么选择这个？
+---
+
+## 这是什么？
+
+一个 **MCP (Model Context Protocol) Server 套件**（Monorepo），让 AI Agent 能够结构化地访问中国电商平台的商家经营数据。每个平台是一个独立的 MCP Server，按需安装使用：
+
+- **巨量引擎 / 巨量千川** — 广告投放数据（广告计划、报表、账户余额）
+- **抖店** — TikTok 电商店铺经营数据（订单、商品、售后、退款）
+- **京东** — 京东商家后台数据（订单、商品、店铺信息）
+- 更多开发中：**淘宝**、**拼多多**、**快手**、**小红书**、**微信小店**
+
+所有工具**默认只读** — AI Agent 可以分析你的经营数据，但无法修改任何内容。
+
+## 为什么选择这个项目？
 
 国内已有的 MCP Server 全是**内容发布**（发视频、搜热搜），没有一个是**商家经营**（拉广告数据、看订单、管售后）。
 
-| | 现有 MCP（HuiMei/Astron 等） | mcp-cn-commerce |
+| | 内容侧 MCP（HuiMei/Astron 等） | mcp-cn-commerce |
 |---|---|---|
-| 做什么 | 发视频、搜热搜 | 拉广告报表、查订单 |
-| 目标用户 | 自媒体/创作者 | 电商老板/运营 |
-| 数据类型 | 内容数据 | **经营数据** |
+| **做什么** | 发视频、搜热点 | 拉广告报表、查订单 |
+| **目标用户** | 自媒体/创作者 | **电商老板/运营/数据分析师** |
+| **数据类型** | 内容数据（播放量、点赞、热搜） | **经营数据**（收入、订单、退款、ROAS） |
+| **覆盖平台** | 内容平台 | 电商+广告平台 |
+| **操作** | 发布/写入 | 只读分析 & 监控 |
+
+**这是国内首个面向电商商家经营场景的开源 MCP Server 套件。**
+
+**典型使用场景**：
+- AI Agent 每日自动拉取广告 ROAS 和消耗，生成投放优化建议
+- 多平台订单数据汇总，用自然语言提问即可分析
+- 库存预警：AI 监控商品库存，低库存自动提醒
+- 售后分析：定期拉取退款数据，发现商品质量问题趋势
+
+## 平台覆盖
+
+| 平台 | 类型 | Phase | 状态 | 测试 | 开放平台 |
+|---|---|---|---|---|---|
+| 巨量引擎 (Ocean Engine) | 广告投放 | 1 | ✅ | 24 | [open.oceanengine.com](https://open.oceanengine.com) |
+| 巨量千川 (Qianchuan) | 电商广告 | 1 | ✅ | (同上) | [qianchuan.jinritemai.com](https://qianchuan.jinritemai.com) |
+| 抖店 (Douyin Shop) | 电商店铺 | 1 | ✅ | 31 | [op.jinritemai.com](https://op.jinritemai.com) |
+| 京东 (JD.com) | 电商店铺 | 1 | ✅ | 19 | [jos.jd.com](https://jos.jd.com) |
+| 淘宝 (Taobao) | 电商店铺 | 2 | ⬜ | - | [open.taobao.com](https://open.taobao.com) |
+| 拼多多 (Pinduoduo) | 电商店铺 | 2 | ⬜ | - | [open.pinduoduo.com](https://open.pinduoduo.com) |
+| 快手 (Kuaishou) | 电商店铺 | 3 | ⬜ | - | [open.kuaixiaodian.com](https://open.kuaixiaodian.com) |
+| 小红书 (Xiaohongshu) | 电商店铺 | 3 | ⬜ | - | [open.xiaohongshu.com](https://open.xiaohongshu.com) |
+| 微信小店 (WeChat Store) | 电商店铺 | 3 | ⬜ | - | [developers.weixin.qq.com](https://developers.weixin.qq.com) |
+
+> Phase 4: 闲鱼、美团、饿了么（API 受限，待政策明朗）
+> **77 个测试**，Phase 1 三平台全部通过。CI 覆盖 Python 3.11/3.12/3.13。
 
 ## 快速开始
 
+### 安装
+
 ```bash
 # 安装单个平台
-pip install mcp-cn-commerce[oceanengine]
+pip install mcp-cn-commerce[oceanengine]   # 巨量引擎广告
+pip install mcp-cn-commerce[doudian]        # 抖店
+pip install mcp-cn-commerce[jd]              # 京东
 
-# 或全部 Phase 1
+# 或安装所有 Phase 1 平台
 pip install mcp-cn-commerce[all]
 ```
 
 ### 配置凭证
 
 ```bash
-# 巨量引擎/千川
+# 巨量引擎 / 千川
 export OCEANENGINE_APP_KEY="你的 App Key"
 export OCEANENGINE_APP_SECRET="你的 App Secret"
 export OCEANENGINE_ACCESS_TOKEN="你的 Access Token"
@@ -67,79 +116,172 @@ export JD_ACCESS_TOKEN="你的 Access Token"
 
 ### 接入 AI Agent
 
-在 MCP 客户端中添加（Claude Desktop / Cherry Studio / Kimi Work 等）：
+支持 **Claude Desktop**、**Cherry Studio**、**Kimi Work** 等所有 MCP 兼容客户端：
 
 ```json
 {
   "mcpServers": {
     "oceanengine": {
       "command": "mcp-cn-oceanengine"
+    },
+    "doudian": {
+      "command": "mcp-cn-doudian"
+    },
+    "jd": {
+      "command": "mcp-cn-jd"
     }
   }
 }
 ```
 
+### AI Agent 使用示例
+
+配置完成后，你可以用自然语言问 AI Agent：
+
+> "帮我看看本周巨量引擎消耗最高的三个广告计划"
+> "抖店哪些商品库存低于 10 件？"
+> "京东待处理的退款单有哪些？"
+> "对比巨量引擎上个月和这个月的 ROAS 趋势"
+> "导出今天所有平台的订单汇总"
+
 ## 每个 Server 的工具
 
-| Server | 工具 | 说明 |
+### 巨量引擎 / 千川 — 广告投放
+
+| 工具 | 说明 | API |
 |---|---|---|
-| oceanengine | `get_advertiser_info` | 广告主账户信息 |
-| | `get_campaign_report` | 广告计划报表（曝光/点击/转化/消耗） |
-| | `get_ad_detail_report` | 广告创意级报表 |
-| | `list_campaigns` | 广告计划列表 |
-| | `get_account_balance` | 账户余额 |
-| doudian | `get_order_list` | 订单列表 |
-| | `get_order_detail` | 订单详情（含物流/售后） |
-| | `get_product_list` | 商品列表（库存/价格） |
-| | `get_refund_list` | 售后/退款单 |
-| | `get_shop_info` | 店铺基本信息 |
-| jd | `get_order_list` | 订单列表 |
-| | `get_order_detail` | 订单详情 |
-| | `get_product_list` | 商品列表 |
-| | `get_shop_info` | 店铺信息 |
+| `get_advertiser_info` | 广告主账户信息、行业、状态 | `/open_api/2/advertiser/info/` |
+| `get_campaign_report` | 广告计划报表（曝光/点击/转化/消耗/ROAS） | `/open_api/2/report/campaign/get/` |
+| `get_ad_detail_report` | 广告创意级详细报表 | `/open_api/2/report/ad/get/` |
+| `list_campaigns` | 广告计划列表（含状态、预算） | `/open_api/2/campaign/get/` |
+| `get_account_balance` | 账户余额与日消耗汇总 | `/open_api/2/account/fund/get/` |
+
+### 抖店 — 电商店铺
+
+| 工具 | 说明 | API |
+|---|---|---|
+| `get_order_list` | 订单列表（支持状态、时间、关键词筛选） | `/order/searchList` |
+| `get_order_detail` | 订单详情（物流追踪、买家信息、售后状态） | `/order/orderDetail` |
+| `get_product_list` | 商品列表（库存、价格、状态） | `/product/list` |
+| `get_refund_list` | 退款/售后单列表 | `/refund/orderList` |
+| `get_shop_info` | 店铺基本信息与数据统计 | `/shop/brandList` |
+
+### 京东 — 电商店铺
+
+| 工具 | 说明 | API |
+|---|---|---|
+| `get_order_list` | 订单列表（状态、时间、关键词筛选） | `/order/query` |
+| `get_order_detail` | 订单详细信息 | `/order/detail` |
+| `get_product_list` | 商品目录（价格、库存） | `/product/list` |
+| `get_shop_info` | 商家店铺信息 | `/shop/info` |
 
 ## 架构
 
 ```
 mcp-cn-commerce/
-├── .github/workflows/test.yml   # CI: 每次 push 自动跑 pytest
-├── shared/                       # 共享基类（签名/请求/分页/错误处理）
+├── .github/
+│   ├── workflows/test.yml        # CI: push/PR 自动跑 pytest
+│   ├── ISSUE_TEMPLATE/           # Bug/功能/平台请求模板
+│   ├── PULL_REQUEST_TEMPLATE.md
+│   └── dependabot.yml            # 自动依赖更新
+├── shared/                        # 共享基类：签名/请求/分页/错误处理
+│   └── cn_commerce_base.py       # CommerceMCPBase — 新平台只需继承此基类
 ├── servers/
-│   ├── oceanengine/              # 巨量引擎 MCP（5 tools）
+│   ├── oceanengine/               # 巨量引擎 MCP（5 tools）
 │   │   ├── src/mcp_oceanengine/
 │   │   └── tests/
-│   ├── doudian/                  # 抖店 MCP（5 tools）
+│   ├── doudian/                   # 抖店 MCP（5 tools）
 │   │   ├── src/mcp_doudian/
 │   │   └── tests/
-│   └── jd/                       # 京东 MCP（4 tools）
+│   └── jd/                        # 京东 MCP（4 tools）
 │       ├── src/mcp_jd/
 │       └── tests/
-└── docs/
-    └── platforms.md              # 8 平台 API 对比文档
+├── docs/
+│   └── platforms.md               # 8 平台 API 对比 & 认证方式矩阵
+├── README.md                      # English
+├── README_zh.md                   # 简体中文
+├── CONTRIBUTING.md                # 贡献指南
+├── SECURITY.md                    # 安全政策
+├── CHANGELOG.md                   # 更新日志
+├── CITATION.cff                   # 学术引用
+├── CODE_OF_CONDUCT.md
+└── LICENSE                        # MIT
 ```
 
-Monorepo 结构：每个平台一个独立 MCP Server，用户只装需要的。共享认证/签名/分页逻辑。
+Monorepo 架构：每个平台是一个独立的 MCP Server，用户按需安装。共享 `CommerceMCPBase` 基类封装了签名（MD5/HMAC-MD5）、分页、错误处理等通用逻辑 — 新增平台只需设置 `BASE_URL` 和 `sign_method`，然后定义工具函数即可。
 
 ## 安全
 
-- **本地运行** — API 凭证不经过任何服务器，只存在你的电脑上
-- **代码开源** — 任何人都可以审计
-- **默认只读** — 所有工具只读数据，不执行写操作
+本项目处理敏感的电商 API 凭证，安全保障：
+
+- 🔒 **本地运行** — API 密钥和凭证存在你的电脑上，不经过任何服务器
+- 📖 **代码开源** — 每一行代码都可审计
+- 👁️ **默认只读** — 全部 14 个工具只读数据，零写入/修改/删除操作
+- 📡 **无数据收集** — 不收集、不追踪、不上传任何使用数据
+- 🖥️ **直连平台 API** — 代码直接调用平台 API，无中间服务器或代理
+- 🔑 **环境变量配置** — 凭证通过环境变量加载，绝不硬编码
 
 ## 常见问题
 
 **问：为什么不做内容发布（发视频/发笔记）？**
-答：内容发布已经有 HuiMei/Astron 等项目覆盖了，没必要重复。商家经营数据才是空白。
+答：内容发布（抖音发视频、小红书发笔记）已经有 HuiMei/Astron 等优秀项目覆盖了，没必要重复。商家经营数据（广告报表、订单、售后）才是 MCP 生态的空白地带。
 
 **问：需要企业资质吗？**
-答：部分平台（抖店、京东）需要企业/个体户资质。拼多多个人可接入。详见 [docs/platforms.md](docs/platforms.md)。
+答：部分平台需要：抖店需要企业/个体户资质，京东需要企业资质。拼多多个人可接入。详见 [docs/platforms.md](docs/platforms.md)。
 
 **问：MCP 和 CLI 哪个更好？**
-答：MCP 给 Agent 用（结构化 tool call），CLI 给人用（终端直接调）。Phase 2 会加 CLI 入口，共享同一套核心逻辑。
+答：MCP 给 AI Agent 用（结构化 tool call，让 AI 自动分析），CLI 给人用（终端直接调，快速查数据）。Phase 2 会加 CLI 入口，共享同一套核心逻辑。
 
 **问：会支持闲鱼/美团/饿了么吗？**
-答：Phase 4。这些平台 API 在 2025 年大幅收紧（ISV 白名单制），等政策明朗后再接入。
+答：在 Phase 4 计划中。这些平台的 API 在 2025 年大幅收紧（ISV 白名单制），等政策明朗后再接入。
+
+**问：和 MCP 官方 Python SDK 的关系？**
+答：基于官方 [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) 构建，遵循 MCP 协议标准。
+
+**问：支持哪些 AI Client？**
+答：所有支持 MCP 协议的客户端：Claude Desktop、Cherry Studio、Kimi Work、Cline、Continue 等。
+
+## 路线图
+
+### Phase 1 — 基础 ✅（当前）
+- 巨量引擎: 广告报表/计划读取
+- 巨量千川: 电商广告（共用巨量引擎认证）
+- 抖店: 订单/商品/售后读取
+- 京东: 订单/商品/店铺读取
+
+### Phase 2 — 主力扩展 ⬜
+- 淘宝: 完整 Top API — 订单/商品/物流
+- 拼多多: 订单/商品/推广工具
+
+### Phase 3 — 长尾覆盖 ⬜
+- 快手: 订单/商品/物流
+- 小红书: 订单/商品/库存
+- 微信小店: 订单/商品/售后
+
+### Phase 4 — 探索 ⬜
+- 闲鱼、美团、饿了么（等 API 政策）
+
+## 相关资源
+
+- [Model Context Protocol (MCP) 官方文档](https://modelcontextprotocol.io/)
+- [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)
+- [Claude Desktop — MCP 支持](https://claude.ai/download)
+- [Cherry Studio — 多模型 MCP 客户端](https://cherry-ai.com/)
+- [平台 API 对比文档](docs/platforms.md)
+
+## 引用
+
+如果在研究或项目中使用 mcp-cn-commerce：
+
+```bibtex
+@software{mcp-cn-commerce,
+  author = {Wang, Zhuo},
+  title = {mcp-cn-commerce: MCP Servers for Chinese E-Commerce Platforms},
+  year = {2025},
+  url = {https://github.com/TonyWang-hub/mcp-cn-commerce}
+}
+```
 
 ## 许可证
 
-MIT
+MIT — 详见 [LICENSE](LICENSE)。

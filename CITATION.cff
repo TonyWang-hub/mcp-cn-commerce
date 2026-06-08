@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use mcp-cn-commerce in your research or project, please cite it as below."
+title: "mcp-cn-commerce: MCP Servers for Chinese E-Commerce Platforms"
+authors:
+  - family-names: "Wang"
+    given-names: "Zhuo"
+repository-code: "https://github.com/TonyWang-hub/mcp-cn-commerce"
+keywords:
+  - "model-context-protocol"
+  - "mcp"
+  - "e-commerce"
+  - "chinese-ecommerce"
+  - "ai-agent"
+  - "python"
+license: MIT
+date-released: 2025-06-01

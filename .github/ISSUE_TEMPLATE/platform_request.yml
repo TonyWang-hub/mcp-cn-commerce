@@ -1,0 +1,55 @@
+name: 🏪 New Platform Request
+description: Request support for a new Chinese e-commerce platform
+title: "[Platform]: "
+labels: [new-platform, enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Request an MCP server for a new Chinese e-commerce or advertising platform.
+  - type: input
+    id: platform-name
+    attributes:
+      label: Platform Name
+      description: Name of the platform (Chinese + English if available)
+      placeholder: e.g., 小红书 (Xiaohongshu)
+    validations:
+      required: true
+  - type: input
+    id: open-platform-url
+    attributes:
+      label: Open Platform / Developer Portal URL
+      description: Link to the platform's API documentation or developer portal
+      placeholder: https://open.xiaohongshu.com
+  - type: dropdown
+    id: auth-type
+    attributes:
+      label: Authentication Type
+      description: What auth mechanism does the platform use?
+      options:
+        - OAuth 2.0
+        - App Key + Secret
+        - Other (describe below)
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: desired-tools
+    attributes:
+      label: Desired Tools / Endpoints
+      description: What API endpoints would you want as MCP tools?
+      placeholder: |
+        - Order listing and details
+        - Product management
+        - After-sale / refunds
+        - ...
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case
+      description: How would you use this integration?
+      placeholder: |
+        - Manage my store operations via AI agent
+        - Automate reporting
+        - Cross-platform data aggregation
+        - ...

@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 Discussions
+    url: https://github.com/TonyWang-hub/mcp-cn-commerce/discussions
+    about: Ask questions, share ideas, or discuss the project
+  - name: 📖 Documentation
+    url: https://github.com/TonyWang-hub/mcp-cn-commerce/tree/main/docs
+    about: Read the platform comparison and API docs
+  - name: 🔒 Security Advisory
+    url: https://github.com/TonyWang-hub/mcp-cn-commerce/security/advisories/new
+    about: Report a security vulnerability privately

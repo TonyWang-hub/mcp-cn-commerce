@@ -1,0 +1,61 @@
+name: 🐛 Bug Report
+description: Report a bug in an MCP server or tool
+title: "[Bug]: "
+labels: [bug, triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please fill out the information below.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Affected Platform
+      description: Which MCP server has the issue?
+      options:
+        - 巨量引擎 (Ocean Engine)
+        - 抖店 (Douyin Shop)
+        - 京东 (JD)
+        - Shared/core
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: tool
+    attributes:
+      label: Tool/Method
+      description: Which specific tool or method has the bug?
+      placeholder: e.g., get_order_list, get_campaign_report
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug, including error messages and stack traces
+      placeholder: |
+        Steps to reproduce:
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: input
+    id: python-version
+    attributes:
+      label: Python Version
+      placeholder: e.g., 3.11.4
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      placeholder: e.g., macOS 14.5, Ubuntu 22.04
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other details that might help

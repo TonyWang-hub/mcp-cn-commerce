@@ -5,10 +5,50 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mcp-cn-commerce"
 version = "0.1.0"
-description = "Chinese e-commerce platform MCP servers — let AI agents read merchant business data"
+description = "Chinese e-commerce platform MCP servers — let AI agents read merchant business data (Ocean Engine, Douyin Shop, JD.com, Taobao, Pinduoduo)"
 requires-python = ">=3.11"
 license = {text = "MIT"}
-authors = [{name = "Wang Zhuo"}]
+authors = [{name = "Wang Zhuo", email = "tonywang@example.com"}]
+readme = "README.md"
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "chinese-ecommerce",
+    "ecommerce",
+    "ai-agent",
+    "agent-tool",
+    "business-data",
+    "ocean-engine",
+    "douyin-shop",
+    "jd-com",
+    "taobao",
+    "pinduoduo",
+    "mcp-server",
+    "python",
+    "claude",
+    "omni-channel",
+    "advertising-api",
+    "order-management",
+    "电商",
+    "MCP",
+    "AI",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Office/Business :: Financial",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Framework :: AsyncIO",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+]
+urls = {Repository = "https://github.com/TonyWang-hub/mcp-cn-commerce", Issues = "https://github.com/TonyWang-hub/mcp-cn-commerce/issues", Documentation = "https://github.com/TonyWang-hub/mcp-cn-commerce#readme", Changelog = "https://github.com/TonyWang-hub/mcp-cn-commerce/blob/main/CHANGELOG.md"}
 
 [project.optional-dependencies]
 oceanengine = ["mcp-cn-oceanengine"]

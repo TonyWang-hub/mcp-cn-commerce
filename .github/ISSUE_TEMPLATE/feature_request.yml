@@ -1,0 +1,44 @@
+name: ✨ Feature Request
+description: Suggest a new feature, tool, or improvement
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion! Let us know what you'd like to see.
+  - type: dropdown
+    id: type
+    attributes:
+      label: Request Type
+      description: What kind of feature are you requesting?
+      options:
+        - New platform integration
+        - New tool for existing platform
+        - CLI support
+        - Documentation
+        - Performance improvement
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Describe the feature in detail
+      placeholder: |
+        What problem does this solve?
+        What use cases does it enable?
+    validations:
+      required: true
+  - type: textarea
+    id: api-docs
+    attributes:
+      label: API Documentation (if applicable)
+      description: Links to the platform's API documentation for the endpoint you'd like wrapped
+      placeholder: https://open.taobao.com/api.htm?docId=...
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any workarounds or alternative approaches you've considered

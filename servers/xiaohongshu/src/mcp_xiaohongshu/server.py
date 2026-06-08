@@ -22,10 +22,10 @@ _project_root = Path(__file__).resolve().parents[4]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from shared.cn_commerce_base import CommerceMCPBase, CommerceAPIError, ConfigValidationError, SignMethod
-
+from shared.cn_commerce_base import CommerceAPIError, CommerceMCPBase, ConfigValidationError, SignMethod
 
 # ── Xiaohongshu client ────────────────────────────────────────────────────────
+
 
 class XiaohongshuMCP(CommerceMCPBase):
     """Xiaohongshu-specific client.
@@ -78,6 +78,7 @@ class XiaohongshuMCP(CommerceMCPBase):
 
 # ── Instantiate client from env ────────────────────────────────────────────
 
+
 def _create_xiaohongshu_client() -> XiaohongshuMCP:
     """Create xiaohongshu client with configuration validation."""
     try:
@@ -89,6 +90,7 @@ def _create_xiaohongshu_client() -> XiaohongshuMCP:
             client_secret=os.environ.get("XHS_CLIENT_SECRET", ""),
             access_token=os.environ.get("XHS_ACCESS_TOKEN", ""),
         )
+
 
 xhs = _create_xiaohongshu_client()
 

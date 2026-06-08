@@ -12,8 +12,8 @@ import json
 import logging
 import os
 import time
-import urllib.parse
-from typing import Any, Callable, Awaitable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import httpx
 
@@ -81,7 +81,7 @@ class CommerceMCPBase:
         self.rate_limiter = RateLimiter()
 
     @classmethod
-    def from_env(cls, platform: str, required_vars: list[str]) -> "CommerceMCPBase":
+    def from_env(cls, platform: str, required_vars: list[str]) -> CommerceMCPBase:
         """Create client from environment variables with validation.
 
         Args:
@@ -113,7 +113,9 @@ class CommerceMCPBase:
 
     # ── HTTP ──────────────────────────────────────────────
 
-    async def _request(self, method: str, path: str, params: dict | None = None, data: dict | None = None) -> dict[str, Any]:
+    async def _request(
+        self, method: str, path: str, params: dict | None = None, data: dict | None = None
+    ) -> dict[str, Any]:
         """Make a signed API request."""
         params = params or {}
         data = data or {}

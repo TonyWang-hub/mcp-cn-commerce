@@ -21,10 +21,10 @@ _project_root = Path(__file__).resolve().parents[4]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from shared.cn_commerce_base import CommerceMCPBase, CommerceAPIError, ConfigValidationError, SignMethod
-
+from shared.cn_commerce_base import CommerceMCPBase, ConfigValidationError, SignMethod
 
 # ── JD client ───────────────────────────────────────────────────────────────
+
 
 class JDMCP(CommerceMCPBase):
     """JD-specific client that overrides signing for HMAC-MD5."""
@@ -38,18 +38,10 @@ class JDMCP(CommerceMCPBase):
         Builds: app_secret + sorted_kv_string + app_secret
         Then HMAC-MD5 with app_secret as key.
         """
-        to_sign = {
-            k: v
-            for k, v in params.items()
-            if k not in ("sign", "sign_method") and v != ""
-        }
+        to_sign = {k: v for k, v in params.items() if k not in ("sign", "sign_method") and v != ""}
         sorted_keys = sorted(to_sign.keys())
         raw = self.app_secret + "".join(f"{k}{to_sign[k]}" for k in sorted_keys) + self.app_secret
-        return (
-            hmac.new(self.app_secret.encode(), raw.encode(), hashlib.md5)
-            .hexdigest()
-            .upper()
-        )
+        return hmac.new(self.app_secret.encode(), raw.encode(), hashlib.md5).hexdigest().upper()
 
     async def _call(self, api_method: str, biz_params: dict | None = None) -> dict:
         """Make a JD API call.
@@ -67,6 +59,7 @@ class JDMCP(CommerceMCPBase):
 
 # ── Instantiate client from env ────────────────────────────────────────────
 
+
 def _create_jd_client() -> JDMCP:
     """Create JD client with configuration validation."""
     try:
@@ -78,6 +71,7 @@ def _create_jd_client() -> JDMCP:
             app_secret=os.environ.get("JD_APP_SECRET", ""),
             access_token=os.environ.get("JD_ACCESS_TOKEN", ""),
         )
+
 
 jd = _create_jd_client()
 

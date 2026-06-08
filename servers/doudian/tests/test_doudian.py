@@ -6,24 +6,25 @@ import os
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 # ═════════════════════════════════════════════════════════════════════
 #  Compatibility shim — MCP >=1.27 moved the tool() decorator to
 #  FastMCP.  The server under test was written for an older MCP API
 #  where Server had a .tool() method.  Monkey-patch it so the module
 #  can be imported and the decorator is a transparent pass-through.
 # ═════════════════════════════════════════════════════════════════════
-
 import mcp.server  # noqa: E402
+import pytest
 
 _orig_server_cls = mcp.server.Server
 
 if not hasattr(_orig_server_cls, "tool"):
+
     def _mock_tool(self, *args: Any, **kwargs: Any) -> Any:
         """Pass-through decorator — returns the function unchanged."""
+
         def decorator(func: Any) -> Any:
             return func
+
         return decorator
 
     _orig_server_cls.tool = _mock_tool  # type: ignore[attr-defined]
@@ -31,10 +32,10 @@ if not hasattr(_orig_server_cls, "tool"):
 
 # Now safe to import the module under test.
 import mcp_doudian.server as _srv  # noqa: E402 — the module itself (for patching)
-
 from mcp_doudian.server import (  # noqa: E402
     ConfigError,
     DouDianAPIError,
+    _safe_get,
     get_bill_list,
     get_feige_messages,
     get_live_data,
@@ -55,9 +56,6 @@ from mcp_doudian.server import (  # noqa: E402
     list_live_rooms,
     list_logistics_companies,
     list_promotions,
-    _get_client,
-    _safe_get,
-    server,
 )
 
 # ═════════════════════════════════════════════════════════════════════
@@ -140,9 +138,7 @@ class TestGetOrderList:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_order_list(page=0, page_size=10)
 
         assert result["page"] == 0
@@ -181,9 +177,7 @@ class TestGetOrderList:
         mock_data = {"total": 0, "list": []}
         mock_client = make_mock_client(mock_data)
 
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             await get_order_list(
                 start_time="2025-03-01 00:00:00",
                 end_time="2025-03-31 23:59:59",
@@ -210,9 +204,7 @@ class TestGetOrderList:
         mock_data: dict[str, Any] = {"list": []}
         mock_client = make_mock_client(mock_data)
 
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_order_list()
 
         assert result["orders"] == []
@@ -289,14 +281,10 @@ class TestGetOrderDetail:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_order_detail(order_id="ORD-12345")
 
-        mock_client.request.assert_called_once_with(
-            "order/detail", {"order_id": "ORD-12345"}
-        )
+        mock_client.request.assert_called_once_with("order/detail", {"order_id": "ORD-12345"})
 
         order = result["order"]
         assert order is not None
@@ -338,23 +326,17 @@ class TestGetOrderDetail:
         }
         mock_client = make_mock_client(mock_data)
 
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_order_detail(shop_order_id="SHOP-999")
 
         assert result["order"]["order_id"] == "ORD-999"
-        mock_client.request.assert_called_once_with(
-            "order/detail", {"shop_order_id": "SHOP-999"}
-        )
+        mock_client.request.assert_called_once_with("order/detail", {"shop_order_id": "SHOP-999"})
 
     @pytest.mark.asyncio
     async def test_missing_order_id_returns_error(self):
         """Empty order_id and empty shop_order_id returns an error dict."""
         mock_client = make_mock_client({})
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_order_detail(order_id="", shop_order_id="")
 
         assert result["error"] == "Please provide either order_id or shop_order_id"
@@ -418,9 +400,7 @@ class TestGetProductList:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_product_list(page=0, page_size=20)
 
         assert result["total"] == 3
@@ -448,9 +428,7 @@ class TestGetProductList:
         """The status parameter is forwarded to the API."""
         mock_data = {"total": 0, "list": []}
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             await get_product_list(status="on_sale")
 
         params = mock_client.request.call_args[0][1]
@@ -491,9 +469,7 @@ class TestGetRefundList:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_refund_list(
                 start_time="2025-06-01 00:00:00",
                 end_time="2025-06-30 23:59:59",
@@ -522,9 +498,7 @@ class TestGetRefundList:
         """The refund_type arg is sent as 'type' in the API params."""
         mock_data = {"total": 0, "list": []}
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             await get_refund_list(refund_type="0")
 
         params = mock_client.request.call_args[0][1]
@@ -535,9 +509,7 @@ class TestGetRefundList:
         """Empty API response returns an empty refunds list."""
         mock_data: dict[str, Any] = {"list": []}
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_refund_list()
 
         assert result["refunds"] == []
@@ -573,9 +545,7 @@ class TestGetShopInfo:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_shop_info()
 
         mock_client.request.assert_called_once_with("shop/basicInfo", {})
@@ -599,9 +569,7 @@ class TestGetShopInfo:
         """When 'shop_score' is absent, 'rating' is used as fallback."""
         mock_data = {"shop": {"shop_id": "S-002", "shop_name": "Test Shop", "rating": "4.5"}}
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_shop_info()
 
         assert result["shop"]["rating"] == "4.5"
@@ -615,13 +583,12 @@ class TestAPIErrorHandling:
         """When the API raises DouDianAPIError, the tool returns an error dict."""
         mock_client = make_mock_client({})
         mock_client.request = AsyncMock(
-            side_effect=DouDianAPIError(code=40001, msg="Invalid params",
-                                        sub_code="40001-1", sub_msg="Missing timestamp")
+            side_effect=DouDianAPIError(
+                code=40001, msg="Invalid params", sub_code="40001-1", sub_msg="Missing timestamp"
+            )
         )
 
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_order_list()
 
         assert "error" in result
@@ -633,13 +600,9 @@ class TestAPIErrorHandling:
     async def test_api_error_in_get_order_detail(self):
         """DouDianAPIError is caught and returned for order detail."""
         mock_client = make_mock_client({})
-        mock_client.request = AsyncMock(
-            side_effect=DouDianAPIError(code=50000, msg="Server error")
-        )
+        mock_client.request = AsyncMock(side_effect=DouDianAPIError(code=50000, msg="Server error"))
 
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_order_detail(order_id="123")
 
         assert result["error"]
@@ -650,13 +613,9 @@ class TestAPIErrorHandling:
     async def test_api_error_in_get_product_list(self):
         """DouDianAPIError is caught for product list."""
         mock_client = make_mock_client({})
-        mock_client.request = AsyncMock(
-            side_effect=DouDianAPIError(code=40002, msg="Shop not found")
-        )
+        mock_client.request = AsyncMock(side_effect=DouDianAPIError(code=40002, msg="Shop not found"))
 
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_product_list()
 
         assert result["error"]
@@ -667,13 +626,9 @@ class TestAPIErrorHandling:
     async def test_api_error_in_get_refund_list(self):
         """DouDianAPIError is caught for refund list."""
         mock_client = make_mock_client({})
-        mock_client.request = AsyncMock(
-            side_effect=DouDianAPIError(code=40003, msg="Unauthorized")
-        )
+        mock_client.request = AsyncMock(side_effect=DouDianAPIError(code=40003, msg="Unauthorized"))
 
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_refund_list()
 
         assert result["error"]
@@ -684,13 +639,9 @@ class TestAPIErrorHandling:
     async def test_api_error_in_get_shop_info(self):
         """DouDianAPIError is caught for shop info."""
         mock_client = make_mock_client({})
-        mock_client.request = AsyncMock(
-            side_effect=DouDianAPIError(code=40004, msg="Token expired")
-        )
+        mock_client.request = AsyncMock(side_effect=DouDianAPIError(code=40004, msg="Token expired"))
 
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_shop_info()
 
         assert result["error"]
@@ -707,6 +658,7 @@ class TestConfigErrorHandling:
         with patch.dict(os.environ, {}, clear=True):
             # Reset singleton cache
             import mcp_doudian.server as srv
+
             srv._client = None
 
             with pytest.raises(ConfigError) as exc_info:
@@ -729,6 +681,7 @@ class TestConfigErrorHandling:
         }
         with patch.dict(os.environ, partial, clear=True):
             import mcp_doudian.server as srv
+
             srv._client = None
 
             with pytest.raises(ConfigError) as exc_info:
@@ -746,6 +699,7 @@ class TestConfigErrorHandling:
         """When env vars are missing, tools catch ConfigError gracefully."""
         with patch.dict(os.environ, {}, clear=True):
             import mcp_doudian.server as srv
+
             srv._client = None
 
             result = await get_order_list()
@@ -759,6 +713,7 @@ class TestConfigErrorHandling:
         """ConfigError is caught in get_shop_info too."""
         with patch.dict(os.environ, {}, clear=True):
             import mcp_doudian.server as srv
+
             srv._client = None
 
             result = await get_shop_info()
@@ -771,6 +726,7 @@ class TestConfigErrorHandling:
         """ConfigError is caught in get_product_list."""
         with patch.dict(os.environ, {}, clear=True):
             import mcp_doudian.server as srv
+
             srv._client = None
 
             result = await get_product_list()
@@ -783,6 +739,7 @@ class TestConfigErrorHandling:
         """ConfigError is caught in get_refund_list."""
         with patch.dict(os.environ, {}, clear=True):
             import mcp_doudian.server as srv
+
             srv._client = None
 
             result = await get_refund_list()
@@ -880,14 +837,10 @@ class TestGetLogisticsTracking:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_logistics_tracking(order_id="ORD-001")
 
-        mock_client.request.assert_called_once_with(
-            "order/logisticsTrace", {"order_id": "ORD-001"}
-        )
+        mock_client.request.assert_called_once_with("order/logisticsTrace", {"order_id": "ORD-001"})
 
         tracking = result["tracking"]
         assert tracking is not None
@@ -907,9 +860,7 @@ class TestGetLogisticsTracking:
     async def test_missing_order_id_returns_error(self):
         """Empty order_id returns an error dict."""
         mock_client = make_mock_client({})
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_logistics_tracking(order_id="")
 
         assert result["error"] == "Please provide order_id"
@@ -920,12 +871,8 @@ class TestGetLogisticsTracking:
     async def test_api_error_caught(self):
         """DouDianAPIError is caught and returned."""
         mock_client = make_mock_client({})
-        mock_client.request = AsyncMock(
-            side_effect=DouDianAPIError(code=40001, msg="Order not found")
-        )
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        mock_client.request = AsyncMock(side_effect=DouDianAPIError(code=40001, msg="Order not found"))
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_logistics_tracking(order_id="ORD-999")
 
         assert result["error"]
@@ -948,14 +895,10 @@ class TestListLogisticsCompanies:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await list_logistics_companies()
 
-        mock_client.request.assert_called_once_with(
-            "order/getLogisticsCompanyList", {}
-        )
+        mock_client.request.assert_called_once_with("order/getLogisticsCompanyList", {})
 
         assert result["total"] == 3
         companies = result["companies"]
@@ -969,9 +912,7 @@ class TestListLogisticsCompanies:
         """Empty API response yields empty companies list."""
         mock_data = {"list": []}
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await list_logistics_companies()
 
         assert result["companies"] == []
@@ -1036,9 +977,7 @@ class TestGetReviewList:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_review_list(
                 start_time="2025-06-01 00:00:00",
                 end_time="2025-06-30 23:59:59",
@@ -1072,9 +1011,7 @@ class TestGetReviewList:
         mock_data = {"total": 0, "list": []}
         mock_client = make_mock_client(mock_data)
 
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             await get_review_list(
                 start_time="2025-03-01 00:00:00",
                 end_time="2025-03-31 23:59:59",
@@ -1121,14 +1058,10 @@ class TestGetReviewDetail:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_review_detail(review_id="C-001")
 
-        mock_client.request.assert_called_once_with(
-            "comment/detail", {"comment_id": "C-001"}
-        )
+        mock_client.request.assert_called_once_with("comment/detail", {"comment_id": "C-001"})
 
         review = result["review"]
         assert review is not None
@@ -1143,9 +1076,7 @@ class TestGetReviewDetail:
     async def test_missing_review_id_returns_error(self):
         """Empty review_id returns an error dict."""
         mock_client = make_mock_client({})
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_review_detail(review_id="")
 
         assert result["error"] == "Please provide review_id"
@@ -1204,9 +1135,7 @@ class TestGetFeigeMessages:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_feige_messages(
                 user_id="U001",
                 start_time="2025-06-01 00:00:00",
@@ -1233,9 +1162,7 @@ class TestGetFeigeMessages:
     async def test_missing_user_id_returns_error(self):
         """Empty user_id returns an error dict."""
         mock_client = make_mock_client({})
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_feige_messages(user_id="")
 
         assert result["error"] == "Please provide user_id"
@@ -1248,9 +1175,7 @@ class TestGetFeigeMessages:
         mock_data = {"total": 0, "list": []}
         mock_client = make_mock_client(mock_data)
 
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             await get_feige_messages(
                 user_id="U001",
                 start_time="2025-06-01 00:00:00",
@@ -1301,9 +1226,7 @@ class TestGetLiveData:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_live_data(
                 room_id="ROOM-001",
                 start_time="2025-06-01 18:00:00",
@@ -1337,9 +1260,7 @@ class TestGetLiveData:
     async def test_missing_room_id_returns_error(self):
         """Empty room_id returns an error dict."""
         mock_client = make_mock_client({})
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_live_data(room_id="")
 
         assert result["error"] == "Please provide room_id"
@@ -1398,9 +1319,7 @@ class TestListLiveRooms:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await list_live_rooms(
                 start_time="2025-06-01 00:00:00",
                 end_time="2025-06-30 23:59:59",
@@ -1479,9 +1398,7 @@ class TestGetTrafficData:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_traffic_data(
                 start_date="2025-06-01",
                 end_date="2025-06-07",
@@ -1511,9 +1428,7 @@ class TestGetTrafficData:
         """Call without start/end dates still works."""
         mock_data = {"traffic_data": {"total_uv": "1000"}}
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_traffic_data()
 
         assert result["traffic"]["total_uv"] == "1000"
@@ -1556,9 +1471,7 @@ class TestGetShortVideoData:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_short_video_data(
                 video_id="VID-001",
                 start_date="2025-06-01",
@@ -1591,9 +1504,7 @@ class TestGetShortVideoData:
     async def test_missing_video_id_returns_error(self):
         """Empty video_id returns error."""
         mock_client = make_mock_client({})
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_short_video_data(video_id="")
 
         assert result["error"] == "Please provide video_id"
@@ -1647,9 +1558,7 @@ class TestListPromotions:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await list_promotions(status="1", page=0, page_size=10)
 
         assert result["total"] == 2
@@ -1673,9 +1582,7 @@ class TestListPromotions:
         """Status filter is forwarded to the API."""
         mock_data = {"total": 0, "list": []}
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             await list_promotions(status="1")
 
         params = mock_client.request.call_args[0][1]
@@ -1731,9 +1638,7 @@ class TestListCoupons:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await list_coupons(status="1", page=0, page_size=10)
 
         assert result["total"] == 2
@@ -1759,9 +1664,7 @@ class TestListCoupons:
         """Empty API response yields empty list."""
         mock_data = {"total": 0, "list": []}
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await list_coupons()
 
         assert result["coupons"] == []
@@ -1829,9 +1732,7 @@ class TestGetBillList:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_bill_list(
                 start_date="2025-06-01",
                 end_date="2025-06-30",
@@ -1866,9 +1767,7 @@ class TestGetBillList:
         """Date filters are passed to the API."""
         mock_data = {"total": 0, "list": []}
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             await get_bill_list(
                 start_date="2025-06-01",
                 end_date="2025-06-30",
@@ -1918,9 +1817,7 @@ class TestGetShopScore:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_shop_score()
 
         mock_client.request.assert_called_once_with("shop/getShopScore", {})
@@ -1944,12 +1841,8 @@ class TestGetShopScore:
     async def test_api_error_caught(self):
         """DouDianAPIError is caught and returned."""
         mock_client = make_mock_client({})
-        mock_client.request = AsyncMock(
-            side_effect=DouDianAPIError(code=50000, msg="Server error")
-        )
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        mock_client.request = AsyncMock(side_effect=DouDianAPIError(code=50000, msg="Server error"))
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_shop_score()
 
         assert result["error"]
@@ -1989,14 +1882,10 @@ class TestListCategories:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await list_categories(parent_id="0")
 
-        mock_client.request.assert_called_once_with(
-            "product/getCategoryList", {"parent_id": "0"}
-        )
+        mock_client.request.assert_called_once_with("product/getCategoryList", {"parent_id": "0"})
 
         assert result["total"] == 2
         assert result["parent_id"] == "0"
@@ -2014,9 +1903,7 @@ class TestListCategories:
         """Default parent_id is '0' (root categories)."""
         mock_data = {"list": []}
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             await list_categories()
 
         params = mock_client.request.call_args[0][1]
@@ -2027,22 +1914,34 @@ class TestListCategories:
         """Fetching child categories by parent_id."""
         mock_data = {
             "list": [
-                {"category_id": "C1-1", "name": "男装", "parent_id": "C1", "level": "2", "has_child": "1", "is_leaf": "0", "status": "1"},
-                {"category_id": "C1-2", "name": "女装", "parent_id": "C1", "level": "2", "has_child": "1", "is_leaf": "0", "status": "1"},
+                {
+                    "category_id": "C1-1",
+                    "name": "男装",
+                    "parent_id": "C1",
+                    "level": "2",
+                    "has_child": "1",
+                    "is_leaf": "0",
+                    "status": "1",
+                },
+                {
+                    "category_id": "C1-2",
+                    "name": "女装",
+                    "parent_id": "C1",
+                    "level": "2",
+                    "has_child": "1",
+                    "is_leaf": "0",
+                    "status": "1",
+                },
             ],
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await list_categories(parent_id="C1")
 
         assert result["total"] == 2
         assert result["categories"][0]["parent_id"] == "C1"
-        mock_client.request.assert_called_once_with(
-            "product/getCategoryList", {"parent_id": "C1"}
-        )
+        mock_client.request.assert_called_once_with("product/getCategoryList", {"parent_id": "C1"})
 
 
 class TestListBrands:
@@ -2082,9 +1981,7 @@ class TestListBrands:
         }
 
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await list_brands(category_id="C2", page=0, page_size=20)
 
         assert result["total"] == 2
@@ -2106,9 +2003,7 @@ class TestListBrands:
         """Category filter is forwarded to API."""
         mock_data = {"total": 0, "list": []}
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             await list_brands(category_id="C2")
 
         params = mock_client.request.call_args[0][1]
@@ -2119,9 +2014,7 @@ class TestListBrands:
         """Brands can be listed without a category filter."""
         mock_data = {"total": 0, "list": []}
         mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             await list_brands()
 
         params = mock_client.request.call_args[0][1]
@@ -2137,12 +2030,8 @@ class TestNewToolsAPIErrorHandling:
     @pytest.mark.asyncio
     async def test_api_error_in_get_review_list(self):
         mock_client = make_mock_client({})
-        mock_client.request = AsyncMock(
-            side_effect=DouDianAPIError(code=40001, msg="Invalid params")
-        )
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        mock_client.request = AsyncMock(side_effect=DouDianAPIError(code=40001, msg="Invalid params"))
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_review_list()
         assert result["error"]
         assert result["code"] == 40001
@@ -2151,12 +2040,8 @@ class TestNewToolsAPIErrorHandling:
     @pytest.mark.asyncio
     async def test_api_error_in_get_feige_messages(self):
         mock_client = make_mock_client({})
-        mock_client.request = AsyncMock(
-            side_effect=DouDianAPIError(code=40002, msg="User not found")
-        )
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        mock_client.request = AsyncMock(side_effect=DouDianAPIError(code=40002, msg="User not found"))
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_feige_messages(user_id="U001")
         assert result["error"]
         assert result["code"] == 40002
@@ -2165,12 +2050,8 @@ class TestNewToolsAPIErrorHandling:
     @pytest.mark.asyncio
     async def test_api_error_in_get_live_data(self):
         mock_client = make_mock_client({})
-        mock_client.request = AsyncMock(
-            side_effect=DouDianAPIError(code=40003, msg="Room not found")
-        )
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        mock_client.request = AsyncMock(side_effect=DouDianAPIError(code=40003, msg="Room not found"))
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_live_data(room_id="ROOM-001")
         assert result["error"]
         assert result["code"] == 40003
@@ -2179,12 +2060,8 @@ class TestNewToolsAPIErrorHandling:
     @pytest.mark.asyncio
     async def test_api_error_in_get_traffic_data(self):
         mock_client = make_mock_client({})
-        mock_client.request = AsyncMock(
-            side_effect=DouDianAPIError(code=40004, msg="Shop not found")
-        )
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        mock_client.request = AsyncMock(side_effect=DouDianAPIError(code=40004, msg="Shop not found"))
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_traffic_data()
         assert result["error"]
         assert result["code"] == 40004
@@ -2193,12 +2070,8 @@ class TestNewToolsAPIErrorHandling:
     @pytest.mark.asyncio
     async def test_api_error_in_get_short_video_data(self):
         mock_client = make_mock_client({})
-        mock_client.request = AsyncMock(
-            side_effect=DouDianAPIError(code=40005, msg="Video not found")
-        )
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        mock_client.request = AsyncMock(side_effect=DouDianAPIError(code=40005, msg="Video not found"))
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_short_video_data(video_id="VID-001")
         assert result["error"]
         assert result["code"] == 40005
@@ -2207,12 +2080,8 @@ class TestNewToolsAPIErrorHandling:
     @pytest.mark.asyncio
     async def test_api_error_in_list_promotions(self):
         mock_client = make_mock_client({})
-        mock_client.request = AsyncMock(
-            side_effect=DouDianAPIError(code=40006, msg="Invalid status")
-        )
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        mock_client.request = AsyncMock(side_effect=DouDianAPIError(code=40006, msg="Invalid status"))
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await list_promotions()
         assert result["error"]
         assert result["code"] == 40006
@@ -2221,12 +2090,8 @@ class TestNewToolsAPIErrorHandling:
     @pytest.mark.asyncio
     async def test_api_error_in_list_coupons(self):
         mock_client = make_mock_client({})
-        mock_client.request = AsyncMock(
-            side_effect=DouDianAPIError(code=40007, msg="Invalid status")
-        )
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        mock_client.request = AsyncMock(side_effect=DouDianAPIError(code=40007, msg="Invalid status"))
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await list_coupons()
         assert result["error"]
         assert result["code"] == 40007
@@ -2235,12 +2100,8 @@ class TestNewToolsAPIErrorHandling:
     @pytest.mark.asyncio
     async def test_api_error_in_get_bill_list(self):
         mock_client = make_mock_client({})
-        mock_client.request = AsyncMock(
-            side_effect=DouDianAPIError(code=40008, msg="Date range too large")
-        )
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        mock_client.request = AsyncMock(side_effect=DouDianAPIError(code=40008, msg="Date range too large"))
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await get_bill_list()
         assert result["error"]
         assert result["code"] == 40008
@@ -2249,12 +2110,8 @@ class TestNewToolsAPIErrorHandling:
     @pytest.mark.asyncio
     async def test_api_error_in_list_categories(self):
         mock_client = make_mock_client({})
-        mock_client.request = AsyncMock(
-            side_effect=DouDianAPIError(code=40009, msg="Invalid parent_id")
-        )
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        mock_client.request = AsyncMock(side_effect=DouDianAPIError(code=40009, msg="Invalid parent_id"))
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await list_categories()
         assert result["error"]
         assert result["code"] == 40009
@@ -2263,12 +2120,8 @@ class TestNewToolsAPIErrorHandling:
     @pytest.mark.asyncio
     async def test_api_error_in_list_brands(self):
         mock_client = make_mock_client({})
-        mock_client.request = AsyncMock(
-            side_effect=DouDianAPIError(code=40010, msg="Category not found")
-        )
-        with patch_environ(), patch.object(
-            _srv, "_get_client", return_value=mock_client
-        ):
+        mock_client.request = AsyncMock(side_effect=DouDianAPIError(code=40010, msg="Category not found"))
+        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
             result = await list_brands()
         assert result["error"]
         assert result["code"] == 40010
@@ -2282,6 +2135,7 @@ class TestNewToolsConfigErrorHandling:
     async def test_config_error_in_get_logistics_tracking(self):
         with patch.dict(os.environ, {}, clear=True):
             import mcp_doudian.server as srv
+
             srv._client = None
             result = await get_logistics_tracking(order_id="ORD-001")
         assert "error" in result
@@ -2291,6 +2145,7 @@ class TestNewToolsConfigErrorHandling:
     async def test_config_error_in_get_review_detail(self):
         with patch.dict(os.environ, {}, clear=True):
             import mcp_doudian.server as srv
+
             srv._client = None
             result = await get_review_detail(review_id="C-001")
         assert "error" in result
@@ -2300,6 +2155,7 @@ class TestNewToolsConfigErrorHandling:
     async def test_config_error_in_list_live_rooms(self):
         with patch.dict(os.environ, {}, clear=True):
             import mcp_doudian.server as srv
+
             srv._client = None
             result = await list_live_rooms()
         assert "error" in result
@@ -2309,6 +2165,7 @@ class TestNewToolsConfigErrorHandling:
     async def test_config_error_in_get_shop_score(self):
         with patch.dict(os.environ, {}, clear=True):
             import mcp_doudian.server as srv
+
             srv._client = None
             result = await get_shop_score()
         assert "error" in result

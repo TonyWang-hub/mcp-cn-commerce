@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mcp-cn-xiaohongshu"
+version = "0.1.0"
+description = "MCP server for Xiaohongshu (小红书) e-commerce platform"
+requires-python = ">=3.10"
+dependencies = ["mcp>=1.0", "httpx>=0.27"]
+
+[project.scripts]
+mcp-cn-xiaohongshu = "mcp_xiaohongshu.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_xiaohongshu"]

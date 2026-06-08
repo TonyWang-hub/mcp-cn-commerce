@@ -30,6 +30,6 @@ jobs:
 
       - name: Run tests
         env:
-          PYTHONPATH: servers/oceanengine/src:servers/doudian/src:servers/jd/src:servers/taobao/src:servers/pinduoduo/src
+          PYTHONPATH: servers/oceanengine/src:servers/doudian/src:servers/jd/src:servers/taobao/src:servers/pinduoduo/src:servers/kuaishou/src:servers/xiaohongshu/src:servers/weixin-store/src
         run: |
           python -m pytest servers/ -v --tb=short

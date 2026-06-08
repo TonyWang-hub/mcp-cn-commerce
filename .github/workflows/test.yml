@@ -33,3 +33,26 @@ jobs:
           PYTHONPATH: servers/oceanengine/src:servers/doudian/src:servers/jd/src:servers/taobao/src:servers/pinduoduo/src:servers/kuaishou/src:servers/xiaohongshu/src:servers/weixin-store/src
         run: |
           python -m pytest servers/ -v --tb=short
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install linting tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install black ruff
+
+      - name: Check code formatting
+        run: |
+          black --check .
+
+      - name: Check code style
+        run: |
+          ruff check .

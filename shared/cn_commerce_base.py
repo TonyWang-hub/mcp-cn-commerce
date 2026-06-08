@@ -17,6 +17,235 @@ from typing import Any
 
 import httpx
 
+import re
+from typing import Any
+
+# ── Security: Sensitive Data Masking ─────────────────────
+
+# Patterns for sensitive fields that should be masked in logs
+_SENSITIVE_FIELD_PATTERNS = re.compile(
+    r"(app_key|app_secret|access_token|client_id|client_secret|"
+    r"refresh_token|api_key|secret_key|password|token|sign)",
+    re.IGNORECASE,
+)
+
+# Regex patterns to detect sensitive values in strings
+_SENSITIVE_VALUE_PATTERNS = [
+    # JWT tokens
+    re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
+    # Bearer tokens
+    re.compile(r"Bearer\s+[A-Za-z0-9._~+/-]+=*", re.IGNORECASE),
+]
+
+
+def mask_sensitive_value(value: str, visible_prefix: int = 4, visible_suffix: int = 4) -> str:
+    """Mask a sensitive value, showing only prefix and suffix.
+
+    Args:
+        value: The sensitive string to mask.
+        visible_prefix: Number of characters to show at the start.
+        visible_suffix: Number of characters to show at the end.
+
+    Returns:
+        Masked string like "abcd****efgh".
+
+    Examples:
+        >>> mask_sensitive_value("abcdefghijklmnop")
+        'abcd****mnop'
+        >>> mask_sensitive_value("short")
+        's****t'
+        >>> mask_sensitive_value("")
+        '****'
+    """
+    if not value:
+        return "****"
+    if len(value) <= visible_prefix + visible_suffix:
+        return value[0] + "****" + value[-1] if len(value) > 1 else "****"
+    return f"{value[:visible_prefix]}****{value[-visible_suffix:]}"
+
+
+def mask_dict_sensitive_keys(data: dict[str, Any]) -> dict[str, Any]:
+    """Create a copy of a dict with sensitive keys masked.
+
+    Recursively processes nested dicts and lists.
+
+    Args:
+        data: Dictionary that may contain sensitive keys.
+
+    Returns:
+        A new dictionary with sensitive values masked.
+    """
+    masked: dict[str, Any] = {}
+    for key, value in data.items():
+        if _SENSITIVE_FIELD_PATTERNS.search(key):
+            if isinstance(value, str):
+                masked[key] = mask_sensitive_value(value)
+            else:
+                masked[key] = "***MASKED***"
+        elif isinstance(value, dict):
+            masked[key] = mask_dict_sensitive_keys(value)
+        elif isinstance(value, list):
+            masked[key] = [
+                mask_dict_sensitive_keys(item) if isinstance(item, dict) else item for item in value
+            ]
+        else:
+            masked[key] = value
+    return masked
+
+
+def mask_log_message(message: str) -> str:
+    """Mask sensitive values that may appear in log message strings.
+
+    Scans for patterns that look like JWTs or Bearer tokens.
+
+    Args:
+        message: Log message string.
+
+    Returns:
+        Message with sensitive values masked.
+    """
+    # Mask JWT tokens
+    message = _SENSITIVE_VALUE_PATTERNS[0].sub(lambda m: mask_sensitive_value(m.group()), message)
+    # Mask Bearer tokens
+    message = _SENSITIVE_VALUE_PATTERNS[1].sub(
+        lambda m: m.group().split()[0] + " " + mask_sensitive_value(m.group().split()[1])
+        if len(m.group().split()) > 1
+        else m.group(),
+        message,
+    )
+    return message
+
+
+class SensitiveDataFilter(logging.Filter):
+    """Logging filter that masks sensitive data in log records.
+
+    Usage:
+        logger.addFilter(SensitiveDataFilter())
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Filter log record, masking any sensitive data."""
+        if isinstance(record.msg, str):
+            record.msg = mask_log_message(record.msg)
+        if record.args:
+            if isinstance(record.args, dict):
+                record.args = mask_dict_sensitive_keys(record.args)
+            elif isinstance(record.args, tuple | list):
+                record.args = tuple(
+                    mask_log_message(str(a)) if isinstance(a, str) else a for a in record.args
+                )
+        return True
+
+
+# ── Security: Input Validation ────────────────────────────
+
+_SQL_INJECTION_PATTERNS = re.compile(
+    r"(\b(UNION|SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|EXEC|EXECUTE)\b"
+    r"|--|/\*|\*/|;.*\b(DROP|DELETE|UPDATE|INSERT)\b"
+    r"|'\s*(OR|AND)\s*'?\d*"
+    r"|'\s*;\s*)",
+    re.IGNORECASE,
+)
+_PATH_TRAVERSAL_PATTERN = re.compile(r"(\.\./|\.\.\\|%2e%2e[/\\]|%252e%252e)", re.IGNORECASE)
+_XSS_PATTERN = re.compile(
+    r"(<script[^>]*>|javascript:|on\w+\s*=|<iframe|<object|<embed|<form)",
+    re.IGNORECASE,
+)
+
+
+def validate_platform_name(platform: str) -> str:
+    """Validate and sanitize a platform name.
+
+    Platform names must be uppercase alphanumeric with underscores only.
+
+    Args:
+        platform: The platform name to validate.
+
+    Returns:
+        The validated platform name.
+
+    Raises:
+        ValueError: If the platform name contains invalid characters.
+    """
+    if not platform:
+        raise ValueError("Platform name cannot be empty")
+    if not re.match(r"^[A-Z][A-Z0-9_]*$", platform):
+        raise ValueError(
+            f"Invalid platform name '{platform}': must be uppercase alphanumeric with underscores"
+        )
+    if len(platform) > 64:
+        raise ValueError(f"Platform name too long ({len(platform)} > 64)")
+    return platform
+
+
+def validate_api_param(name: str, value: str, max_length: int = 4096) -> str:
+    """Validate an API parameter value for injection attacks.
+
+    Checks for SQL injection, path traversal, and XSS patterns.
+
+    Args:
+        name: Parameter name (for error messages).
+        value: Parameter value to validate.
+        max_length: Maximum allowed length.
+
+    Returns:
+        The validated value.
+
+    Raises:
+        ValueError: If the value contains suspicious patterns.
+    """
+    if not isinstance(value, str):
+        return value  # type: ignore[return-value]
+
+    if len(value) > max_length:
+        raise ValueError(f"Parameter '{name}' exceeds maximum length ({len(value)} > {max_length})")
+
+    if _SQL_INJECTION_PATTERNS.search(value):
+        raise ValueError(f"Parameter '{name}' contains suspicious SQL patterns")
+
+    if _PATH_TRAVERSAL_PATTERN.search(value):
+        raise ValueError(f"Parameter '{name}' contains path traversal patterns")
+
+    if _XSS_PATTERN.search(value):
+        raise ValueError(f"Parameter '{name}' contains suspicious script patterns")
+
+    return value
+
+
+def validate_env_var_name(name: str) -> str:
+    """Validate an environment variable name.
+
+    Env var names must be uppercase alphanumeric with underscores.
+
+    Args:
+        name: The environment variable name.
+
+    Returns:
+        The validated name.
+
+    Raises:
+        ValueError: If the name is invalid.
+    """
+    if not name:
+        raise ValueError("Environment variable name cannot be empty")
+    if not re.match(r"^[A-Z][A-Z0-9_]*$", name):
+        raise ValueError(
+            f"Invalid env var name '{name}': must be uppercase alphanumeric with underscores"
+        )
+    return name
+
+
+def sanitize_log_context(**kwargs: Any) -> dict[str, Any]:
+    """Create a sanitized context dict for logging, masking sensitive values.
+
+    Args:
+        **kwargs: Key-value pairs to include in the context.
+
+    Returns:
+        A dictionary safe for logging with sensitive values masked.
+    """
+    return mask_dict_sensitive_keys(kwargs)
+
 # Configure logging
 logger = logging.getLogger("mcp-cn-commerce")
 

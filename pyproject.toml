@@ -69,7 +69,19 @@ all = [
     "mcp-cn-xiaohongshu",
     "mcp-cn-weixin-store",
 ]
-dev = ["pytest>=7.0", "pytest-asyncio"]
+dev = ["pytest>=7.0", "pytest-asyncio", "black", "ruff"]
 
 [tool.setuptools.packages.find]
 include = ["shared*"]
+
+[tool.black]
+line-length = 120
+target-version = ["py311", "py312", "py313"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501", "E402"]  # Line too long - handled by black; Module level import not at top of file

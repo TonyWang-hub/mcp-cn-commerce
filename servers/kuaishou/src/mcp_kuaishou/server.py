@@ -22,10 +22,10 @@ _project_root = Path(__file__).resolve().parents[4]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from shared.cn_commerce_base import CommerceMCPBase, CommerceAPIError, ConfigValidationError, SignMethod
-
+from shared.cn_commerce_base import CommerceMCPBase, ConfigValidationError, SignMethod
 
 # ── Kuaishou client ───────────────────────────────────────────────────────────
+
 
 class KuaishouMCP(CommerceMCPBase):
     """Kuaishou-specific client.
@@ -60,17 +60,9 @@ class KuaishouMCP(CommerceMCPBase):
     def _sign(self, params: dict) -> str:
         """Generate MD5 signature using sign_secret."""
 
-        to_sign = {
-            k: v
-            for k, v in params.items()
-            if k not in ("sign", "sign_method") and v != ""
-        }
+        to_sign = {k: v for k, v in params.items() if k not in ("sign", "sign_method") and v != ""}
         sorted_keys = sorted(to_sign.keys())
-        raw = (
-            self.sign_secret
-            + "".join(f"{k}{to_sign[k]}" for k in sorted_keys)
-            + self.sign_secret
-        )
+        raw = self.sign_secret + "".join(f"{k}{to_sign[k]}" for k in sorted_keys) + self.sign_secret
         return hashlib.md5(raw.encode()).hexdigest().upper()
 
     # ── Convenience wrapper ───────────────────────────────────────────────
@@ -81,6 +73,7 @@ class KuaishouMCP(CommerceMCPBase):
 
 
 # ── Instantiate client from env ────────────────────────────────────────────
+
 
 def _create_kuaishou_client() -> KuaishouMCP:
     """Create kuaishou client with configuration validation."""
@@ -94,6 +87,7 @@ def _create_kuaishou_client() -> KuaishouMCP:
             sign_secret=os.environ.get("KUAISHOU_SIGN_SECRET", ""),
             access_token=os.environ.get("KUAISHOU_ACCESS_TOKEN", ""),
         )
+
 
 ks = _create_kuaishou_client()
 

@@ -1,8 +1,12 @@
 # mcp-cn-commerce
 
-Chinese e-commerce platform MCP servers — let AI agents (Claude Cowork, Kimi Work, etc.) read merchant business data.
-
 [![Test](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/workflows/test.yml/badge.svg)](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/workflows/test.yml)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+> Let AI agents read Chinese e-commerce merchant business data. Not content publishing — **business operations** MCP connectors.
+
+**English** | [简体中文](README_zh.md)
 
 ## Platforms
 

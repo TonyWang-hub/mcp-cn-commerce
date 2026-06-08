@@ -26,12 +26,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-asyncio httpx mcp
 
-      - name: Install server packages (editable)
-        run: |
-          pip install -e servers/oceanengine/
-          pip install -e servers/doudian/
-          pip install -e servers/jd/
-
       - name: Run tests
+        env:
+          PYTHONPATH: servers/oceanengine/src:servers/doudian/src:servers/jd/src
         run: |
           python -m pytest servers/ -v --tb=short

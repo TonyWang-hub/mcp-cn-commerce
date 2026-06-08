@@ -6,6 +6,7 @@ Provides unified auth signing, request handling, and error normalization.
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import hmac
 import json
@@ -237,3 +238,59 @@ def format_error_response(error: Exception) -> str:
         {"error": {"message": str(error)}},
         ensure_ascii=False,
     )
+
+
+def format_response(result: Any) -> str:
+    """Format a successful API response as a pretty-printed JSON string.
+
+    Args:
+        result: The response data to format (dict, list, or any JSON-serializable type).
+
+    Returns:
+        A pretty-printed JSON string.
+    """
+    if isinstance(result, str):
+        return result
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+def handle_tool_errors(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[str]]:
+    """Decorator to handle common MCP tool errors and format responses.
+
+    This decorator wraps an async tool function to:
+    - Catch CommerceAPIError and format it as a structured error response
+    - Catch any other exceptions and format them as generic error responses
+    - Automatically format successful dict/list results as pretty-printed JSON
+
+    Usage:
+        @handle_tool_errors
+        async def my_tool(param: str) -> str:
+            result = await client._request("GET", "path/", params={...})
+            return result  # Will be auto-formatted as JSON
+
+    Args:
+        func: The async tool function to wrap.
+
+    Returns:
+        Wrapped function with error handling and response formatting.
+    """
+
+    @functools.wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> str:
+        try:
+            result = await func(*args, **kwargs)
+            return format_response(result)
+        except CommerceAPIError as e:
+            return format_error_response(e)
+        except json.JSONDecodeError as e:
+            return json.dumps(
+                {"error": {"message": f"Invalid JSON: {e}"}},
+                ensure_ascii=False,
+            )
+        except Exception as e:
+            return json.dumps(
+                {"error": {"message": str(e)}},
+                ensure_ascii=False,
+            )
+
+    return wrapper

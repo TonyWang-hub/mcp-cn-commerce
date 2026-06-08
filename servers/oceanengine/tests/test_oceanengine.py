@@ -118,9 +118,9 @@ class TestSafeIntList:
 
 class TestFormatHelpers:
     def test_format_response_pretty_json(self):
-        from mcp_oceanengine.server import _format_response
+        from cn_commerce_base import format_response
 
-        result = json.loads(_format_response({"code": 0, "data": {"name": "测试"}}))
+        result = json.loads(format_response({"code": 0, "data": {"name": "测试"}}))
         assert result["code"] == 0
         assert result["data"]["name"] == "测试"
 
@@ -449,7 +449,7 @@ class TestListCampaigns:
 
         data = json.loads(result)
         assert "error" in data
-        assert "Invalid filtering JSON" in data["error"]["message"]
+        assert "Invalid JSON" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_page_size_capped_at_100(self, mock_client, mock_request):

@@ -9,7 +9,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -26,7 +26,6 @@ from cn_commerce_base import (
     SignMethod,
     format_error_response,
 )
-
 
 # ── SignMethod Tests ──────────────────────────────────────
 

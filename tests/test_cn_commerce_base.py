@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 # Add the shared directory to the path
@@ -22,6 +23,8 @@ from cn_commerce_base import (
     CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,
+    EndpointMetrics,
+    MetricsCollector,
     RateLimiter,
     SignMethod,
     format_error_response,
@@ -277,3 +280,181 @@ class TestCommerceMCPBase:
         result = await client._paginate(mock_fetch, page_size=1, max_pages=3)
         assert len(result) == 3
         assert mock_fetch.call_count == 3
+
+    def test_init_has_metrics_collector(self):
+        client = CommerceMCPBase()
+        assert isinstance(client.metrics, MetricsCollector)
+
+
+# ── EndpointMetrics Tests ────────────────────────────────
+
+
+class TestEndpointMetrics:
+    """Tests for EndpointMetrics dataclass."""
+
+    def test_default_values(self):
+        m = EndpointMetrics()
+        assert m.request_count == 0
+        assert m.error_count == 0
+        assert m.total_latency_ms == 0.0
+        assert m.min_latency_ms == float("inf")
+        assert m.max_latency_ms == 0.0
+
+    def test_avg_latency_no_requests(self):
+        m = EndpointMetrics()
+        assert m.avg_latency_ms == 0.0
+
+    def test_avg_latency_with_requests(self):
+        m = EndpointMetrics(request_count=3, total_latency_ms=300.0)
+        assert m.avg_latency_ms == 100.0
+
+    def test_error_rate_no_requests(self):
+        m = EndpointMetrics()
+        assert m.error_rate == 0.0
+
+    def test_error_rate_with_requests(self):
+        m = EndpointMetrics(request_count=10, error_count=3)
+        assert m.error_rate == 0.3
+
+
+# ── MetricsCollector Tests ───────────────────────────────
+
+
+class TestMetricsCollector:
+    """Tests for MetricsCollector."""
+
+    def test_record_successful_request(self):
+        collector = MetricsCollector()
+        collector.record_request("/api/test", latency_ms=50.0, success=True)
+        ep = collector.get_endpoint_metrics("/api/test")
+        assert ep.request_count == 1
+        assert ep.error_count == 0
+        assert ep.total_latency_ms == 50.0
+        assert ep.min_latency_ms == 50.0
+        assert ep.max_latency_ms == 50.0
+
+    def test_record_failed_request(self):
+        collector = MetricsCollector()
+        collector.record_request(
+            "/api/test",
+            latency_ms=100.0,
+            success=False,
+            error_code=40001,
+            error_msg="bad",
+        )
+        ep = collector.get_endpoint_metrics("/api/test")
+        assert ep.request_count == 1
+        assert ep.error_count == 1
+        assert ep.last_error_code == 40001
+        assert ep.last_error_msg == "bad"
+
+    def test_record_multiple_requests(self):
+        collector = MetricsCollector()
+        collector.record_request("/api/a", latency_ms=10.0, success=True)
+        collector.record_request("/api/a", latency_ms=20.0, success=True)
+        collector.record_request("/api/b", latency_ms=5.0, success=False, error_code=500, error_msg="err")
+        ep_a = collector.get_endpoint_metrics("/api/a")
+        ep_b = collector.get_endpoint_metrics("/api/b")
+        assert ep_a.request_count == 2
+        assert ep_b.request_count == 1
+        assert ep_b.error_count == 1
+
+    def test_global_metrics(self):
+        collector = MetricsCollector()
+        collector.record_request("/api/a", latency_ms=10.0, success=True)
+        collector.record_request("/api/b", latency_ms=30.0, success=False, error_code=1, error_msg="e")
+        g = collector.get_global_metrics()
+        assert g.request_count == 2
+        assert g.error_count == 1
+        assert g.total_latency_ms == 40.0
+
+    def test_get_all_metrics(self):
+        collector = MetricsCollector()
+        collector.record_request("/api/a", latency_ms=10.0, success=True)
+        collector.record_request("/api/b", latency_ms=20.0, success=True)
+        all_m = collector.get_all_metrics()
+        assert "/api/a" in all_m
+        assert "/api/b" in all_m
+
+    def test_get_endpoint_metrics_unknown_returns_default(self):
+        collector = MetricsCollector()
+        m = collector.get_endpoint_metrics("/unknown")
+        assert m.request_count == 0
+
+    def test_min_max_latency_tracking(self):
+        collector = MetricsCollector()
+        collector.record_request("/api", latency_ms=5.0, success=True)
+        collector.record_request("/api", latency_ms=100.0, success=True)
+        collector.record_request("/api", latency_ms=50.0, success=True)
+        ep = collector.get_endpoint_metrics("/api")
+        assert ep.min_latency_ms == 5.0
+        assert ep.max_latency_ms == 100.0
+        assert ep.avg_latency_ms == pytest.approx(155.0 / 3)
+
+    def test_summary_structure(self):
+        collector = MetricsCollector()
+        collector.record_request("/api/test", latency_ms=42.0, success=True)
+        summary = collector.get_summary()
+        assert "uptime_seconds" in summary
+        assert "global" in summary
+        assert "endpoints" in summary
+        assert summary["global"]["total_requests"] == 1
+        assert "/api/test" in summary["endpoints"]
+
+    def test_summary_empty_collector(self):
+        collector = MetricsCollector()
+        summary = collector.get_summary()
+        assert summary["global"]["total_requests"] == 0
+        assert summary["global"]["total_errors"] == 0
+        assert summary["endpoints"] == {}
+
+    def test_reset(self):
+        collector = MetricsCollector()
+        collector.record_request("/api", latency_ms=10.0, success=True)
+        collector.reset()
+        g = collector.get_global_metrics()
+        assert g.request_count == 0
+        assert collector.get_all_metrics() == {}
+
+
+# ── Health Check Tests ────────────────────────────────────
+
+
+class TestHealthCheck:
+    """Tests for CommerceMCPBase.health_check."""
+
+    @pytest.mark.asyncio
+    async def test_health_check_no_base_url(self):
+        client = CommerceMCPBase()
+        result = await client.health_check()
+        assert result["api_reachable"] is False
+        assert result["configured"] is False
+
+    @pytest.mark.asyncio
+    async def test_health_check_configured_no_token(self):
+        client = CommerceMCPBase(app_key="key", app_secret="secret")
+        result = await client.health_check()
+        assert result["configured"] is True
+        assert result["has_token"] is False
+
+    @pytest.mark.asyncio
+    async def test_health_check_includes_metrics(self):
+        client = CommerceMCPBase(app_key="key", app_secret="secret")
+        result = await client.health_check()
+        assert "metrics" in result
+        assert "global" in result["metrics"]
+        assert "uptime_seconds" in result["metrics"]
+
+    @pytest.mark.asyncio
+    async def test_health_check_connection_error(self):
+        from unittest.mock import AsyncMock
+        from unittest.mock import patch as mock_patch
+
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        client.BASE_URL = "http://127.0.0.1:99999"
+        mock_client = AsyncMock()
+        mock_client.head.side_effect = httpx.ConnectError("refused")
+        with mock_patch.object(client, "_get_client", return_value=mock_client):
+            result = await client.health_check()
+        assert result["api_reachable"] is False
+        assert "error" in result

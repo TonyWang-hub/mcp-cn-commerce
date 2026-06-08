@@ -71,13 +71,14 @@
 | 巨量千川 (Qianchuan) | 电商广告 | 1 | ✅ | (同上) | [qianchuan.jinritemai.com](https://qianchuan.jinritemai.com) |
 | 抖店 (Douyin Shop) | 电商店铺 | 1 | ✅ | 31 | [op.jinritemai.com](https://op.jinritemai.com) |
 | 京东 (JD.com) | 电商店铺 | 1 | ✅ | 19 | [jos.jd.com](https://jos.jd.com) |
-| 淘宝 (Taobao) | 电商店铺 | 2 | ⬜ | - | [open.taobao.com](https://open.taobao.com) |
-| 拼多多 (Pinduoduo) | 电商店铺 | 2 | ⬜ | - | [open.pinduoduo.com](https://open.pinduoduo.com) |
-| 快手 (Kuaishou) | 电商店铺 | 3 | ⬜ | - | [open.kuaixiaodian.com](https://open.kuaixiaodian.com) |
-| 小红书 (Xiaohongshu) | 电商店铺 | 3 | ⬜ | - | [open.xiaohongshu.com](https://open.xiaohongshu.com) |
-| 微信小店 (WeChat Store) | 电商店铺 | 3 | ⬜ | - | [developers.weixin.qq.com](https://developers.weixin.qq.com) |
+| 淘宝 (Taobao) | 电商店铺 | 2 | ✅ | 36 | [open.taobao.com](https://open.taobao.com) |
+| 拼多多 (Pinduoduo) | 电商店铺 | 2 | ✅ | 30 | [open.pinduoduo.com](https://open.pinduoduo.com) |
+| 快手 (Kuaishou) | 电商店铺 | 3 | ✅ | 33 | [open.kuaixiaodian.com](https://open.kuaixiaodian.com) |
+| 小红书 (Xiaohongshu) | 电商店铺 | 3 | ✅ | 33 | [open.xiaohongshu.com](https://open.xiaohongshu.com) |
+| 微信小店 (WeChat Store) | 电商店铺 | 3 | ✅ | 25 | [developers.weixin.qq.com](https://developers.weixin.qq.com) |
 
 > Phase 4: 闲鱼、美团、饿了么（API 受限，待政策明朗）
+> **358 个测试**，所有 8 个平台全部通过。CI 覆盖 Python 3.11/3.12/3.13。
 > **77 个测试**，Phase 1 三平台全部通过。CI 覆盖 Python 3.11/3.12/3.13。
 
 ## 快速开始

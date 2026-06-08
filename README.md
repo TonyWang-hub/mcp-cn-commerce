@@ -64,15 +64,15 @@ This is the **first open-source MCP server suite for Chinese e-commerce business
 | 巨量千川 (Qianchuan) | E-commerce Ads (电商广告) | 1 | ✅ | (shared) | [qianchuan.jinritemai.com](https://qianchuan.jinritemai.com) |
 | 抖店 (Douyin Shop) | E-commerce (电商店铺) | 1 | ✅ | 31 | [op.jinritemai.com](https://op.jinritemai.com) |
 | 京东 (JD.com) | E-commerce (电商店铺) | 1 | ✅ | 19 | [jos.jd.com](https://jos.jd.com) |
-| 淘宝 (Taobao) | E-commerce (电商店铺) | 2 | ⬜ | - | [open.taobao.com](https://open.taobao.com) |
-| 拼多多 (Pinduoduo) | E-commerce (电商店铺) | 2 | ⬜ | - | [open.pinduoduo.com](https://open.pinduoduo.com) |
-| 快手 (Kuaishou) | E-commerce (电商店铺) | 3 | ⬜ | - | [open.kuaixiaodian.com](https://open.kuaixiaodian.com) |
-| 小红书 (Xiaohongshu) | E-commerce (电商店铺) | 3 | ⬜ | - | [open.xiaohongshu.com](https://open.xiaohongshu.com) |
-| 微信小店 (WeChat Store) | E-commerce (电商店铺) | 3 | ⬜ | - | [developers.weixin.qq.com](https://developers.weixin.qq.com) |
+| 淘宝 (Taobao) | E-commerce (电商店铺) | 2 | ✅ | 36 | [open.taobao.com](https://open.taobao.com) |
+| 拼多多 (Pinduoduo) | E-commerce (电商店铺) | 2 | ✅ | 30 | [open.pinduoduo.com](https://open.pinduoduo.com) |
+| 快手 (Kuaishou) | E-commerce (电商店铺) | 3 | ✅ | 33 | [open.kuaixiaodian.com](https://open.kuaixiaodian.com) |
+| 小红书 (Xiaohongshu) | E-commerce (电商店铺) | 3 | ✅ | 33 | [open.xiaohongshu.com](https://open.xiaohongshu.com) |
+| 微信小店 (WeChat Store) | E-commerce (电商店铺) | 3 | ✅ | 25 | [developers.weixin.qq.com](https://developers.weixin.qq.com) |
 
 > **Phase 4** (exploratory): 闲鱼 (Xianyu), 美团 (Meituan), 饿了么 (Ele.me) — restricted APIs, awaiting policy clarity.
 >
-> **77 tests** across all Phase 1 servers. CI runs on Python 3.11, 3.12, 3.13.
+> **358 tests** across all 8 servers. CI runs on Python 3.11, 3.12, 3.13.
 
 ## Quick Start
 

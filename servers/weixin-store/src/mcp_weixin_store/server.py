@@ -27,7 +27,7 @@ _project_root = Path(__file__).resolve().parents[4]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from shared.cn_commerce_base import CommerceMCPBase, CommerceAPIError
+from shared.cn_commerce_base import CommerceMCPBase, CommerceAPIError, ConfigValidationError
 
 
 # ── WeChat Store client ───────────────────────────────────────────────────────
@@ -125,13 +125,23 @@ class WeixinStoreMCP(CommerceMCPBase):
         return result
 
 
-# ── Instantiate client from env ───────────────────────────────────────────────
+# ── Instantiate client from env ────────────────────────────────────────────
 
-_wx = WeixinStoreMCP(
-    app_key=os.environ.get("WX_APP_ID", ""),
-    app_secret=os.environ.get("WX_APP_SECRET", ""),
-    access_token=os.environ.get("WX_ACCESS_TOKEN", ""),
-)
+def _create_weixin_store_client() -> WeixinStoreMCP:
+    """Create weixin-store client with configuration validation."""
+    # Check required vars
+    required = ["WX_APP_ID", "WX_APP_SECRET"]
+    missing = [v for v in required if not os.environ.get(v)]
+    if missing:
+        raise ConfigValidationError("WX", missing)
+
+    return WeixinStoreMCP(
+        app_key=os.environ.get("WX_APP_ID", ""),
+        app_secret=os.environ.get("WX_APP_SECRET", ""),
+        access_token=os.environ.get("WX_ACCESS_TOKEN", ""),
+    )
+
+_wx = _create_weixin_store_client()
 
 
 # ── MCP server ────────────────────────────────────────────────────────────────

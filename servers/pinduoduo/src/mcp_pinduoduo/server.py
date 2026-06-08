@@ -22,7 +22,7 @@ _project_root = Path(__file__).resolve().parents[4]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from shared.cn_commerce_base import CommerceMCPBase, CommerceAPIError, SignMethod
+from shared.cn_commerce_base import CommerceMCPBase, CommerceAPIError, ConfigValidationError, SignMethod
 
 
 # ── Pinduoduo client ────────────────────────────────────────────────────────
@@ -76,11 +76,19 @@ class PinduoduoMCP(CommerceMCPBase):
 
 # ── Instantiate client from env ────────────────────────────────────────────
 
-pdd = PinduoduoMCP(
-    app_key=os.environ.get("PINDUODUO_CLIENT_ID", ""),
-    app_secret=os.environ.get("PINDUODUO_CLIENT_SECRET", ""),
-    access_token=os.environ.get("PINDUODUO_ACCESS_TOKEN", ""),
-)
+def _create_pinduoduo_client() -> PinduoduoMCP:
+    """Create pinduoduo client with configuration validation."""
+    try:
+        return PinduoduoMCP.from_env("PINDUODUO", ["CLIENT_ID", "CLIENT_SECRET", "ACCESS_TOKEN"])
+    except ConfigValidationError:
+        # Fallback to direct instantiation for backward compatibility
+        return PinduoduoMCP(
+            client_id=os.environ.get("PINDUODUO_CLIENT_ID", ""),
+            client_secret=os.environ.get("PINDUODUO_CLIENT_SECRET", ""),
+            access_token=os.environ.get("PINDUODUO_ACCESS_TOKEN", ""),
+        )
+
+pdd = _create_pinduoduo_client()
 
 
 # ── MCP server ─────────────────────────────────────────────────────────────

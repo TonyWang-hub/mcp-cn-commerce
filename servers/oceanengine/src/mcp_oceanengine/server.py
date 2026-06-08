@@ -65,7 +65,7 @@ def _safe_int_list(comma_separated: str) -> list[int]:
     return [int(x.strip()) for x in comma_separated.split(",") if x.strip()]
 
 
-# ── Tools ────────────────────────────────────────────────
+# ── Tools: Advertiser ────────────────────────────────────
 
 
 @server.tool()
@@ -87,6 +87,30 @@ async def get_advertiser_info(advertiser_ids: str) -> str:
         return _format_error(e)
     except Exception as e:
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
+
+
+@server.tool()
+async def get_account_balance(advertiser_id: str) -> str:
+    """Get the account balance for an advertiser.
+
+    Args:
+        advertiser_id: The advertiser account ID.
+    """
+    client = _get_client()
+    try:
+        result = await client._request(
+            "GET",
+            "2/advertiser/fund/get/",
+            params={"advertiser_id": int(advertiser_id)},
+        )
+        return _format_response(result)
+    except CommerceAPIError as e:
+        return _format_error(e)
+    except Exception as e:
+        return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
+
+
+# ── Tools: Campaign Reports ──────────────────────────────
 
 
 @server.tool()
@@ -163,6 +187,9 @@ async def get_ad_detail_report(
         return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
 
 
+# ── Tools: Campaign Management ───────────────────────────
+
+
 @server.tool()
 async def list_campaigns(
     advertiser_id: str,
@@ -200,18 +227,455 @@ async def list_campaigns(
 
 
 @server.tool()
-async def get_account_balance(advertiser_id: str) -> str:
-    """Get the account balance for an advertiser.
+async def get_campaign_detail(advertiser_id: str, campaign_id: str) -> str:
+    """广告计划详情 (Campaign detail).
+
+    Get detailed information about a specific advertising campaign
+    including budget, targeting, status, and creative settings.
 
     Args:
         advertiser_id: The advertiser account ID.
+        campaign_id: The campaign ID to query.
     """
     client = _get_client()
     try:
         result = await client._request(
             "GET",
-            "2/advertiser/fund/get/",
-            params={"advertiser_id": int(advertiser_id)},
+            "2/campaign/read/",
+            params={
+                "advertiser_id": int(advertiser_id),
+                "campaign_ids": [int(campaign_id)],
+            },
+        )
+        return _format_response(result)
+    except CommerceAPIError as e:
+        return _format_error(e)
+    except Exception as e:
+        return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
+
+
+@server.tool()
+async def list_ads(
+    advertiser_id: str,
+    campaign_id: str = "",
+    page: int = 1,
+    page_size: int = 20,
+) -> str:
+    """广告创意列表 (Ad creative list).
+
+    List ad creatives under an advertiser account, optionally filtered by campaign.
+
+    Args:
+        advertiser_id: The advertiser account ID.
+        campaign_id: Optional campaign ID to filter ads by campaign.
+        page: Page number for pagination (default 1).
+        page_size: Number of records per page (default 20, max 100).
+    """
+    client = _get_client()
+    try:
+        params: dict = {
+            "advertiser_id": int(advertiser_id),
+            "page": page,
+            "page_size": min(page_size, 100),
+        }
+        if campaign_id:
+            params["campaign_id"] = int(campaign_id)
+        result = await client._request("GET", "2/ad/get/", params=params)
+        return _format_response(result)
+    except CommerceAPIError as e:
+        return _format_error(e)
+    except Exception as e:
+        return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
+
+
+@server.tool()
+async def get_ad_detail(advertiser_id: str, ad_id: str) -> str:
+    """广告创意详情 (Ad creative detail).
+
+    Get detailed information about a specific ad creative
+    including creative content, delivery status, and performance settings.
+
+    Args:
+        advertiser_id: The advertiser account ID.
+        ad_id: The ad creative ID to query.
+    """
+    client = _get_client()
+    try:
+        result = await client._request(
+            "GET",
+            "2/ad/read/",
+            params={
+                "advertiser_id": int(advertiser_id),
+                "ad_ids": [int(ad_id)],
+            },
+        )
+        return _format_response(result)
+    except CommerceAPIError as e:
+        return _format_error(e)
+    except Exception as e:
+        return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
+
+
+# ── Tools: 千川 (Qianchuan Ecommerce Ads) ────────────────
+
+
+@server.tool()
+async def get_qianchuan_report(
+    advertiser_id: str,
+    start_date: str,
+    end_date: str,
+    page: int = 1,
+    page_size: int = 20,
+) -> str:
+    """千川电商广告报表 (Qianchuan ecommerce ad report).
+
+    Get advertising performance report for Qianchuan (千川) ecommerce ads
+    including impressions, clicks, cost, conversions, GMV, ROI, etc.
+
+    Args:
+        advertiser_id: The advertiser account ID.
+        start_date: Start date in YYYY-MM-DD format.
+        end_date: End date in YYYY-MM-DD format.
+        page: Page number for pagination (default 1).
+        page_size: Number of records per page (default 20, max 100).
+    """
+    client = _get_client()
+    try:
+        result = await client._request(
+            "GET",
+            "2/qianchuan/report/ad/get/",
+            params={
+                "advertiser_id": int(advertiser_id),
+                "start_date": start_date,
+                "end_date": end_date,
+                "page": page,
+                "page_size": min(page_size, 100),
+            },
+        )
+        return _format_response(result)
+    except CommerceAPIError as e:
+        return _format_error(e)
+    except Exception as e:
+        return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
+
+
+@server.tool()
+async def get_qianchuan_campaign_list(
+    advertiser_id: str,
+    page: int = 1,
+    page_size: int = 20,
+) -> str:
+    """千川广告计划列表 (Qianchuan campaign list).
+
+    List Qianchuan (千川) ecommerce ad campaigns under an advertiser account.
+
+    Args:
+        advertiser_id: The advertiser account ID.
+        page: Page number for pagination (default 1).
+        page_size: Number of records per page (default 20, max 100).
+    """
+    client = _get_client()
+    try:
+        result = await client._request(
+            "GET",
+            "2/qianchuan/campaign/list/get/",
+            params={
+                "advertiser_id": int(advertiser_id),
+                "page": page,
+                "page_size": min(page_size, 100),
+            },
+        )
+        return _format_response(result)
+    except CommerceAPIError as e:
+        return _format_error(e)
+    except Exception as e:
+        return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
+
+
+# ── Tools: 星图 (Star/Influencer Marketing) ──────────────
+
+
+@server.tool()
+async def get_star_report(
+    advertiser_id: str,
+    start_date: str,
+    end_date: str,
+    page: int = 1,
+    page_size: int = 20,
+) -> str:
+    """星图达人投放报表 (Star influencer marketing report).
+
+    Get performance report for Star (星图) influencer marketing campaigns
+    including reach, engagement, conversions, cost per engagement, and ROI.
+
+    Args:
+        advertiser_id: The advertiser account ID.
+        start_date: Start date in YYYY-MM-DD format.
+        end_date: End date in YYYY-MM-DD format.
+        page: Page number for pagination (default 1).
+        page_size: Number of records per page (default 20, max 100).
+    """
+    client = _get_client()
+    try:
+        result = await client._request(
+            "GET",
+            "2/star/report/",
+            params={
+                "advertiser_id": int(advertiser_id),
+                "start_date": start_date,
+                "end_date": end_date,
+                "page": page,
+                "page_size": min(page_size, 100),
+            },
+        )
+        return _format_response(result)
+    except CommerceAPIError as e:
+        return _format_error(e)
+    except Exception as e:
+        return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
+
+
+@server.tool()
+async def list_star_tasks(
+    advertiser_id: str,
+    status: str = "",
+    page: int = 1,
+    page_size: int = 20,
+) -> str:
+    """星图任务列表 (Star task list).
+
+    List Star (星图) influencer marketing tasks under an advertiser account,
+    optionally filtered by task status.
+
+    Args:
+        advertiser_id: The advertiser account ID.
+        status: Optional status filter (e.g. "IN_PROGRESS", "COMPLETED", "CANCELLED").
+        page: Page number for pagination (default 1).
+        page_size: Number of records per page (default 20, max 100).
+    """
+    client = _get_client()
+    try:
+        params: dict = {
+            "advertiser_id": int(advertiser_id),
+            "page": page,
+            "page_size": min(page_size, 100),
+        }
+        if status:
+            params["status"] = status
+        result = await client._request("GET", "2/star/task/list/", params=params)
+        return _format_response(result)
+    except CommerceAPIError as e:
+        return _format_error(e)
+    except Exception as e:
+        return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
+
+
+# ── Tools: 素材 (Creative/Materials) ─────────────────────
+
+
+@server.tool()
+async def get_creative_report(
+    advertiser_id: str,
+    start_date: str,
+    end_date: str,
+    page: int = 1,
+    page_size: int = 20,
+) -> str:
+    """素材/创意报表 (Creative/materials report).
+
+    Get creative-level performance report including impressions, clicks,
+    CTR, conversions, and cost per creative.
+
+    Args:
+        advertiser_id: The advertiser account ID.
+        start_date: Start date in YYYY-MM-DD format.
+        end_date: End date in YYYY-MM-DD format.
+        page: Page number for pagination (default 1).
+        page_size: Number of records per page (default 20, max 100).
+    """
+    client = _get_client()
+    try:
+        result = await client._request(
+            "GET",
+            "2/report/creative/get/",
+            params={
+                "advertiser_id": int(advertiser_id),
+                "start_date": start_date,
+                "end_date": end_date,
+                "page": page,
+                "page_size": min(page_size, 100),
+            },
+        )
+        return _format_response(result)
+    except CommerceAPIError as e:
+        return _format_error(e)
+    except Exception as e:
+        return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
+
+
+@server.tool()
+async def list_materials(
+    advertiser_id: str,
+    page: int = 1,
+    page_size: int = 20,
+    material_type: str = "",
+) -> str:
+    """素材库列表 (Material library list).
+
+    List materials in the creative library under an advertiser account,
+    optionally filtered by material type.
+
+    Args:
+        advertiser_id: The advertiser account ID.
+        page: Page number for pagination (default 1).
+        page_size: Number of records per page (default 20, max 100).
+        material_type: Optional material type filter (e.g. "IMAGE", "VIDEO", "TITLE").
+    """
+    client = _get_client()
+    try:
+        params: dict = {
+            "advertiser_id": int(advertiser_id),
+            "page": page,
+            "page_size": min(page_size, 100),
+        }
+        if material_type:
+            params["material_type"] = material_type
+        result = await client._request("GET", "2/material/list/", params=params)
+        return _format_response(result)
+    except CommerceAPIError as e:
+        return _format_error(e)
+    except Exception as e:
+        return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
+
+
+# ── Tools: 人群 (Audience/DMP) ───────────────────────────
+
+
+@server.tool()
+async def list_audience_packages(
+    advertiser_id: str,
+    page: int = 1,
+    page_size: int = 20,
+) -> str:
+    """DMP 人群包列表 (DMP audience package list).
+
+    List DMP (Data Management Platform) audience packages under an advertiser
+    account, including audience size, type, and status.
+
+    Args:
+        advertiser_id: The advertiser account ID.
+        page: Page number for pagination (default 1).
+        page_size: Number of records per page (default 20, max 100).
+    """
+    client = _get_client()
+    try:
+        result = await client._request(
+            "GET",
+            "2/dmp/audience/list/",
+            params={
+                "advertiser_id": int(advertiser_id),
+                "page": page,
+                "page_size": min(page_size, 100),
+            },
+        )
+        return _format_response(result)
+    except CommerceAPIError as e:
+        return _format_error(e)
+    except Exception as e:
+        return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
+
+
+@server.tool()
+async def get_audience_report(
+    advertiser_id: str,
+    start_date: str,
+    end_date: str,
+    page: int = 1,
+    page_size: int = 20,
+) -> str:
+    """人群分析报表 (Audience analysis report).
+
+    Get audience analysis report including demographic breakdown, interest
+    tags, device distribution, and geographic distribution.
+
+    Args:
+        advertiser_id: The advertiser account ID.
+        start_date: Start date in YYYY-MM-DD format.
+        end_date: End date in YYYY-MM-DD format.
+        page: Page number for pagination (default 1).
+        page_size: Number of records per page (default 20, max 100).
+    """
+    client = _get_client()
+    try:
+        result = await client._request(
+            "GET",
+            "2/report/audience/",
+            params={
+                "advertiser_id": int(advertiser_id),
+                "start_date": start_date,
+                "end_date": end_date,
+                "page": page,
+                "page_size": min(page_size, 100),
+            },
+        )
+        return _format_response(result)
+    except CommerceAPIError as e:
+        return _format_error(e)
+    except Exception as e:
+        return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
+
+
+# ── Tools: 优化建议 (Optimization Suggestions) ───────────
+
+
+@server.tool()
+async def get_bid_suggestion(advertiser_id: str, campaign_id: str) -> str:
+    """出价建议 (Bid suggestion).
+
+    Get bid optimization suggestions for a campaign, including recommended bid
+    range based on historical performance and competition analysis.
+
+    Args:
+        advertiser_id: The advertiser account ID.
+        campaign_id: The campaign ID to get bid suggestions for.
+    """
+    client = _get_client()
+    try:
+        result = await client._request(
+            "GET",
+            "2/tools/bid_suggest/",
+            params={
+                "advertiser_id": int(advertiser_id),
+                "campaign_id": int(campaign_id),
+            },
+        )
+        return _format_response(result)
+    except CommerceAPIError as e:
+        return _format_error(e)
+    except Exception as e:
+        return json.dumps({"error": {"message": str(e)}}, ensure_ascii=False)
+
+
+@server.tool()
+async def get_diagnosis(advertiser_id: str, campaign_id: str) -> str:
+    """广告诊断 (Ad diagnosis).
+
+    Get diagnostic analysis for a campaign, identifying delivery issues,
+    budget constraints, audience saturation, and optimization recommendations.
+
+    Args:
+        advertiser_id: The advertiser account ID.
+        campaign_id: The campaign ID to diagnose.
+    """
+    client = _get_client()
+    try:
+        result = await client._request(
+            "GET",
+            "2/tools/diagnosis/",
+            params={
+                "advertiser_id": int(advertiser_id),
+                "campaign_id": int(campaign_id),
+            },
         )
         return _format_response(result)
     except CommerceAPIError as e:

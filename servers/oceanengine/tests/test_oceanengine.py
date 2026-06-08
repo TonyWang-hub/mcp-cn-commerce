@@ -117,7 +117,7 @@ class TestFormatHelpers:
         assert result["error"]["message"] == "Invalid parameters"
 
 
-# ── Tool function tests ─────────────────────────────────────
+# ── Tool function tests: Original 5 tools ───────────────────
 
 
 class TestGetAdvertiserInfo:
@@ -535,6 +535,1008 @@ class TestGetAccountBalance:
         assert data["error"]["message"] == "Account not found"
 
 
+# ── Tool function tests: 千川 (Qianchuan) ───────────────────
+
+
+class TestGetQianchuanReport:
+    """Tests for get_qianchuan_report."""
+
+    @pytest.mark.asyncio
+    async def test_returns_qianchuan_report(self, mock_client, mock_request):
+        """Returns Qianchuan ecommerce ad report with GMV and ROI fields."""
+        mock_request.return_value = {
+            "code": 0,
+            "data": {
+                "list": [
+                    {
+                        "ad_id": 70001,
+                        "ad_name": "千川直播引流",
+                        "show_cnt": 320000,
+                        "click_cnt": 9600,
+                        "stat_cost": 28500.00,
+                        "ctr": 3.0,
+                        "convert_cnt": 580,
+                        "gmv": 152000.00,
+                        "roi": 5.33,
+                    }
+                ],
+                "page_info": {"page": 1, "page_size": 20, "total": 1},
+            },
+        }
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_qianchuan_report
+
+            result = await get_qianchuan_report(
+                advertiser_id="123",
+                start_date="2024-03-01",
+                end_date="2024-03-31",
+            )
+
+        data = json.loads(result)
+        report = data["data"]["list"][0]
+        assert report["ad_id"] == 70001
+        assert "gmv" in report
+        assert "roi" in report
+        assert report["roi"] == 5.33
+
+    @pytest.mark.asyncio
+    async def test_page_size_capped_at_100(self, mock_client, mock_request):
+        """page_size > 100 is capped."""
+        mock_request.return_value = {"code": 0, "data": {"list": []}}
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_qianchuan_report
+
+            await get_qianchuan_report(
+                advertiser_id="123",
+                start_date="2024-01-01",
+                end_date="2024-01-31",
+                page_size=500,
+            )
+
+        call_kwargs = mock_request.call_args[1]
+        assert call_kwargs["params"]["page_size"] == 100
+
+    @pytest.mark.asyncio
+    async def test_api_error_handling(self, mock_client, mock_request):
+        """CommerceAPIError is caught and formatted."""
+        mock_request.side_effect = CommerceAPIError(40100, "Qianchuan report not available")
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_qianchuan_report
+
+            result = await get_qianchuan_report(
+                advertiser_id="123",
+                start_date="2024-01-01",
+                end_date="2024-01-31",
+            )
+
+        data = json.loads(result)
+        assert data["error"]["code"] == 40100
+        assert "Qianchuan" in data["error"]["message"]
+
+
+class TestGetQianchuanCampaignList:
+    """Tests for get_qianchuan_campaign_list."""
+
+    @pytest.mark.asyncio
+    async def test_returns_qianchuan_campaigns(self, mock_client, mock_request):
+        """Returns list of Qianchuan campaigns with budget and status."""
+        mock_request.return_value = {
+            "code": 0,
+            "data": {
+                "list": [
+                    {
+                        "campaign_id": 8001,
+                        "campaign_name": "千川直播推广",
+                        "status": "CAMPAIGN_STATUS_ENABLE",
+                        "budget": 100000.00,
+                        "budget_mode": "BUDGET_MODE_DAY",
+                    },
+                    {
+                        "campaign_id": 8002,
+                        "campaign_name": "千川短视频推广",
+                        "status": "CAMPAIGN_STATUS_DISABLE",
+                        "budget": 50000.00,
+                        "budget_mode": "BUDGET_MODE_DAY",
+                    },
+                ]
+            },
+        }
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_qianchuan_campaign_list
+
+            result = await get_qianchuan_campaign_list(advertiser_id="123")
+
+        data = json.loads(result)
+        assert len(data["data"]["list"]) == 2
+        assert data["data"]["list"][0]["campaign_name"] == "千川直播推广"
+        assert data["data"]["list"][0]["budget"] == 100000.00
+
+    @pytest.mark.asyncio
+    async def test_page_size_capped_at_100(self, mock_client, mock_request):
+        """page_size > 100 is capped."""
+        mock_request.return_value = {"code": 0, "data": {"list": []}}
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_qianchuan_campaign_list
+
+            await get_qianchuan_campaign_list(advertiser_id="123", page_size=999)
+
+        call_kwargs = mock_request.call_args[1]
+        assert call_kwargs["params"]["page_size"] == 100
+
+    @pytest.mark.asyncio
+    async def test_api_error_handling(self, mock_client, mock_request):
+        """CommerceAPIError is caught and formatted."""
+        mock_request.side_effect = CommerceAPIError(40100, "Advertiser not authorized for Qianchuan")
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_qianchuan_campaign_list
+
+            result = await get_qianchuan_campaign_list(advertiser_id="999")
+
+        data = json.loads(result)
+        assert data["error"]["code"] == 40100
+        assert "Qianchuan" in data["error"]["message"]
+
+
+# ── Tool function tests: 星图 (Star/Influencer) ─────────────
+
+
+class TestGetStarReport:
+    """Tests for get_star_report."""
+
+    @pytest.mark.asyncio
+    async def test_returns_star_report(self, mock_client, mock_request):
+        """Returns Star influencer report with engagement and reach metrics."""
+        mock_request.return_value = {
+            "code": 0,
+            "data": {
+                "list": [
+                    {
+                        "task_id": 9001,
+                        "influencer_name": "达人张伟",
+                        "fans_count": 520000,
+                        "play_cnt": 1200000,
+                        "like_cnt": 85000,
+                        "comment_cnt": 3200,
+                        "share_cnt": 1500,
+                        "engage_rate": 7.5,
+                    }
+                ],
+                "page_info": {"page": 1, "page_size": 20, "total": 1},
+            },
+        }
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_star_report
+
+            result = await get_star_report(
+                advertiser_id="123",
+                start_date="2024-04-01",
+                end_date="2024-04-30",
+            )
+
+        data = json.loads(result)
+        report = data["data"]["list"][0]
+        assert report["task_id"] == 9001
+        assert report["influencer_name"] == "达人张伟"
+        assert "engage_rate" in report
+        assert report["fans_count"] == 520000
+
+    @pytest.mark.asyncio
+    async def test_page_size_capped_at_100(self, mock_client, mock_request):
+        """page_size > 100 is capped."""
+        mock_request.return_value = {"code": 0, "data": {"list": []}}
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_star_report
+
+            await get_star_report(
+                advertiser_id="123",
+                start_date="2024-01-01",
+                end_date="2024-01-31",
+                page_size=500,
+            )
+
+        call_kwargs = mock_request.call_args[1]
+        assert call_kwargs["params"]["page_size"] == 100
+
+    @pytest.mark.asyncio
+    async def test_api_error_handling(self, mock_client, mock_request):
+        """CommerceAPIError is caught and formatted."""
+        mock_request.side_effect = CommerceAPIError(40100, "Star report unavailable")
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_star_report
+
+            result = await get_star_report(
+                advertiser_id="123",
+                start_date="2024-01-01",
+                end_date="2024-01-31",
+            )
+
+        data = json.loads(result)
+        assert data["error"]["code"] == 40100
+        assert "Star" in data["error"]["message"]
+
+
+class TestListStarTasks:
+    """Tests for list_star_tasks."""
+
+    @pytest.mark.asyncio
+    async def test_returns_star_tasks(self, mock_client, mock_request):
+        """Returns list of Star influencer tasks."""
+        mock_request.return_value = {
+            "code": 0,
+            "data": {
+                "list": [
+                    {
+                        "task_id": 9501,
+                        "task_name": "美妆种草合作",
+                        "influencer_name": "达人李娜",
+                        "status": "IN_PROGRESS",
+                        "budget": 30000.00,
+                        "create_time": "2024-05-01 10:00:00",
+                    },
+                    {
+                        "task_id": 9502,
+                        "task_name": "品牌代言合作",
+                        "influencer_name": "达人王强",
+                        "status": "COMPLETED",
+                        "budget": 50000.00,
+                        "create_time": "2024-04-15 09:30:00",
+                    },
+                ]
+            },
+        }
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import list_star_tasks
+
+            result = await list_star_tasks(advertiser_id="123")
+
+        data = json.loads(result)
+        assert len(data["data"]["list"]) == 2
+        assert data["data"]["list"][0]["status"] == "IN_PROGRESS"
+        assert data["data"]["list"][1]["task_name"] == "品牌代言合作"
+
+    @pytest.mark.asyncio
+    async def test_with_status_filter(self, mock_client, mock_request):
+        """Status filter is forwarded to the API."""
+        mock_request.return_value = {
+            "code": 0,
+            "data": {
+                "list": [
+                    {
+                        "task_id": 9503,
+                        "task_name": "已完成任务",
+                        "status": "COMPLETED",
+                    }
+                ]
+            },
+        }
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import list_star_tasks
+
+            await list_star_tasks(advertiser_id="123", status="COMPLETED")
+
+        call_kwargs = mock_request.call_args[1]
+        assert call_kwargs["params"]["status"] == "COMPLETED"
+
+    @pytest.mark.asyncio
+    async def test_no_status_param_when_empty(self, mock_client, mock_request):
+        """When status is empty string, it is NOT added to params."""
+        mock_request.return_value = {"code": 0, "data": {"list": []}}
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import list_star_tasks
+
+            await list_star_tasks(advertiser_id="123", status="")
+
+        call_kwargs = mock_request.call_args[1]
+        assert "status" not in call_kwargs["params"]
+
+    @pytest.mark.asyncio
+    async def test_page_size_capped_at_100(self, mock_client, mock_request):
+        """page_size > 100 is capped."""
+        mock_request.return_value = {"code": 0, "data": {"list": []}}
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import list_star_tasks
+
+            await list_star_tasks(advertiser_id="123", page_size=999)
+
+        call_kwargs = mock_request.call_args[1]
+        assert call_kwargs["params"]["page_size"] == 100
+
+    @pytest.mark.asyncio
+    async def test_api_error_handling(self, mock_client, mock_request):
+        """CommerceAPIError is caught and formatted."""
+        mock_request.side_effect = CommerceAPIError(40100, "Star tasks not found")
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import list_star_tasks
+
+            result = await list_star_tasks(advertiser_id="999")
+
+        data = json.loads(result)
+        assert data["error"]["code"] == 40100
+        assert "not found" in data["error"]["message"]
+
+
+# ── Tool function tests: 广告管理 (Ad Management) ───────────
+
+
+class TestGetCampaignDetail:
+    """Tests for get_campaign_detail."""
+
+    @pytest.mark.asyncio
+    async def test_returns_campaign_detail(self, mock_client, mock_request):
+        """Returns detailed campaign info including budget, targeting, and status."""
+        mock_request.return_value = {
+            "code": 0,
+            "data": {
+                "campaign_id": 1001,
+                "campaign_name": "品牌推广-春季",
+                "status": "CAMPAIGN_STATUS_ENABLE",
+                "budget": 200000.00,
+                "budget_mode": "BUDGET_MODE_DAY",
+                "delivery_mode": "DELIVERY_MODE_STANDARD",
+                "targeting": {
+                    "age": ["18-24", "25-34"],
+                    "gender": "ALL",
+                    "region": ["北京", "上海", "广州"],
+                },
+            },
+        }
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_campaign_detail
+
+            result = await get_campaign_detail(
+                advertiser_id="123", campaign_id="1001"
+            )
+
+        data = json.loads(result)
+        assert data["data"]["campaign_id"] == 1001
+        assert data["data"]["campaign_name"] == "品牌推广-春季"
+        assert "targeting" in data["data"]
+        assert data["data"]["budget"] == 200000.00
+
+    @pytest.mark.asyncio
+    async def test_api_error_handling(self, mock_client, mock_request):
+        """CommerceAPIError is caught and formatted."""
+        mock_request.side_effect = CommerceAPIError(40100, "Campaign not found")
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_campaign_detail
+
+            result = await get_campaign_detail(
+                advertiser_id="123", campaign_id="99999"
+            )
+
+        data = json.loads(result)
+        assert data["error"]["code"] == 40100
+        assert "not found" in data["error"]["message"]
+
+
+class TestListAds:
+    """Tests for list_ads."""
+
+    @pytest.mark.asyncio
+    async def test_returns_ad_list(self, mock_client, mock_request):
+        """Returns list of ad creatives with delivery status."""
+        mock_request.return_value = {
+            "code": 0,
+            "data": {
+                "list": [
+                    {
+                        "ad_id": 50001,
+                        "ad_name": "信息流广告A",
+                        "campaign_id": 1001,
+                        "status": "AD_STATUS_DELIVERING",
+                        "creative_type": "IMAGE",
+                    },
+                    {
+                        "ad_id": 50002,
+                        "ad_name": "短视频广告B",
+                        "campaign_id": 1001,
+                        "status": "AD_STATUS_DELIVERING",
+                        "creative_type": "VIDEO",
+                    },
+                ]
+            },
+        }
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import list_ads
+
+            result = await list_ads(advertiser_id="123")
+
+        data = json.loads(result)
+        assert len(data["data"]["list"]) == 2
+        assert data["data"]["list"][0]["ad_name"] == "信息流广告A"
+        assert data["data"]["list"][1]["creative_type"] == "VIDEO"
+
+    @pytest.mark.asyncio
+    async def test_with_campaign_filter(self, mock_client, mock_request):
+        """Campaign ID filter is forwarded when provided."""
+        mock_request.return_value = {
+            "code": 0,
+            "data": {
+                "list": [
+                    {
+                        "ad_id": 50003,
+                        "ad_name": "指定计划广告",
+                        "campaign_id": 2001,
+                        "status": "AD_STATUS_DELIVERING",
+                    }
+                ]
+            },
+        }
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import list_ads
+
+            await list_ads(advertiser_id="123", campaign_id="2001")
+
+        call_kwargs = mock_request.call_args[1]
+        assert call_kwargs["params"]["campaign_id"] == 2001
+
+    @pytest.mark.asyncio
+    async def test_no_campaign_param_when_empty(self, mock_client, mock_request):
+        """When campaign_id is empty, it is NOT added to params."""
+        mock_request.return_value = {"code": 0, "data": {"list": []}}
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import list_ads
+
+            await list_ads(advertiser_id="123", campaign_id="")
+
+        call_kwargs = mock_request.call_args[1]
+        assert "campaign_id" not in call_kwargs["params"]
+
+    @pytest.mark.asyncio
+    async def test_page_size_capped_at_100(self, mock_client, mock_request):
+        """page_size > 100 is capped."""
+        mock_request.return_value = {"code": 0, "data": {"list": []}}
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import list_ads
+
+            await list_ads(advertiser_id="123", page_size=500)
+
+        call_kwargs = mock_request.call_args[1]
+        assert call_kwargs["params"]["page_size"] == 100
+
+    @pytest.mark.asyncio
+    async def test_api_error_handling(self, mock_client, mock_request):
+        """CommerceAPIError is caught and formatted."""
+        mock_request.side_effect = CommerceAPIError(40100, "Ads not found")
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import list_ads
+
+            result = await list_ads(advertiser_id="999")
+
+        data = json.loads(result)
+        assert data["error"]["code"] == 40100
+        assert "not found" in data["error"]["message"]
+
+
+class TestGetAdDetail:
+    """Tests for get_ad_detail."""
+
+    @pytest.mark.asyncio
+    async def test_returns_ad_detail(self, mock_client, mock_request):
+        """Returns detailed ad creative info with creative content and settings."""
+        mock_request.return_value = {
+            "code": 0,
+            "data": {
+                "ad_id": 50001,
+                "ad_name": "信息流广告素材A",
+                "campaign_id": 1001,
+                "status": "AD_STATUS_DELIVERING",
+                "creative_type": "IMAGE",
+                "creative_materials": [
+                    {"image_url": "https://cdn.example.com/img/001.jpg"},
+                    {"title": "限时优惠，不容错过"},
+                ],
+                "delivery_settings": {
+                    "bid": 15.00,
+                    "bid_type": "BID_TYPE_CPM",
+                    "schedule_start": "2024-06-01",
+                    "schedule_end": "2024-06-30",
+                },
+            },
+        }
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_ad_detail
+
+            result = await get_ad_detail(advertiser_id="123", ad_id="50001")
+
+        data = json.loads(result)
+        assert data["data"]["ad_id"] == 50001
+        assert data["data"]["ad_name"] == "信息流广告素材A"
+        assert "creative_materials" in data["data"]
+        assert "delivery_settings" in data["data"]
+        assert data["data"]["delivery_settings"]["bid"] == 15.00
+
+    @pytest.mark.asyncio
+    async def test_api_error_handling(self, mock_client, mock_request):
+        """CommerceAPIError is caught and formatted."""
+        mock_request.side_effect = CommerceAPIError(40100, "Ad not found")
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_ad_detail
+
+            result = await get_ad_detail(advertiser_id="123", ad_id="99999")
+
+        data = json.loads(result)
+        assert data["error"]["code"] == 40100
+        assert "not found" in data["error"]["message"]
+
+
+# ── Tool function tests: 素材 (Creative/Materials) ──────────
+
+
+class TestGetCreativeReport:
+    """Tests for get_creative_report."""
+
+    @pytest.mark.asyncio
+    async def test_returns_creative_report(self, mock_client, mock_request):
+        """Returns creative-level performance data."""
+        mock_request.return_value = {
+            "code": 0,
+            "data": {
+                "list": [
+                    {
+                        "creative_id": 60001,
+                        "creative_name": "素材-夏日促销",
+                        "show_cnt": 450000,
+                        "click_cnt": 13500,
+                        "stat_cost": 18000.00,
+                        "ctr": 3.0,
+                        "cpc": 1.33,
+                        "convert_cnt": 450,
+                    }
+                ],
+                "page_info": {"page": 1, "page_size": 20, "total": 1},
+            },
+        }
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_creative_report
+
+            result = await get_creative_report(
+                advertiser_id="123",
+                start_date="2024-05-01",
+                end_date="2024-05-31",
+            )
+
+        data = json.loads(result)
+        report = data["data"]["list"][0]
+        assert report["creative_id"] == 60001
+        assert "ctr" in report
+        assert "cpc" in report
+        assert report["convert_cnt"] == 450
+
+    @pytest.mark.asyncio
+    async def test_page_size_capped_at_100(self, mock_client, mock_request):
+        """page_size > 100 is capped."""
+        mock_request.return_value = {"code": 0, "data": {"list": []}}
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_creative_report
+
+            await get_creative_report(
+                advertiser_id="123",
+                start_date="2024-01-01",
+                end_date="2024-01-31",
+                page_size=500,
+            )
+
+        call_kwargs = mock_request.call_args[1]
+        assert call_kwargs["params"]["page_size"] == 100
+
+    @pytest.mark.asyncio
+    async def test_api_error_handling(self, mock_client, mock_request):
+        """CommerceAPIError is caught and formatted."""
+        mock_request.side_effect = CommerceAPIError(40100, "Creative report unavailable")
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_creative_report
+
+            result = await get_creative_report(
+                advertiser_id="123",
+                start_date="2024-01-01",
+                end_date="2024-01-31",
+            )
+
+        data = json.loads(result)
+        assert data["error"]["code"] == 40100
+        assert "Creative" in data["error"]["message"]
+
+
+class TestListMaterials:
+    """Tests for list_materials."""
+
+    @pytest.mark.asyncio
+    async def test_returns_material_list(self, mock_client, mock_request):
+        """Returns list of creative materials."""
+        mock_request.return_value = {
+            "code": 0,
+            "data": {
+                "list": [
+                    {
+                        "material_id": "mat_001",
+                        "material_name": "夏日促销banner",
+                        "material_type": "IMAGE",
+                        "width": 1200,
+                        "height": 628,
+                        "file_size": 204800,
+                        "create_time": "2024-05-10 14:30:00",
+                    },
+                    {
+                        "material_id": "mat_002",
+                        "material_name": "产品介绍视频",
+                        "material_type": "VIDEO",
+                        "duration": 15,
+                        "file_size": 5242880,
+                        "create_time": "2024-05-12 09:00:00",
+                    },
+                ]
+            },
+        }
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import list_materials
+
+            result = await list_materials(advertiser_id="123")
+
+        data = json.loads(result)
+        assert len(data["data"]["list"]) == 2
+        assert data["data"]["list"][0]["material_type"] == "IMAGE"
+        assert data["data"]["list"][1]["material_type"] == "VIDEO"
+
+    @pytest.mark.asyncio
+    async def test_with_material_type_filter(self, mock_client, mock_request):
+        """Material type filter is forwarded to the API."""
+        mock_request.return_value = {
+            "code": 0,
+            "data": {
+                "list": [
+                    {
+                        "material_id": "mat_003",
+                        "material_name": "视频素材",
+                        "material_type": "VIDEO",
+                    }
+                ]
+            },
+        }
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import list_materials
+
+            await list_materials(advertiser_id="123", material_type="VIDEO")
+
+        call_kwargs = mock_request.call_args[1]
+        assert call_kwargs["params"]["material_type"] == "VIDEO"
+
+    @pytest.mark.asyncio
+    async def test_no_material_type_param_when_empty(self, mock_client, mock_request):
+        """When material_type is empty, it is NOT added to params."""
+        mock_request.return_value = {"code": 0, "data": {"list": []}}
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import list_materials
+
+            await list_materials(advertiser_id="123", material_type="")
+
+        call_kwargs = mock_request.call_args[1]
+        assert "material_type" not in call_kwargs["params"]
+
+    @pytest.mark.asyncio
+    async def test_page_size_capped_at_100(self, mock_client, mock_request):
+        """page_size > 100 is capped."""
+        mock_request.return_value = {"code": 0, "data": {"list": []}}
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import list_materials
+
+            await list_materials(advertiser_id="123", page_size=500)
+
+        call_kwargs = mock_request.call_args[1]
+        assert call_kwargs["params"]["page_size"] == 100
+
+    @pytest.mark.asyncio
+    async def test_api_error_handling(self, mock_client, mock_request):
+        """CommerceAPIError is caught and formatted."""
+        mock_request.side_effect = CommerceAPIError(40100, "Material library access denied")
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import list_materials
+
+            result = await list_materials(advertiser_id="999")
+
+        data = json.loads(result)
+        assert data["error"]["code"] == 40100
+        assert "denied" in data["error"]["message"]
+
+
+# ── Tool function tests: 人群 (Audience/DMP) ─────────────
+
+
+class TestListAudiencePackages:
+    """Tests for list_audience_packages."""
+
+    @pytest.mark.asyncio
+    async def test_returns_audience_packages(self, mock_client, mock_request):
+        """Returns list of DMP audience packages with size and status."""
+        mock_request.return_value = {
+            "code": 0,
+            "data": {
+                "list": [
+                    {
+                        "audience_id": "aud_1001",
+                        "audience_name": "高消费女性用户",
+                        "audience_size": 2800000,
+                        "audience_type": "CUSTOM",
+                        "status": "ACTIVE",
+                        "create_time": "2024-04-01 10:00:00",
+                    },
+                    {
+                        "audience_id": "aud_1002",
+                        "audience_name": "一线城市白领",
+                        "audience_size": 1500000,
+                        "audience_type": "LOOKALIKE",
+                        "status": "ACTIVE",
+                        "create_time": "2024-04-15 14:00:00",
+                    },
+                ]
+            },
+        }
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import list_audience_packages
+
+            result = await list_audience_packages(advertiser_id="123")
+
+        data = json.loads(result)
+        assert len(data["data"]["list"]) == 2
+        assert data["data"]["list"][0]["audience_name"] == "高消费女性用户"
+        assert data["data"]["list"][0]["audience_size"] == 2800000
+        assert data["data"]["list"][1]["audience_type"] == "LOOKALIKE"
+
+    @pytest.mark.asyncio
+    async def test_page_size_capped_at_100(self, mock_client, mock_request):
+        """page_size > 100 is capped."""
+        mock_request.return_value = {"code": 0, "data": {"list": []}}
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import list_audience_packages
+
+            await list_audience_packages(advertiser_id="123", page_size=999)
+
+        call_kwargs = mock_request.call_args[1]
+        assert call_kwargs["params"]["page_size"] == 100
+
+    @pytest.mark.asyncio
+    async def test_api_error_handling(self, mock_client, mock_request):
+        """CommerceAPIError is caught and formatted."""
+        mock_request.side_effect = CommerceAPIError(40100, "DMP access not authorized")
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import list_audience_packages
+
+            result = await list_audience_packages(advertiser_id="999")
+
+        data = json.loads(result)
+        assert data["error"]["code"] == 40100
+        assert "authorized" in data["error"]["message"]
+
+
+class TestGetAudienceReport:
+    """Tests for get_audience_report."""
+
+    @pytest.mark.asyncio
+    async def test_returns_audience_analysis(self, mock_client, mock_request):
+        """Returns audience analysis with demographic and interest breakdown."""
+        mock_request.return_value = {
+            "code": 0,
+            "data": {
+                "list": [
+                    {
+                        "dimension": "age",
+                        "items": [
+                            {"label": "18-24", "ratio": 0.35},
+                            {"label": "25-34", "ratio": 0.45},
+                            {"label": "35-44", "ratio": 0.15},
+                            {"label": "45+", "ratio": 0.05},
+                        ],
+                    },
+                    {
+                        "dimension": "gender",
+                        "items": [
+                            {"label": "男", "ratio": 0.55},
+                            {"label": "女", "ratio": 0.45},
+                        ],
+                    },
+                ]
+            },
+        }
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_audience_report
+
+            result = await get_audience_report(
+                advertiser_id="123",
+                start_date="2024-05-01",
+                end_date="2024-05-31",
+            )
+
+        data = json.loads(result)
+        breakdown = data["data"]["list"]
+        assert len(breakdown) == 2
+        assert breakdown[0]["dimension"] == "age"
+        assert len(breakdown[0]["items"]) == 4
+        assert breakdown[1]["dimension"] == "gender"
+
+    @pytest.mark.asyncio
+    async def test_page_size_capped_at_100(self, mock_client, mock_request):
+        """page_size > 100 is capped."""
+        mock_request.return_value = {"code": 0, "data": {"list": []}}
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_audience_report
+
+            await get_audience_report(
+                advertiser_id="123",
+                start_date="2024-01-01",
+                end_date="2024-01-31",
+                page_size=500,
+            )
+
+        call_kwargs = mock_request.call_args[1]
+        assert call_kwargs["params"]["page_size"] == 100
+
+    @pytest.mark.asyncio
+    async def test_api_error_handling(self, mock_client, mock_request):
+        """CommerceAPIError is caught and formatted."""
+        mock_request.side_effect = CommerceAPIError(40100, "Audience report not available")
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_audience_report
+
+            result = await get_audience_report(
+                advertiser_id="123",
+                start_date="2024-01-01",
+                end_date="2024-01-31",
+            )
+
+        data = json.loads(result)
+        assert data["error"]["code"] == 40100
+        assert "Audience" in data["error"]["message"]
+
+
+# ── Tool function tests: 优化建议 (Optimization) ─────────────
+
+
+class TestGetBidSuggestion:
+    """Tests for get_bid_suggestion."""
+
+    @pytest.mark.asyncio
+    async def test_returns_bid_suggestions(self, mock_client, mock_request):
+        """Returns bid suggestions with min, max, and recommended bid."""
+        mock_request.return_value = {
+            "code": 0,
+            "data": {
+                "campaign_id": 1001,
+                "suggestions": {
+                    "bid_min": 8.00,
+                    "bid_max": 25.00,
+                    "bid_recommended": 15.50,
+                    "competition_level": "MEDIUM",
+                    "estimated_impressions": 500000,
+                },
+            },
+        }
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_bid_suggestion
+
+            result = await get_bid_suggestion(
+                advertiser_id="123", campaign_id="1001"
+            )
+
+        data = json.loads(result)
+        assert data["data"]["campaign_id"] == 1001
+        suggestions = data["data"]["suggestions"]
+        assert suggestions["bid_min"] == 8.00
+        assert suggestions["bid_max"] == 25.00
+        assert suggestions["bid_recommended"] == 15.50
+        assert "competition_level" in suggestions
+
+    @pytest.mark.asyncio
+    async def test_api_error_handling(self, mock_client, mock_request):
+        """CommerceAPIError is caught and formatted."""
+        mock_request.side_effect = CommerceAPIError(40100, "Campaign has no delivery data for bid suggestion")
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_bid_suggestion
+
+            result = await get_bid_suggestion(
+                advertiser_id="123", campaign_id="99999"
+            )
+
+        data = json.loads(result)
+        assert data["error"]["code"] == 40100
+        assert "bid suggestion" in data["error"]["message"]
+
+
+class TestGetDiagnosis:
+    """Tests for get_diagnosis."""
+
+    @pytest.mark.asyncio
+    async def test_returns_diagnosis(self, mock_client, mock_request):
+        """Returns campaign diagnosis with issues and recommendations."""
+        mock_request.return_value = {
+            "code": 0,
+            "data": {
+                "campaign_id": 1001,
+                "diagnosis_score": 75,
+                "issues": [
+                    {
+                        "type": "BUDGET_LIMIT",
+                        "severity": "MEDIUM",
+                        "description": "日预算多次消耗达到上限，建议提高预算",
+                    },
+                    {
+                        "type": "AUDIENCE_SATURATION",
+                        "severity": "LOW",
+                        "description": "定向人群规模偏小，建议扩展兴趣标签",
+                    },
+                ],
+                "recommendations": [
+                    "将日预算从 5000 提高到 10000",
+                    "添加相关兴趣标签扩大受众规模",
+                ],
+            },
+        }
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_diagnosis
+
+            result = await get_diagnosis(advertiser_id="123", campaign_id="1001")
+
+        data = json.loads(result)
+        assert data["data"]["campaign_id"] == 1001
+        assert data["data"]["diagnosis_score"] == 75
+        assert len(data["data"]["issues"]) == 2
+        assert data["data"]["issues"][0]["type"] == "BUDGET_LIMIT"
+        assert len(data["data"]["recommendations"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_api_error_handling(self, mock_client, mock_request):
+        """CommerceAPIError is caught and formatted."""
+        mock_request.side_effect = CommerceAPIError(40100, "Diagnosis not available for this campaign")
+
+        with _patch_get_client(mock_client):
+            from mcp_oceanengine.server import get_diagnosis
+
+            result = await get_diagnosis(advertiser_id="123", campaign_id="99999")
+
+        data = json.loads(result)
+        assert data["error"]["code"] == 40100
+        assert "Diagnosis" in data["error"]["message"]
+
+
 # ── Cross-tool pagination summary ───────────────────────────
 
 
@@ -556,6 +1558,42 @@ class TestPaginationCapping:
             (
                 "list_campaigns",
                 {"advertiser_id": "1", "page_size": 300},
+            ),
+            (
+                "get_qianchuan_report",
+                {"advertiser_id": "1", "start_date": "2024-01-01", "end_date": "2024-01-31", "page_size": 300},
+            ),
+            (
+                "get_qianchuan_campaign_list",
+                {"advertiser_id": "1", "page_size": 300},
+            ),
+            (
+                "get_star_report",
+                {"advertiser_id": "1", "start_date": "2024-01-01", "end_date": "2024-01-31", "page_size": 300},
+            ),
+            (
+                "list_star_tasks",
+                {"advertiser_id": "1", "page_size": 300},
+            ),
+            (
+                "list_ads",
+                {"advertiser_id": "1", "page_size": 300},
+            ),
+            (
+                "get_creative_report",
+                {"advertiser_id": "1", "start_date": "2024-01-01", "end_date": "2024-01-31", "page_size": 300},
+            ),
+            (
+                "list_materials",
+                {"advertiser_id": "1", "page_size": 300},
+            ),
+            (
+                "list_audience_packages",
+                {"advertiser_id": "1", "page_size": 300},
+            ),
+            (
+                "get_audience_report",
+                {"advertiser_id": "1", "start_date": "2024-01-01", "end_date": "2024-01-31", "page_size": 300},
             ),
         ],
     )

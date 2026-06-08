@@ -13,7 +13,7 @@ import logging
 import os
 import time
 import urllib.parse
-from typing import Any
+from typing import Any, Callable, Awaitable
 
 import httpx
 
@@ -22,15 +22,17 @@ logger = logging.getLogger("mcp-cn-commerce")
 
 
 class SignMethod:
-    MD5 = "md5"
-    HMAC_SHA256 = "hmac_sha256"
-    HMAC_MD5 = "hmac_md5"
+    """Supported signing methods for API authentication."""
+
+    MD5: str = "md5"
+    HMAC_SHA256: str = "hmac_sha256"
+    HMAC_MD5: str = "hmac_md5"
 
 
 class ConfigValidationError(Exception):
     """Raised when required configuration is missing."""
 
-    def __init__(self, platform: str, missing_vars: list[str]):
+    def __init__(self, platform: str, missing_vars: list[str]) -> None:
         self.platform = platform
         self.missing_vars = missing_vars
         msg = f"[{platform}] Missing required environment variables: {', '.join(missing_vars)}"
@@ -40,12 +42,12 @@ class ConfigValidationError(Exception):
 class RateLimiter:
     """Simple rate limiter to prevent API throttling."""
 
-    def __init__(self, requests_per_second: float = 10.0):
+    def __init__(self, requests_per_second: float = 10.0) -> None:
         self.requests_per_second = requests_per_second
         self.min_interval = 1.0 / requests_per_second
-        self.last_request_time = 0.0
+        self.last_request_time: float = 0.0
 
-    async def acquire(self):
+    async def acquire(self) -> None:
         """Wait if necessary to respect rate limit."""
         now = time.time()
         time_since_last = now - self.last_request_time
@@ -72,7 +74,7 @@ class CommerceMCPBase:
     access_token: str = ""
     rate_limiter: RateLimiter | None = None
 
-    def __init__(self, app_key: str = "", app_secret: str = "", access_token: str = ""):
+    def __init__(self, app_key: str = "", app_secret: str = "", access_token: str = "") -> None:
         self.app_key = app_key
         self.app_secret = app_secret
         self.access_token = access_token
@@ -151,7 +153,7 @@ class CommerceMCPBase:
 
     # ── Signing ───────────────────────────────────────────
 
-    def _sign(self, params: dict) -> str:
+    def _sign(self, params: dict[str, Any]) -> str:
         """Generate signature for request params."""
         # Remove sign and sign_method, sort by key
         to_sign = {k: v for k, v in params.items() if k not in ("sign", "sign_method") and v != ""}
@@ -166,9 +168,15 @@ class CommerceMCPBase:
 
     # ── Pagination ────────────────────────────────────────
 
-    async def _paginate(self, fetch_fn, page_key: str = "page", page_size: int = 50, max_pages: int = 50) -> list[dict]:
+    async def _paginate(
+        self,
+        fetch_fn: Callable[..., Awaitable[dict[str, Any]]],
+        page_key: str = "page",
+        page_size: int = 50,
+        max_pages: int = 50,
+    ) -> list[dict[str, Any]]:
         """Generic pagination helper."""
-        results = []
+        results: list[dict[str, Any]] = []
         for page in range(1, max_pages + 1):
             data = await fetch_fn(page=page, page_size=page_size)
             items = data.get("result", data.get("list", []))
@@ -183,7 +191,7 @@ class CommerceMCPBase:
 class CommerceAPIError(Exception):
     """Normalized API error across all platforms."""
 
-    def __init__(self, code: int, msg: str):
+    def __init__(self, code: int, msg: str) -> None:
         self.code = code
         self.msg = msg
         super().__init__(f"[{code}] {msg}")

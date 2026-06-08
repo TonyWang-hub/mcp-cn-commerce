@@ -85,7 +85,7 @@ class CommerceMCPBase:
         if self.sign_method == SignMethod.MD5:
             return hashlib.md5(raw.encode()).hexdigest().upper()
         elif self.sign_method == SignMethod.HMAC_SHA256:
-            return hmac.new(self.app_secret.encode(), raw.encode(), hashlib.sha256).hexdigest().upper()
+            return hmac.HMAC(self.app_secret.encode(), raw.encode(), hashlib.sha256).hexdigest().upper()
         raise ValueError(f"Unknown sign method: {self.sign_method}")
 
     # ── Pagination ────────────────────────────────────────

@@ -336,7 +336,11 @@ class TestMetricsCollector:
     def test_record_failed_request(self):
         collector = MetricsCollector()
         collector.record_request(
-            "/api/test", latency_ms=100.0, success=False, error_code=40001, error_msg="bad",
+            "/api/test",
+            latency_ms=100.0,
+            success=False,
+            error_code=40001,
+            error_msg="bad",
         )
         ep = collector.get_endpoint_metrics("/api/test")
         assert ep.request_count == 1
@@ -443,7 +447,8 @@ class TestHealthCheck:
 
     @pytest.mark.asyncio
     async def test_health_check_connection_error(self):
-        from unittest.mock import AsyncMock, patch as mock_patch
+        from unittest.mock import AsyncMock
+        from unittest.mock import patch as mock_patch
 
         client = CommerceMCPBase(app_key="k", app_secret="s")
         client.BASE_URL = "http://127.0.0.1:99999"

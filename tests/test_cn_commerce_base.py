@@ -9,7 +9,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -23,11 +23,16 @@ from cn_commerce_base import (
     CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,
+    DEFAULT_RETRY,
     EndpointMetrics,
     MetricsCollector,
+    RATE_LIMIT_RETRY,
     RateLimiter,
+    RetryConfig,
+    RetryableError,
     SignMethod,
     format_error_response,
+    with_retry,
 )
 
 # ── SignMethod Tests ──────────────────────────────────────
@@ -458,3 +463,460 @@ class TestHealthCheck:
             result = await client.health_check()
         assert result["api_reachable"] is False
         assert "error" in result
+
+
+# ── RetryConfig Tests ─────────────────────────────────────
+
+
+class TestRetryConfig:
+    """Tests for RetryConfig dataclass."""
+
+    def test_default_values(self):
+        cfg = RetryConfig()
+        assert cfg.max_retries == 3
+        assert cfg.base_delay == 1.0
+        assert cfg.max_delay == 60.0
+        assert cfg.jitter is True
+        assert 429 in cfg.retryable_status_codes
+        assert 500 in cfg.retryable_status_codes
+        assert 502 in cfg.retryable_status_codes
+        assert 503 in cfg.retryable_status_codes
+        assert 504 in cfg.retryable_status_codes
+        assert cfg.retryable_api_codes == set()
+
+    def test_custom_values(self):
+        cfg = RetryConfig(
+            max_retries=5,
+            base_delay=2.0,
+            max_delay=120.0,
+            jitter=False,
+            retryable_status_codes={429},
+            retryable_api_codes={40001, 40002},
+        )
+        assert cfg.max_retries == 5
+        assert cfg.base_delay == 2.0
+        assert cfg.max_delay == 120.0
+        assert cfg.jitter is False
+        assert cfg.retryable_status_codes == {429}
+        assert cfg.retryable_api_codes == {40001, 40002}
+
+    def test_compute_delay_exponential(self):
+        cfg = RetryConfig(base_delay=1.0, jitter=False)
+        assert cfg.compute_delay(0) == 1.0
+        assert cfg.compute_delay(1) == 2.0
+        assert cfg.compute_delay(2) == 4.0
+        assert cfg.compute_delay(3) == 8.0
+
+    def test_compute_delay_capped_at_max(self):
+        cfg = RetryConfig(base_delay=1.0, max_delay=5.0, jitter=False)
+        assert cfg.compute_delay(10) == 5.0  # 2^10 = 1024, capped to 5.0
+
+    def test_compute_delay_with_jitter(self):
+        cfg = RetryConfig(base_delay=4.0, jitter=True)
+        delays = [cfg.compute_delay(0) for _ in range(100)]
+        # With jitter, delay should be in [2.0, 6.0] (4.0 * [0.5, 1.5])
+        assert all(2.0 <= d <= 6.0 for d in delays)
+        # Should have some variation (not all the same)
+        assert len(set(delays)) > 1
+
+    def test_should_retry_http_status(self):
+        cfg = RetryConfig()
+        assert cfg.should_retry_http_status(429) is True
+        assert cfg.should_retry_http_status(500) is True
+        assert cfg.should_retry_http_status(503) is True
+        assert cfg.should_retry_http_status(200) is False
+        assert cfg.should_retry_http_status(400) is False
+        assert cfg.should_retry_http_status(404) is False
+
+    def test_should_retry_api_code(self):
+        cfg = RetryConfig(retryable_api_codes={40001, 50001})
+        assert cfg.should_retry_api_code(40001) is True
+        assert cfg.should_retry_api_code(50001) is True
+        assert cfg.should_retry_api_code(40002) is False
+
+    def test_should_retry_exception_connect_error(self):
+        cfg = RetryConfig()
+        assert cfg.should_retry_exception(httpx.ConnectError("timeout")) is True
+
+    def test_should_retry_exception_read_timeout(self):
+        cfg = RetryConfig()
+        assert cfg.should_retry_exception(httpx.ReadTimeout("timeout")) is True
+
+    def test_should_retry_exception_write_timeout(self):
+        cfg = RetryConfig()
+        assert cfg.should_retry_exception(httpx.WriteTimeout("timeout")) is True
+
+    def test_should_retry_exception_pool_timeout(self):
+        cfg = RetryConfig()
+        assert cfg.should_retry_exception(httpx.PoolTimeout("timeout")) is True
+
+    def test_should_retry_exception_http_status_error(self):
+        cfg = RetryConfig()
+        # HTTPStatusError is NOT in default retryable_exceptions
+        assert cfg.should_retry_exception(httpx.HTTPStatusError("400", request=AsyncMock(), response=AsyncMock())) is False
+
+    def test_should_retry_exception_commerce_api_error_retryable(self):
+        cfg = RetryConfig(retryable_api_codes={40001})
+        assert cfg.should_retry_exception(CommerceAPIError(40001, "rate limited")) is True
+
+    def test_should_retry_exception_commerce_api_error_not_retryable(self):
+        cfg = RetryConfig(retryable_api_codes={40001})
+        assert cfg.should_retry_exception(CommerceAPIError(40002, "bad request")) is False
+
+    def test_should_retry_exception_generic_error(self):
+        cfg = RetryConfig()
+        assert cfg.should_retry_exception(ValueError("bad")) is False
+
+    def test_retryable_exceptions_custom(self):
+        cfg = RetryConfig(retryable_exceptions=(ValueError,))
+        assert cfg.should_retry_exception(ValueError("test")) is True
+        assert cfg.should_retry_exception(httpx.ConnectError("test")) is False
+
+
+class TestRetryableError:
+    """Tests for RetryableError."""
+
+    def test_attributes(self):
+        original = httpx.ConnectError("timeout")
+        err = RetryableError(original, attempt=2)
+        assert err.original is original
+        assert err.attempt == 2
+        assert "attempt 2" in str(err)
+
+    def test_is_exception(self):
+        err = RetryableError(ValueError("test"), 0)
+        assert isinstance(err, Exception)
+
+
+class TestDefaultRetryConfigs:
+    """Tests for DEFAULT_RETRY and RATE_LIMIT_RETRY presets."""
+
+    def test_default_retry(self):
+        assert DEFAULT_RETRY.max_retries == 3
+        assert DEFAULT_RETRY.base_delay == 1.0
+        assert DEFAULT_RETRY.max_delay == 60.0
+
+    def test_rate_limit_retry(self):
+        assert RATE_LIMIT_RETRY.max_retries == 5
+        assert RATE_LIMIT_RETRY.base_delay == 2.0
+        assert RATE_LIMIT_RETRY.max_delay == 120.0
+        assert 429 in RATE_LIMIT_RETRY.retryable_status_codes
+
+
+# ── with_retry Decorator Tests ────────────────────────────
+
+
+class TestWithRetryDecorator:
+    """Tests for the with_retry async decorator."""
+
+    @pytest.mark.asyncio
+    async def test_no_retry_on_success(self):
+        call_count = 0
+
+        @with_retry(RetryConfig(max_retries=3, base_delay=0.01, jitter=False))
+        async def succeed():
+            nonlocal call_count
+            call_count += 1
+            return "ok"
+
+        result = await succeed()
+        assert result == "ok"
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_retries_on_retryable_exception(self):
+        call_count = 0
+
+        @with_retry(RetryConfig(max_retries=3, base_delay=0.01, jitter=False))
+        async def fail_then_succeed():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise httpx.ConnectError("connection refused")
+            return "ok"
+
+        result = await fail_then_succeed()
+        assert result == "ok"
+        assert call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_raises_after_max_retries(self):
+        call_count = 0
+
+        @with_retry(RetryConfig(max_retries=2, base_delay=0.01, jitter=False))
+        async def always_fail():
+            nonlocal call_count
+            call_count += 1
+            raise httpx.ReadTimeout("timeout")
+
+        with pytest.raises(httpx.ReadTimeout):
+            await always_fail()
+        assert call_count == 3  # 1 initial + 2 retries
+
+    @pytest.mark.asyncio
+    async def test_no_retry_on_non_retryable_exception(self):
+        call_count = 0
+
+        @with_retry(RetryConfig(max_retries=3, base_delay=0.01, jitter=False))
+        async def fail_non_retryable():
+            nonlocal call_count
+            call_count += 1
+            raise ValueError("not retryable")
+
+        with pytest.raises(ValueError, match="not retryable"):
+            await fail_non_retryable()
+        assert call_count == 1  # No retries
+
+    @pytest.mark.asyncio
+    async def test_preserves_function_name(self):
+        @with_retry(RetryConfig(max_retries=0))
+        async def my_function():
+            return True
+
+        assert my_function.__name__ == "my_function"
+
+    @pytest.mark.asyncio
+    async def test_passes_args_and_kwargs(self):
+        received_args = []
+
+        @with_retry(RetryConfig(max_retries=0))
+        async def capture_args(a, b, c=None):
+            received_args.append((a, b, c))
+            return "ok"
+
+        await capture_args(1, 2, c=3)
+        assert received_args == [(1, 2, 3)]
+
+    @pytest.mark.asyncio
+    async def test_uses_default_retry_when_no_config(self):
+        call_count = 0
+
+        @with_retry()
+        async def fail_once():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise httpx.ConnectError("fail")
+            return "done"
+
+        result = await fail_once()
+        assert result == "done"
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_max_retries_zero_no_retry(self):
+        call_count = 0
+
+        @with_retry(RetryConfig(max_retries=0, base_delay=0.01))
+        async def fail():
+            nonlocal call_count
+            call_count += 1
+            raise httpx.ConnectError("fail")
+
+        with pytest.raises(httpx.ConnectError):
+            await fail()
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_retry_with_commerce_api_error(self):
+        call_count = 0
+
+        @with_retry(RetryConfig(
+            max_retries=2,
+            base_delay=0.01,
+            jitter=False,
+            retryable_api_codes={40001},
+        ))
+        async def api_fail_then_succeed():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise CommerceAPIError(40001, "rate limited")
+            return "ok"
+
+        result = await api_fail_then_succeed()
+        assert result == "ok"
+        assert call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_retry_does_not_catch_non_retryable_api_code(self):
+        call_count = 0
+
+        @with_retry(RetryConfig(
+            max_retries=3,
+            base_delay=0.01,
+            retryable_api_codes={40001},
+        ))
+        async def api_fail_wrong_code():
+            nonlocal call_count
+            call_count += 1
+            raise CommerceAPIError(50001, "not retryable")
+
+        with pytest.raises(CommerceAPIError):
+            await api_fail_wrong_code()
+        assert call_count == 1
+
+
+# ── _request Retry Integration Tests ──────────────────────
+
+
+class TestRequestRetry:
+    """Tests for retry integration in CommerceMCPBase._request."""
+
+    @pytest.mark.asyncio
+    async def test_request_with_retry_success_first_try(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        client.BASE_URL = "http://test.example.com"
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": {"id": 1}}
+        mock_response.status_code = 200
+        mock_client.get.return_value = mock_response
+
+        with patch.object(client, "_get_client", return_value=mock_client):
+            result = await client._request(
+                "GET", "/api/test",
+                retry_config=RetryConfig(max_retries=2, base_delay=0.01, jitter=False),
+            )
+
+        assert result == {"result": {"id": 1}}
+        assert mock_client.get.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_request_with_retry_on_connect_error(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        client.BASE_URL = "http://test.example.com"
+        mock_client = AsyncMock()
+        success_response = MagicMock()
+        success_response.json.return_value = {"result": {"ok": True}}
+        success_response.status_code = 200
+
+        mock_client.get.side_effect = [
+            httpx.ConnectError("connection refused"),
+            success_response,
+        ]
+
+        with patch.object(client, "_get_client", return_value=mock_client):
+            result = await client._request(
+                "GET", "/api/test",
+                retry_config=RetryConfig(max_retries=3, base_delay=0.01, jitter=False),
+            )
+
+        assert result == {"result": {"ok": True}}
+        assert mock_client.get.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_request_with_retry_exhausted_raises(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        client.BASE_URL = "http://test.example.com"
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = httpx.ConnectError("connection refused")
+
+        with patch.object(client, "_get_client", return_value=mock_client):
+            with pytest.raises(httpx.ConnectError):
+                await client._request(
+                    "GET", "/api/test",
+                    retry_config=RetryConfig(max_retries=2, base_delay=0.01, jitter=False),
+                )
+
+        assert mock_client.get.call_count == 3  # 1 initial + 2 retries
+
+    @pytest.mark.asyncio
+    async def test_request_no_retry_config_raises_immediately(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        client.BASE_URL = "http://test.example.com"
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = httpx.ConnectError("connection refused")
+
+        with patch.object(client, "_get_client", return_value=mock_client):
+            with pytest.raises(httpx.ConnectError):
+                await client._request("GET", "/api/test")
+
+        assert mock_client.get.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_request_retry_on_api_error_with_retryable_code(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        client.BASE_URL = "http://test.example.com"
+        mock_client = AsyncMock()
+
+        error_response = MagicMock()
+        error_response.json.return_value = {"error_response": {"code": 40001, "msg": "rate limited"}}
+        error_response.status_code = 200
+
+        success_response = MagicMock()
+        success_response.json.return_value = {"result": {"ok": True}}
+        success_response.status_code = 200
+
+        mock_client.get.side_effect = [error_response, success_response]
+
+        with patch.object(client, "_get_client", return_value=mock_client):
+            result = await client._request(
+                "GET", "/api/test",
+                retry_config=RetryConfig(
+                    max_retries=2, base_delay=0.01, jitter=False,
+                    retryable_api_codes={40001},
+                ),
+            )
+
+        assert result == {"result": {"ok": True}}
+        assert mock_client.get.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_request_retry_on_api_error_non_retryable_raises(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        client.BASE_URL = "http://test.example.com"
+        mock_client = AsyncMock()
+        error_response = MagicMock()
+        error_response.json.return_value = {"error_response": {"code": 40002, "msg": "bad request"}}
+        error_response.status_code = 200
+        mock_client.get.return_value = error_response
+
+        with patch.object(client, "_get_client", return_value=mock_client):
+            with pytest.raises(CommerceAPIError) as exc_info:
+                await client._request(
+                    "GET", "/api/test",
+                    retry_config=RetryConfig(
+                        max_retries=3, base_delay=0.01, jitter=False,
+                        retryable_api_codes={40001},
+                    ),
+                )
+
+        assert exc_info.value.code == 40002
+        assert mock_client.get.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_request_retry_regenerates_timestamp(self):
+        """Each retry attempt should generate a fresh timestamp."""
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        client.BASE_URL = "http://test.example.com"
+        timestamps = []
+        mock_client = AsyncMock()
+
+        error_response = MagicMock()
+        error_response.json.return_value = {"result": "ok"}
+        error_response.status_code = 200
+
+        call_count = 0
+
+        async def capture_get(url, params=None):
+            nonlocal call_count
+            call_count += 1
+            if params:
+                timestamps.append(params.get("timestamp"))
+            if call_count == 1:
+                raise httpx.ConnectError("fail")
+            return error_response
+
+        mock_client.get.side_effect = capture_get
+
+        with patch.object(client, "_get_client", return_value=mock_client):
+            await client._request(
+                "GET", "/api/test",
+                retry_config=RetryConfig(max_retries=2, base_delay=0.1, jitter=False),
+            )
+
+        # Should have 2 different timestamps (one per attempt)
+        assert len(timestamps) == 2
+        # Timestamps should be different (time advances between retries)
+        assert timestamps[0] != timestamps[1]

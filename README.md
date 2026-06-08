@@ -78,14 +78,28 @@ This is the **first open-source MCP server suite for Chinese e-commerce business
 
 ### Installation
 
-```bash
-# Install a specific platform server
-pip install mcp-cn-commerce[oceanengine]   # 巨量引擎 advertising
-pip install mcp-cn-commerce[doudian]        # 抖店 Douyin Shop
-pip install mcp-cn-commerce[jd]              # 京东 JD.com
+#### From GitHub Releases (recommended — no registration needed)
 
-# Or install all Phase 1 servers at once
-pip install mcp-cn-commerce[all]
+```bash
+# Visit the latest Release and download the .whl file
+# https://github.com/TonyWang-hub/mcp-cn-commerce/releases/latest
+
+# Or install directly from the Release URL:
+pip install https://github.com/TonyWang-hub/mcp-cn-commerce/releases/latest/download/mcp_cn_commerce-0.1.0-py3-none-any.whl
+```
+
+#### From Git (always latest)
+
+```bash
+pip install git+https://github.com/TonyWang-hub/mcp-cn-commerce.git
+```
+
+#### For development
+
+```bash
+git clone https://github.com/TonyWang-hub/mcp-cn-commerce.git
+cd mcp-cn-commerce
+pip install -e ".[dev]"
 ```
 
 ### Configuration

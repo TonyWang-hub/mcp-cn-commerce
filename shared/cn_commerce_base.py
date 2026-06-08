@@ -14,8 +14,8 @@ import logging
 import os
 import random
 import re
-import time
 import threading
+import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -337,7 +337,7 @@ class RetryConfig:
         Returns:
             Delay in seconds.
         """
-        delay = min(self.base_delay * (2 ** attempt), self.max_delay)
+        delay = min(self.base_delay * (2**attempt), self.max_delay)
         if self.jitter:
             delay = delay * (0.5 + random.random())
         return delay
@@ -398,9 +398,7 @@ def with_retry(config: RetryConfig | None = None) -> Callable[..., Any]:
                     if not retry_config.should_retry_exception(exc):
                         raise
                     if attempt == retry_config.max_retries:
-                        logger.error(
-                            f"Max retries ({retry_config.max_retries}) exhausted for {func.__name__}"
-                        )
+                        logger.error(f"Max retries ({retry_config.max_retries}) exhausted for {func.__name__}")
                         raise
                     delay = retry_config.compute_delay(attempt)
                     logger.warning(
@@ -730,8 +728,7 @@ class CommerceMCPBase:
 
                 delay = retry_config.compute_delay(attempt)
                 logger.warning(
-                    f"Retry {attempt + 1}/{retry_config.max_retries} for {path} "
-                    f"after {delay:.2f}s: {exc}"
+                    f"Retry {attempt + 1}/{retry_config.max_retries} for {path} " f"after {delay:.2f}s: {exc}"
                 )
                 await asyncio.sleep(delay)
 

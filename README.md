@@ -203,17 +203,17 @@ This project handles sensitive e-commerce API credentials. Our security guarante
 
 ## Roadmap
 
-### Phase 1 — Foundation ✅ (current)
+### Phase 1 — Foundation ✅
 - 巨量引擎: Ad campaign & report read APIs
 - 巨量千川: E-commerce advertising (shared Ocean Engine auth)
 - 抖店: Order, product, after-sale read APIs
 - 京东: Order, product, shop read APIs
 
-### Phase 2 — Mid-Tier Expansion ⬜
+### Phase 2 — Mid-Tier Expansion ✅
 - 淘宝 (Taobao): Full Top API integration — orders, products, logistics
 - 拼多多 (Pinduoduo): Orders, products, promotion tools
 
-### Phase 3 — Long-Tail Coverage ⬜
+### Phase 3 — Long-Tail Coverage ✅
 - 快手 (Kuaishou): Orders, products, logistics
 - 小红书 (Xiaohongshu): Orders, products, inventory
 - 微信小店 (WeChat Store): Orders, products, after-sale

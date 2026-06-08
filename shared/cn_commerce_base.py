@@ -12,9 +12,13 @@ import hmac
 import json
 import logging
 import os
+import random
 import re
 import time
+import threading
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -281,6 +285,356 @@ class RateLimiter:
         self.last_request_time = time.time()
 
 
+# ── Metrics ────────────────────────────────────────────────
+
+
+@dataclass
+class EndpointMetrics:
+    """Metrics for a single API endpoint.
+
+    Attributes:
+        request_count: Total number of requests.
+        error_count: Number of failed requests.
+        total_latency_ms: Cumulative latency in milliseconds.
+        min_latency_ms: Minimum observed latency.
+        max_latency_ms: Maximum observed latency.
+        last_error_code: Most recent error code (0 if none).
+        last_error_msg: Most recent error message.
+    """
+
+    request_count: int = 0
+    error_count: int = 0
+    total_latency_ms: float = 0.0
+    min_latency_ms: float = float("inf")
+    max_latency_ms: float = 0.0
+    last_error_code: int = 0
+    last_error_msg: str = ""
+
+    @property
+    def avg_latency_ms(self) -> float:
+        """Average latency in milliseconds."""
+        if self.request_count == 0:
+            return 0.0
+        return self.total_latency_ms / self.request_count
+
+    @property
+    def error_rate(self) -> float:
+        """Error rate as a fraction (0.0 to 1.0)."""
+        if self.request_count == 0:
+            return 0.0
+        return self.error_count / self.request_count
+
+
+class MetricsCollector:
+    """Collects and aggregates request metrics across endpoints.
+
+    Thread-safe via a lock so it can be used from concurrent async tasks.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._endpoints: OrderedDict[str, EndpointMetrics] = OrderedDict()
+        self._global = EndpointMetrics()
+        self._start_time = time.time()
+
+    def record_request(
+        self,
+        endpoint: str,
+        latency_ms: float,
+        success: bool,
+        error_code: int = 0,
+        error_msg: str = "",
+    ) -> None:
+        """Record a completed request.
+
+        Args:
+            endpoint: The API endpoint path.
+            latency_ms: Request duration in milliseconds.
+            success: Whether the request succeeded.
+            error_code: Platform-specific error code (if failed).
+            error_msg: Error message (if failed).
+        """
+        with self._lock:
+            ep = self._endpoints.setdefault(endpoint, EndpointMetrics())
+            ep.request_count += 1
+            ep.total_latency_ms += latency_ms
+            ep.min_latency_ms = min(ep.min_latency_ms, latency_ms)
+            ep.max_latency_ms = max(ep.max_latency_ms, latency_ms)
+            if not success:
+                ep.error_count += 1
+                ep.last_error_code = error_code
+                ep.last_error_msg = error_msg
+
+            # Global aggregation
+            self._global.request_count += 1
+            self._global.total_latency_ms += latency_ms
+            self._global.min_latency_ms = min(self._global.min_latency_ms, latency_ms)
+            self._global.max_latency_ms = max(self._global.max_latency_ms, latency_ms)
+            if not success:
+                self._global.error_count += 1
+
+    def get_endpoint_metrics(self, endpoint: str) -> EndpointMetrics:
+        """Get metrics for a specific endpoint, or a default empty one."""
+        with self._lock:
+            return self._endpoints.get(endpoint, EndpointMetrics())
+
+    def get_global_metrics(self) -> EndpointMetrics:
+        """Get aggregated metrics across all endpoints."""
+        with self._lock:
+            return self._global
+
+    def get_all_metrics(self) -> dict[str, EndpointMetrics]:
+        """Get metrics for all recorded endpoints."""
+        with self._lock:
+            return dict(self._endpoints)
+
+    def get_summary(self) -> dict[str, Any]:
+        """Get a JSON-serializable summary of all metrics.
+
+        Returns:
+            Dict with ``uptime_seconds``, ``global``, and ``endpoints`` keys.
+        """
+        with self._lock:
+            uptime = time.time() - self._start_time
+            return {
+                "uptime_seconds": round(uptime, 2),
+                "global": {
+                    "total_requests": self._global.request_count,
+                    "total_errors": self._global.error_count,
+                    "avg_latency_ms": round(self._global.avg_latency_ms, 2),
+                    "error_rate": round(self._global.error_rate, 4),
+                },
+                "endpoints": {
+                    ep: {
+                        "requests": m.request_count,
+                        "errors": m.error_count,
+                        "avg_latency_ms": round(m.avg_latency_ms, 2),
+                        "min_latency_ms": m.min_latency_ms if m.min_latency_ms != float("inf") else 0.0,
+                        "max_latency_ms": m.max_latency_ms,
+                        "error_rate": round(m.error_rate, 4),
+                    }
+                    for ep, m in self._endpoints.items()
+                },
+            }
+
+    def reset(self) -> None:
+        """Reset all collected metrics."""
+        with self._lock:
+            self._endpoints.clear()
+            self._global = EndpointMetrics()
+            self._start_time = time.time()
+
+
+# ── Retry Mechanism ────────────────────────────────────────
+
+
+class RetryableError(Exception):
+    """Exception that signals the operation should be retried.
+
+    Wraps the original exception so callers can distinguish between
+    retryable and non-retryable failures.
+    """
+
+    def __init__(self, original: Exception, attempt: int) -> None:
+        self.original = original
+        self.attempt = attempt
+        super().__init__(f"Retryable error on attempt {attempt}: {original}")
+
+
+@dataclass
+class RetryConfig:
+    """Configuration for the retry mechanism.
+
+    Attributes:
+        max_retries: Maximum number of retry attempts (0 = no retries).
+        base_delay: Base delay in seconds for exponential backoff.
+        max_delay: Maximum delay cap in seconds.
+        jitter: Whether to add random jitter to the delay.
+        retryable_exceptions: Tuple of exception types that should be retried.
+        retryable_status_codes: Set of HTTP status codes that should be retried.
+        retryable_api_codes: Set of platform API error codes that should be retried.
+    """
+
+    max_retries: int = 3
+    base_delay: float = 1.0
+    max_delay: float = 60.0
+    jitter: bool = True
+    retryable_exceptions: tuple[type[Exception], ...] = (
+        httpx.ConnectError,
+        httpx.ReadTimeout,
+        httpx.WriteTimeout,
+        httpx.PoolTimeout,
+    )
+    retryable_status_codes: set[int] = field(default_factory=lambda: {429, 500, 502, 503, 504})
+    retryable_api_codes: set[int] = field(default_factory=lambda: set())
+
+    def compute_delay(self, attempt: int) -> float:
+        """Compute the delay before the next retry using exponential backoff.
+
+        Args:
+            attempt: The current attempt number (0-indexed).
+
+        Returns:
+            Delay in seconds.
+        """
+        delay = min(self.base_delay * (2 ** attempt), self.max_delay)
+        if self.jitter:
+            delay = delay * (0.5 + random.random())
+        return delay
+
+    def should_retry_http_status(self, status_code: int) -> bool:
+        """Check if an HTTP status code should trigger a retry."""
+        return status_code in self.retryable_status_codes
+
+    def should_retry_api_code(self, api_code: int) -> bool:
+        """Check if a platform API error code should trigger a retry."""
+        return api_code in self.retryable_api_codes
+
+    def should_retry_exception(self, exc: Exception) -> bool:
+        """Check if an exception should trigger a retry."""
+        if isinstance(exc, CommerceAPIError):
+            return self.should_retry_api_code(exc.code)
+        return isinstance(exc, self.retryable_exceptions)
+
+
+# Default retry config for common transient errors
+DEFAULT_RETRY = RetryConfig()
+
+# Aggressive retry config for rate-limited endpoints
+RATE_LIMIT_RETRY = RetryConfig(
+    max_retries=5,
+    base_delay=2.0,
+    max_delay=120.0,
+    retryable_status_codes={429, 500, 502, 503, 504},
+)
+
+
+def with_retry(config: RetryConfig | None = None) -> Callable[..., Any]:
+    """Decorator that adds retry with exponential backoff to an async function.
+
+    Usage::
+
+        @with_retry(RetryConfig(max_retries=3))
+        async def fetch_data(self, ...):
+            ...
+
+    Args:
+        config: Retry configuration. Uses DEFAULT_RETRY if not provided.
+
+    Returns:
+        A decorator that wraps the async function with retry logic.
+    """
+    retry_config = config or DEFAULT_RETRY
+
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        @functools.wraps(func)
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            last_exc: Exception | None = None
+            for attempt in range(retry_config.max_retries + 1):
+                try:
+                    return await func(*args, **kwargs)
+                except Exception as exc:
+                    last_exc = exc
+                    if not retry_config.should_retry_exception(exc):
+                        raise
+                    if attempt == retry_config.max_retries:
+                        logger.error(
+                            f"Max retries ({retry_config.max_retries}) exhausted for {func.__name__}"
+                        )
+                        raise
+                    delay = retry_config.compute_delay(attempt)
+                    logger.warning(
+                        f"Retry {attempt + 1}/{retry_config.max_retries} for {func.__name__} "
+                        f"after {delay:.2f}s: {exc}"
+                    )
+                    await asyncio.sleep(delay)
+            # Should not reach here, but safety net
+            if last_exc:
+                raise last_exc
+
+        return wrapper
+
+    return decorator
+
+
+
+class ResponseCache:
+    """Simple in-memory response cache with TTL and max size.
+
+    Thread-safe via a lock. Evicts oldest entries (LRU) when max_size is reached.
+    """
+
+    def __init__(self, max_size: int = 256, default_ttl: float = 300.0) -> None:
+        self.max_size = max_size
+        self.default_ttl = default_ttl
+        self._cache: OrderedDict[str, tuple[Any, float]] = OrderedDict()
+        self._lock = threading.Lock()
+        self._hits = 0
+        self._misses = 0
+
+    def _make_key(self, method: str, url: str, params: dict[str, Any], data: dict[str, Any]) -> str:
+        """Build a stable cache key from request components."""
+        key_parts = [method, url, json.dumps(params, sort_keys=True), json.dumps(data, sort_keys=True)]
+        raw = "|".join(key_parts)
+        return hashlib.md5(raw.encode()).hexdigest()
+
+    def get(self, key: str) -> tuple[bool, Any]:
+        """Look up a key in the cache. Returns (found, value)."""
+        with self._lock:
+            if key not in self._cache:
+                self._misses += 1
+                return False, None
+            value, expiry = self._cache[key]
+            if time.time() > expiry:
+                del self._cache[key]
+                self._misses += 1
+                return False, None
+            self._cache.move_to_end(key)
+            self._hits += 1
+            return True, value
+
+    def put(self, key: str, value: Any, ttl: float | None = None) -> None:
+        """Store a value in the cache."""
+        if self.max_size <= 0:
+            return
+        ttl = ttl if ttl is not None else self.default_ttl
+        expiry = time.time() + ttl
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+            self._cache[key] = (value, expiry)
+            while len(self._cache) > self.max_size:
+                self._cache.popitem(last=False)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._cache.clear()
+
+    @property
+    def size(self) -> int:
+        with self._lock:
+            return len(self._cache)
+
+    @property
+    def stats(self) -> dict[str, Any]:
+        """Cache statistics including hit rate, size, etc."""
+        with self._lock:
+            total = self._hits + self._misses
+            return {
+                "size": len(self._cache),
+                "max_size": self.max_size,
+                "hits": self._hits,
+                "misses": self._misses,
+                "hit_rate": round(self._hits / total, 4) if total > 0 else 0.0,
+                "default_ttl": self.default_ttl,
+            }
+
+    def reset_stats(self) -> None:
+        with self._lock:
+            self._hits = 0
+            self._misses = 0
+
+
 class CommerceMCPBase:
     """Base class for Chinese e-commerce platform MCP servers.
 
@@ -303,6 +657,8 @@ class CommerceMCPBase:
         self.app_secret = app_secret
         self.access_token = access_token
         self.rate_limiter = RateLimiter()
+        self.metrics = MetricsCollector()
+        self.cache = ResponseCache()
 
     def _get_client(self) -> httpx.AsyncClient:
         """Get or create an HTTP client with connection pooling."""
@@ -351,44 +707,127 @@ class CommerceMCPBase:
     # ── HTTP ──────────────────────────────────────────────
 
     async def _request(
-        self, method: str, path: str, params: dict | None = None, data: dict | None = None
+        self,
+        method: str,
+        path: str,
+        params: dict | None = None,
+        data: dict | None = None,
+        retry_config: RetryConfig | None = None,
+        use_cache: bool = False,
+        cache_ttl: float | None = None,
     ) -> dict[str, Any]:
-        """Make a signed API request."""
+        """Make a signed API request with optional retry support.
+
+        Args:
+            method: HTTP method ("GET" or "POST").
+            path: API endpoint path (appended to BASE_URL).
+            params: Query parameters.
+            data: Request body (JSON).
+            retry_config: If provided, retry failed requests according to this config.
+
+        Returns:
+            Parsed JSON response as a dict.
+
+        Raises:
+            CommerceAPIError: If the API returns an error response.
+            httpx.HTTPError: For non-retryable network errors.
+        """
         params = params or {}
         data = data or {}
 
-        # Rate limiting
-        if self.rate_limiter:
-            await self.rate_limiter.acquire()
+        # Check cache for GET requests (compute key before auth params are injected)
+        cache_key = None
+        if use_cache and method == "GET" and self.cache:
+            cache_key = self.cache._make_key(method, f"{self.BASE_URL}{path}", params, data)
+            found, cached = self.cache.get(cache_key)
+            if found:
+                logger.debug(f"Cache hit for {method} {path}")
+                return cached
 
-        # Inject auth params
-        params["app_key"] = self.app_key
-        params["timestamp"] = str(int(time.time() * 1000))
+        # Snapshot auth params for retry (timestamp must be regenerated each attempt)
+        auth_params: dict[str, str] = {}
+        auth_params["app_key"] = self.app_key
         if self.access_token:
-            params["access_token"] = self.access_token
+            auth_params["access_token"] = self.access_token
 
-        # Sign
-        params["sign"] = self._sign(params)
-        params["sign_method"] = self.sign_method
+        last_exc: Exception | None = None
+        max_attempts = (retry_config.max_retries + 1) if retry_config else 1
 
-        url = f"{self.BASE_URL}{path}"
-        logger.debug(f"Request: {method} {url}")
+        for attempt in range(max_attempts):
+            start_time = time.monotonic()
+            try:
+                # Rate limiting
+                if self.rate_limiter:
+                    await self.rate_limiter.acquire()
 
-        client = self._get_client()
-        if method == "GET":
-            resp = await client.get(url, params={**params, **data})
-        else:
-            resp = await client.post(url, params=params, json=data)
+                # Build fresh params each attempt (timestamp changes)
+                attempt_params = {**params, **auth_params}
+                attempt_params["timestamp"] = str(int(time.time() * 1000))
+                attempt_params["sign"] = self._sign(attempt_params)
+                attempt_params["sign_method"] = self.sign_method
 
-        result = resp.json()
-        if "error_response" in result:
-            error_code = result["error_response"].get("code", -1)
-            error_msg = result["error_response"].get("msg", "unknown")
-            logger.warning(f"API error: [{error_code}] {error_msg}")
-            raise CommerceAPIError(code=error_code, msg=error_msg)
+                url = f"{self.BASE_URL}{path}"
+                logger.debug(f"Request: {method} {url} (attempt {attempt + 1}/{max_attempts})")
 
-        logger.debug(f"Response: {resp.status_code}")
-        return result
+                client = self._get_client()
+                if method == "GET":
+                    resp = await client.get(url, params={**attempt_params, **data})
+                else:
+                    resp = await client.post(url, params=attempt_params, json=data)
+
+                result = resp.json()
+                if "error_response" in result:
+                    error_code = result["error_response"].get("code", -1)
+                    error_msg = result["error_response"].get("msg", "unknown")
+                    logger.warning(f"API error: [{error_code}] {error_msg}")
+                    raise CommerceAPIError(code=error_code, msg=error_msg)
+
+                logger.debug(f"Response: {resp.status_code}")
+
+                # Record metrics on success
+                elapsed_ms = (time.monotonic() - start_time) * 1000
+                self.metrics.record_request(path, latency_ms=elapsed_ms, success=True)
+
+                # Cache the response for GET requests
+                if cache_key is not None:
+                    self.cache.put(cache_key, result, ttl=cache_ttl)
+                    logger.debug(f"Cached response for {method} {path}")
+
+                return result
+
+            except Exception as exc:
+                last_exc = exc
+
+                # If no retry config or not retryable, record metrics and re-raise
+                if not retry_config or not retry_config.should_retry_exception(exc):
+                    elapsed_ms = (time.monotonic() - start_time) * 1000
+                    if isinstance(exc, CommerceAPIError):
+                        self.metrics.record_request(path, latency_ms=elapsed_ms, success=False, error_code=exc.code, error_msg=exc.msg)
+                    else:
+                        self.metrics.record_request(path, latency_ms=elapsed_ms, success=False)
+                    raise
+
+                # If this was the last attempt, record metrics and re-raise
+                if attempt == max_attempts - 1:
+                    elapsed_ms = (time.monotonic() - start_time) * 1000
+                    if isinstance(exc, CommerceAPIError):
+                        self.metrics.record_request(path, latency_ms=elapsed_ms, success=False, error_code=exc.code, error_msg=exc.msg)
+                    else:
+                        self.metrics.record_request(path, latency_ms=elapsed_ms, success=False)
+                    logger.error(f"Max retries ({retry_config.max_retries}) exhausted for {path}")
+                    raise
+
+                delay = retry_config.compute_delay(attempt)
+                logger.warning(
+                    f"Retry {attempt + 1}/{retry_config.max_retries} for {path} "
+                    f"after {delay:.2f}s: {exc}"
+                )
+                await asyncio.sleep(delay)
+
+        # Should not reach here
+        if last_exc:
+            raise last_exc  # type: ignore[misc]
+        return {}  # type: ignore[return-value]
 
     # ── Signing ───────────────────────────────────────────
 
@@ -433,6 +872,108 @@ class CommerceMCPBase:
             self._client = None
 
 
+    # ── Batch Operations ──────────────────────────────────
+
+    async def _batch_request(
+        self,
+        requests: list[BatchRequestItem],
+        max_concurrency: int = 5,
+        fail_fast: bool = False,
+    ) -> BatchSummary:
+        """Execute multiple API requests concurrently with controlled concurrency."""
+        if not requests:
+            raise ValueError("requests list cannot be empty")
+        max_concurrency = max(1, min(max_concurrency, 20))
+        semaphore = asyncio.Semaphore(max_concurrency)
+
+        async def _execute_one(item: BatchRequestItem) -> BatchResultItem:
+            async with semaphore:
+                start = time.monotonic()
+                try:
+                    result = await self._request(
+                        method=item.method,
+                        path=item.path,
+                        params=dict(item.params),
+                        data=dict(item.data),
+                    )
+                    elapsed = (time.monotonic() - start) * 1000
+                    return BatchResultItem(
+                        request_id=item.request_id,
+                        success=True,
+                        data=result,
+                        latency_ms=elapsed,
+                    )
+                except Exception as exc:
+                    elapsed = (time.monotonic() - start) * 1000
+                    logger.warning(f"Batch request \'{item.request_id}\' failed: {exc}")
+                    return BatchResultItem(
+                        request_id=item.request_id,
+                        success=False,
+                        error=exc,
+                        latency_ms=elapsed,
+                    )
+
+        batch_start = time.monotonic()
+        if fail_fast:
+            results: list[BatchResultItem] = []
+            for coro in asyncio.as_completed([_execute_one(r) for r in requests]):
+                result = await coro
+                results.append(result)
+                if not result.success:
+                    break
+        else:
+            results = list(await asyncio.gather(*[_execute_one(r) for r in requests]))
+        total_ms = (time.monotonic() - batch_start) * 1000
+        return self._batch_aggregate(results, total_ms)
+
+    @staticmethod
+    def _batch_aggregate(
+        results: list[BatchResultItem],
+        total_latency_ms: float,
+    ) -> BatchSummary:
+        """Aggregate batch results into a summary."""
+        succeeded = sum(1 for r in results if r.success)
+        failed = len(results) - succeeded
+        error_summary: dict[str, int] = {}
+        for r in results:
+            if r.error:
+                key = type(r.error).__name__
+                error_summary[key] = error_summary.get(key, 0) + 1
+        return BatchSummary(
+            total=len(results),
+            succeeded=succeeded,
+            failed=failed,
+            results=results,
+            total_latency_ms=total_latency_ms,
+            error_summary=error_summary,
+        )
+
+    async def health_check(self) -> dict[str, Any]:
+        """Check API reachability and client configuration.
+
+        Returns:
+            Dict with ``configured``, ``has_token``, ``api_reachable``,
+            ``metrics``, and optionally ``error`` keys.
+        """
+        result: dict[str, Any] = {
+            "configured": bool(self.app_key and self.app_secret),
+            "has_token": bool(self.access_token),
+            "api_reachable": False,
+            "metrics": self.metrics.get_summary(),
+            "cache": self.cache.stats,
+        }
+        if not self.BASE_URL:
+            return result
+        try:
+            client = self._get_client()
+            resp = await client.head(self.BASE_URL, timeout=5)
+            result["api_reachable"] = resp.status_code < 500
+        except Exception as exc:
+            result["api_reachable"] = False
+            result["error"] = str(exc)
+        return result
+
+
 class CommerceAPIError(Exception):
     """Normalized API error across all platforms."""
 
@@ -440,6 +981,36 @@ class CommerceAPIError(Exception):
         self.code = code
         self.msg = msg
         super().__init__(f"[{code}] {msg}")
+
+
+
+
+@dataclass
+class BatchRequestItem:
+    method: str
+    path: str
+    params: dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
+    request_id: str = ""
+
+
+@dataclass
+class BatchResultItem:
+    request_id: str
+    success: bool
+    data: dict[str, Any] | None = None
+    error: Exception | None = None
+    latency_ms: float = 0.0
+
+
+@dataclass
+class BatchSummary:
+    total: int
+    succeeded: int
+    failed: int
+    results: list[BatchResultItem]
+    total_latency_ms: float
+    error_summary: dict[str, int] = field(default_factory=dict)
 
 
 def format_error_response(error: Exception) -> str:

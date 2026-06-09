@@ -31,10 +31,10 @@ from cn_commerce_base import (
     CommerceAPIError,
     CommerceMCPBase,
     ConfigRule,
-    ConfigValidationResult,
-    ConfigValidator,
     ConfigurableRateLimiter,
     ConfigValidationError,
+    ConfigValidationResult,
+    ConfigValidator,
     ConnectionPoolMonitor,
     EndpointMetrics,
     EndpointRateLimit,
@@ -51,7 +51,6 @@ from cn_commerce_base import (
     SensitiveDataFilter,
     SignMethod,
     Span,
-    SpanEvent,
     TraceContext,
     Tracer,
     format_error_response,
@@ -2441,7 +2440,7 @@ class TestEnhancedHealthCheck:
         mock_client = AsyncMock()
         mock_client.head.return_value = mock_response
         with patch.object(client, "_ensure_client", return_value=mock_client):
-            result1 = await client.health_check(use_cache=True, cache_key="test")
+            await client.health_check(use_cache=True, cache_key="test")
             result2 = await client.health_check(use_cache=True, cache_key="test")
         assert result2.get("cached") is True
 

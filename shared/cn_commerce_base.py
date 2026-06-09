@@ -22,8 +22,8 @@ import uuid
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -1036,7 +1036,7 @@ def handle_tool_errors(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awa
 # ── Webhook Support ─────────────────────────────────────────
 
 
-class WebhookEventType(str, Enum):
+class WebhookEventType(StrEnum):
     """Supported webhook event types for e-commerce platforms.
 
     Attributes:
@@ -1092,13 +1092,11 @@ class WebhookSubscription:
 
     def __post_init__(self) -> None:
         if not self.created_at:
-            self.created_at = datetime.now(timezone.utc).isoformat()
+            self.created_at = datetime.now(UTC).isoformat()
         if not self.subscription_id:
             self.subscription_id = str(uuid.uuid4())
         if not self.secret:
-            self.secret = hashlib.sha256(
-                f"{self.subscription_id}:{self.url}:{time.time()}".encode()
-            ).hexdigest()
+            self.secret = hashlib.sha256(f"{self.subscription_id}:{self.url}:{time.time()}".encode()).hexdigest()
 
 
 @dataclass
@@ -1127,7 +1125,7 @@ class WebhookEvent:
         if not self.event_id:
             self.event_id = str(uuid.uuid4())
         if not self.timestamp:
-            self.timestamp = datetime.now(timezone.utc).isoformat()
+            self.timestamp = datetime.now(UTC).isoformat()
 
     def to_dict(self) -> dict[str, Any]:
         """Convert event to a dictionary for JSON serialization."""
@@ -1205,7 +1203,7 @@ class WebhookSignatureVerifier:
             Cleaned signature string.
         """
         if prefix and signature_header.startswith(prefix):
-            return signature_header[len(prefix):]
+            return signature_header[len(prefix) :]
         return signature_header
 
 
@@ -1343,10 +1341,7 @@ class WebhookManager:
         with self._lock:
             self._subscriptions[subscription.subscription_id] = subscription
 
-        logger.info(
-            f"Webhook subscription created: {subscription.subscription_id} "
-            f"for events {event_types}"
-        )
+        logger.info(f"Webhook subscription created: {subscription.subscription_id} " f"for events {event_types}")
         return subscription
 
     def unsubscribe(self, subscription_id: str) -> bool:
@@ -1441,9 +1436,7 @@ class WebhookManager:
                 sub.metadata = metadata
             return sub
 
-    def add_delivery_callback(
-        self, callback: Callable[..., Awaitable[WebhookDeliveryResult]]
-    ) -> None:
+    def add_delivery_callback(self, callback: Callable[..., Awaitable[WebhookDeliveryResult]]) -> None:
         """Register a callback for webhook delivery.
 
         This allows custom HTTP client injection for actual delivery.
@@ -1454,9 +1447,7 @@ class WebhookManager:
         """
         self._delivery_callbacks.append(callback)
 
-    def _prepare_delivery(
-        self, subscription: WebhookSubscription, event: WebhookEvent
-    ) -> tuple[bytes, str]:
+    def _prepare_delivery(self, subscription: WebhookSubscription, event: WebhookEvent) -> tuple[bytes, str]:
         """Prepare payload and signature for delivery.
 
         Args:
@@ -1469,7 +1460,7 @@ class WebhookManager:
         payload_dict = {
             "event": event.to_dict(),
             "subscription_id": subscription.subscription_id,
-            "delivery_timestamp": datetime.now(timezone.utc).isoformat(),
+            "delivery_timestamp": datetime.now(UTC).isoformat(),
         }
         payload_bytes = json.dumps(payload_dict, ensure_ascii=False, sort_keys=True).encode()
         verifier = WebhookSignatureVerifier(secret=subscription.secret)
@@ -1503,7 +1494,7 @@ class WebhookManager:
                     result.attempt = attempt
                     if result.success:
                         with self._lock:
-                            subscription.last_triggered_at = datetime.now(timezone.utc).isoformat()
+                            subscription.last_triggered_at = datetime.now(UTC).isoformat()
                             subscription.failure_count = 0
                         return result
                     last_error = result.error or f"HTTP {result.status_code}"
@@ -1519,7 +1510,7 @@ class WebhookManager:
                     )
 
             if attempt < self._max_delivery_retries:
-                delay = min(2 ** attempt, 30)
+                delay = min(2**attempt, 30)
                 await asyncio.sleep(delay)
 
         # All retries exhausted
@@ -1574,10 +1565,7 @@ class WebhookManager:
             self._delivery_results.append(result)
 
         succeeded = sum(1 for r in results if r.success)
-        logger.info(
-            f"Webhook event {event.event_id} delivered: "
-            f"{succeeded}/{len(results)} succeeded"
-        )
+        logger.info(f"Webhook event {event.event_id} delivered: " f"{succeeded}/{len(results)} succeeded")
         return results
 
     def verify_signature(
@@ -1610,11 +1598,7 @@ class WebhookManager:
         total = len(self._delivery_results)
         succeeded = sum(1 for r in self._delivery_results if r.success)
         failed = total - succeeded
-        avg_latency = (
-            sum(r.latency_ms for r in self._delivery_results) / total
-            if total > 0
-            else 0.0
-        )
+        avg_latency = sum(r.latency_ms for r in self._delivery_results) / total if total > 0 else 0.0
 
         return {
             "total_deliveries": total,
@@ -1637,164 +1621,7 @@ class WebhookManager:
 
 
 @dataclass
-class BatchRequestItem:
-    """A single request in a batch operation.
-
-    Attributes:
-        method: HTTP method ("GET" or "POST").
-        path: API endpoint path.
-        params: Query parameters.
-        data: Request body (for POST requests).
-        request_id: Optional tracking identifier.
-    """
-
-    method: str = "GET"
-    path: str = ""
-    params: dict[str, Any] = field(default_factory=dict)
-    data: dict[str, Any] = field(default_factory=dict)
-    request_id: str = ""
-
-
-@dataclass
-class BatchResultItem:
-    """Result of a single request in a batch operation.
-
-    Attributes:
-        request_id: Matches the input BatchRequestItem.request_id.
-        success: Whether the request succeeded.
-        data: Response data (None if failed).
-        error: Exception that occurred (None if succeeded).
-        latency_ms: Request duration in milliseconds.
-    """
-
-    request_id: str = ""
-    success: bool = False
-    data: dict[str, Any] | None = None
-    error: Exception | None = None
-    latency_ms: float = 0.0
-
-
-@dataclass
-class BatchSummary:
-    """Aggregated results of a batch operation.
-
-    Attributes:
-        total: Total number of requests.
-        succeeded: Number of successful requests.
-        failed: Number of failed requests.
-        results: Individual result items.
-        total_latency_ms: Wall-clock time for the entire batch.
-        error_summary: Error type counts, e.g. {"CommerceAPIError": 2}.
-    """
-
-    total: int = 0
-    succeeded: int = 0
-    failed: int = 0
-    results: list[BatchResultItem] = field(default_factory=list)
-    total_latency_ms: float = 0.0
-    error_summary: dict[str, int] = field(default_factory=dict)
-
-
-def _batch_aggregate(
-    results: list[BatchResultItem],
-    total_latency_ms: float,
-) -> BatchSummary:
-    """Aggregate batch results into a summary (static method)."""
-    succeeded = sum(1 for r in results if r.success)
-    failed = len(results) - succeeded
-    error_summary: dict[str, int] = {}
-    for r in results:
-        if r.error is not None:
-            etype = type(r.error).__name__
-            error_summary[etype] = error_summary.get(etype, 0) + 1
-    return BatchSummary(
-        total=len(results),
-        succeeded=succeeded,
-        failed=failed,
-        results=results,
-        total_latency_ms=total_latency_ms,
-        error_summary=error_summary,
-    )
-
-
-async def _batch_request(
-    self: CommerceMCPBase,
-    requests: list[BatchRequestItem],
-    max_concurrency: int = 5,
-    fail_fast: bool = False,
-) -> BatchSummary:
-    """Execute multiple API requests concurrently.
-
-    Args:
-        requests: List of BatchRequestItem to execute.
-        max_concurrency: Maximum concurrent requests (clamped to 1-20).
-        fail_fast: Stop submitting new requests after the first error.
-
-    Returns:
-        BatchSummary with aggregated results.
-
-    Raises:
-        ValueError: If requests list is empty.
-    """
-    if not requests:
-        raise ValueError("requests cannot be empty")
-
-    max_concurrency = max(1, min(max_concurrency, 20))
-    semaphore = asyncio.Semaphore(max_concurrency)
-    results: list[BatchResultItem] = []
-    lock = asyncio.Lock()
-    has_error = asyncio.Event()
-
-    async def _execute_one(item: BatchRequestItem) -> None:
-        if fail_fast and has_error.is_set():
-            return
-        async with semaphore:
-            if fail_fast and has_error.is_set():
-                return
-            start = time.time()
-            try:
-                data = await self._request(
-                    method=item.method,
-                    path=item.path,
-                    params=dict(item.params),
-                    data=dict(item.data),
-                )
-                latency = (time.time() - start) * 1000
-                result = BatchResultItem(
-                    request_id=item.request_id,
-                    success=True,
-                    data=data,
-                    latency_ms=latency,
-                )
-            except Exception as exc:
-                latency = (time.time() - start) * 1000
-                result = BatchResultItem(
-                    request_id=item.request_id,
-                    success=False,
-                    error=exc,
-                    latency_ms=latency,
-                )
-                if fail_fast:
-                    has_error.set()
-            async with lock:
-                results.append(result)
-
-    batch_start = time.time()
-    await asyncio.gather(*[_execute_one(item) for item in requests])
-    total_latency = (time.time() - batch_start) * 1000
-
-    return _batch_aggregate(results, total_latency)
-
-
-# Bind batch methods to CommerceMCPBase
-CommerceMCPBase._batch_aggregate = staticmethod(_batch_aggregate)  # type: ignore[assignment]
-CommerceMCPBase._batch_request = _batch_request  # type: ignore[assignment]
-
-
-# ── Data Export ───────────────────────────────────────────
-
-
-class ExportFormat(str, Enum):
+class ExportFormat(StrEnum):
     """Supported export formats."""
 
     CSV = "csv"
@@ -2003,9 +1830,7 @@ class DataExporter:
         try:
             import openpyxl
         except ImportError:
-            raise ImportError(
-                "openpyxl is required for Excel export. Install it with: pip install openpyxl"
-            )
+            raise ImportError("openpyxl is required for Excel export. Install it with: pip install openpyxl")
 
         wb = openpyxl.Workbook()
         ws = wb.active

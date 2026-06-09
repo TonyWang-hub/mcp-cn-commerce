@@ -2704,10 +2704,7 @@ class RequestResultCache:
         """
         now = time.time()
         with self._lock:
-            expired_keys = [
-                k for k, (stored_at, ttl, _) in self._cache.items()
-                if now - stored_at > ttl
-            ]
+            expired_keys = [k for k, (stored_at, ttl, _) in self._cache.items() if now - stored_at > ttl]
             for k in expired_keys:
                 del self._cache[k]
             self._stats.total_evicted += len(expired_keys)
@@ -2854,6 +2851,7 @@ class ResponseDecompressor:
                 # Brotli -- attempt if available
                 try:
                     import brotli
+
                     decompressed = brotli.decompress(body)
                 except ImportError:
                     logger.warning("Brotli decompression requested but brotli not installed")
@@ -2870,10 +2868,7 @@ class ResponseDecompressor:
                 self._stats.decompressed_responses += 1
                 self._stats.total_decompressed_bytes += len(decompressed)
 
-            logger.debug(
-                f"Decompressed {len(body)} -> {len(decompressed)} bytes "
-                f"(encoding={encoding})"
-            )
+            logger.debug(f"Decompressed {len(body)} -> {len(decompressed)} bytes " f"(encoding={encoding})")
             return decompressed
 
         except Exception as exc:
@@ -3212,9 +3207,7 @@ class RequestEncryptor:
             self._total_encrypted += 1
             self._total_bytes_encrypted += len(body)
 
-        logger.debug(
-            f"Encrypted {len(body)} bytes using {self.config.method.value}"
-        )
+        logger.debug(f"Encrypted {len(body)} bytes using {self.config.method.value}")
         return encrypted, headers
 
     def decrypt(self, data: bytes) -> bytes:
@@ -3241,9 +3234,7 @@ class RequestEncryptor:
             self._total_decrypted += 1
             self._total_bytes_decrypted += len(decrypted)
 
-        logger.debug(
-            f"Decrypted {len(data)} -> {len(decrypted)} bytes using {self.config.method.value}"
-        )
+        logger.debug(f"Decrypted {len(data)} -> {len(decrypted)} bytes using {self.config.method.value}")
         return decrypted
 
     def _do_encrypt(self, body: bytes) -> bytes:
@@ -3296,10 +3287,7 @@ class RequestEncryptor:
         try:
             import pyaes
         except ImportError:
-            raise ImportError(
-                "pyaes is required for AES encryption. "
-                "Install it with: pip install pyaes"
-            )
+            raise ImportError("pyaes is required for AES encryption. " "Install it with: pip install pyaes")
 
         iv = os.urandom(16)
         padded = self._pkcs7_pad(body, 16)
@@ -3322,10 +3310,7 @@ class RequestEncryptor:
         try:
             import pyaes
         except ImportError:
-            raise ImportError(
-                "pyaes is required for AES decryption. "
-                "Install it with: pip install pyaes"
-            )
+            raise ImportError("pyaes is required for AES decryption. " "Install it with: pip install pyaes")
 
         iv = data[:16]
         ciphertext = data[16:]
@@ -3577,9 +3562,16 @@ class AuditLog:
             return ""
 
         fields = [
-            "audit_id", "request_id", "method", "path",
-            "platform", "timestamp", "status_code",
-            "latency_ms", "encrypted", "error",
+            "audit_id",
+            "request_id",
+            "method",
+            "path",
+            "platform",
+            "timestamp",
+            "status_code",
+            "latency_ms",
+            "encrypted",
+            "error",
         ]
         output = io.StringIO()
         writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
@@ -3932,15 +3924,17 @@ class CommerceMCPBase:
                         self._result_cache.set(cache_key, result, ttl_seconds=cache_ttl)
 
                 # ── Audit: log successful request ──
-                self._audit_log.log(AuditEntry(
-                    request_id=request_id,
-                    method=method.upper(),
-                    path=path,
-                    platform=self.__class__.__name__.upper(),
-                    status_code=resp.status_code,
-                    latency_ms=(time.time() - request_start) * 1000,
-                    encrypted=is_encrypted,
-                ))
+                self._audit_log.log(
+                    AuditEntry(
+                        request_id=request_id,
+                        method=method.upper(),
+                        path=path,
+                        platform=self.__class__.__name__.upper(),
+                        status_code=resp.status_code,
+                        latency_ms=(time.time() - request_start) * 1000,
+                        encrypted=is_encrypted,
+                    )
+                )
 
                 return result
 
@@ -3948,16 +3942,18 @@ class CommerceMCPBase:
                 last_exc = exc
 
                 # ── Audit: log failed request ──
-                self._audit_log.log(AuditEntry(
-                    request_id=request_id,
-                    method=method.upper(),
-                    path=path,
-                    platform=self.__class__.__name__.upper(),
-                    status_code=getattr(exc, "status_code", 0),
-                    latency_ms=(time.time() - request_start) * 1000,
-                    encrypted=is_encrypted,
-                    error=str(exc),
-                ))
+                self._audit_log.log(
+                    AuditEntry(
+                        request_id=request_id,
+                        method=method.upper(),
+                        path=path,
+                        platform=self.__class__.__name__.upper(),
+                        status_code=getattr(exc, "status_code", 0),
+                        latency_ms=(time.time() - request_start) * 1000,
+                        encrypted=is_encrypted,
+                        error=str(exc),
+                    )
+                )
 
                 # If no retry config or not retryable, re-raise immediately
                 if not retry_config or not retry_config.should_retry_exception(exc):

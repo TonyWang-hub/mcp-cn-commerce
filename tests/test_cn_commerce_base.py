@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sys
+import zlib
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -27,27 +28,27 @@ from cn_commerce_base import (
     BatchRequestItem,
     BatchResultItem,
     BatchSummary,
-    CircuitBreakerState,
+    CacheWarmer,
     CommerceAPIError,
     CommerceMCPBase,
+    CompressionConfig,
+    CompressionMethod,
     ConfigurableRateLimiter,
     ConfigValidationError,
     EndpointMetrics,
-    EndpointNode,
     EndpointRateLimit,
-    FailoverConfig,
-    FailoverManager,
-    LoadBalancer,
-    LoadBalancingStrategy,
     MetricsCollector,
     PlatformRateLimitConfig,
     RateLimitConfig,
     RateLimiter,
     RateLimitStats,
+    RequestCompressor,
     RetryableError,
     RetryConfig,
     SensitiveDataFilter,
     SignMethod,
+    WarmupResult,
+    WarmupTask,
     format_error_response,
     format_response,
     handle_tool_errors,
@@ -2263,1313 +2264,798 @@ class TestConfigurableRateLimiter:
 # ── WarmupTask Tests ──────────────────────────────────────
 
 
-class TestLoadBalancingStrategy:
-    """Tests for LoadBalancingStrategy enum."""
+class TestWarmupTask:
+    """Tests for WarmupTask dataclass."""
 
-    def test_round_robin(self):
-        assert LoadBalancingStrategy.ROUND_ROBIN == "round_robin"
+    def test_basic_creation(self):
+        async def fetch():
+            return {}
 
-    def test_weighted(self):
-        assert LoadBalancingStrategy.WEIGHTED == "weighted"
+        task = WarmupTask(platform="TEST", cache_key="key1", fetch_fn=fetch)
+        assert task.platform == "TEST"
+        assert task.cache_key == "key1"
+        assert task.priority == 0
+        assert task.enabled is True
 
-    def test_least_connections(self):
-        assert LoadBalancingStrategy.LEAST_CONNECTIONS == "least_connections"
+    def test_custom_priority(self):
+        async def fetch():
+            return {}
 
+        task = WarmupTask(platform="TEST", cache_key="key1", fetch_fn=fetch, priority=5)
+        assert task.priority == 5
 
-# ── EndpointNode Tests ─────────────────────────────────────
+    def test_disabled(self):
+        async def fetch():
+            return {}
 
-
-class TestEndpointNode:
-    """Tests for EndpointNode dataclass."""
-
-    def test_default_values(self):
-        node = EndpointNode()
-        assert node.url == ""
-        assert node.weight == 1
-        assert node.active_connections == 0
-        assert node.is_healthy is True
-        assert node.failure_count == 0
-        assert node.last_failure_time == 0.0
-        assert node.total_requests == 0
-        assert node.total_failures == 0
-        assert node.avg_latency_ms == 0.0
-
-    def test_custom_values(self):
-        node = EndpointNode(
-            url="https://api.example.com",
-            weight=3,
-            active_connections=5,
-            is_healthy=False,
-            failure_count=2,
-        )
-        assert node.url == "https://api.example.com"
-        assert node.weight == 3
-        assert node.active_connections == 5
-        assert node.is_healthy is False
-        assert node.failure_count == 2
+        task = WarmupTask(platform="TEST", cache_key="key1", fetch_fn=fetch, enabled=False)
+        assert task.enabled is False
 
 
-# ── LoadBalancer Tests ─────────────────────────────────────
+# ── WarmupResult Tests ────────────────────────────────────
 
 
-class TestLoadBalancer:
-    """Tests for LoadBalancer."""
-
-    def test_default_strategy(self):
-        lb = LoadBalancer()
-        assert lb.strategy == LoadBalancingStrategy.ROUND_ROBIN
-
-    def test_custom_strategy(self):
-        lb = LoadBalancer(LoadBalancingStrategy.WEIGHTED)
-        assert lb.strategy == LoadBalancingStrategy.WEIGHTED
-
-    def test_add_endpoint(self):
-        lb = LoadBalancer()
-        node = lb.add_endpoint("https://api1.example.com", weight=2)
-        assert node.url == "https://api1.example.com"
-        assert node.weight == 2
-        assert lb.endpoint_count == 1
-
-    def test_add_endpoint_updates_weight(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com", weight=1)
-        node = lb.add_endpoint("https://api1.example.com", weight=5)
-        assert node.weight == 5
-        assert lb.endpoint_count == 1
-
-    def test_add_endpoint_min_weight(self):
-        lb = LoadBalancer()
-        node = lb.add_endpoint("https://api1.example.com", weight=0)
-        assert node.weight == 1  # Minimum weight is 1
-
-    def test_remove_endpoint(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        assert lb.remove_endpoint("https://api1.example.com") is True
-        assert lb.endpoint_count == 0
-
-    def test_remove_nonexistent_endpoint(self):
-        lb = LoadBalancer()
-        assert lb.remove_endpoint("https://nonexistent.com") is False
-
-    def test_mark_healthy(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        lb.mark_unhealthy("https://api1.example.com")
-        lb.mark_healthy("https://api1.example.com")
-        node = lb._endpoints["https://api1.example.com"]
-        assert node.is_healthy is True
-        assert node.failure_count == 0
-
-    def test_mark_unhealthy(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        lb.mark_unhealthy("https://api1.example.com")
-        node = lb._endpoints["https://api1.example.com"]
-        assert node.is_healthy is False
-        assert node.failure_count == 1
-        assert node.total_failures == 1
-        assert node.last_failure_time > 0
-
-    def test_record_success(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        lb.record_success("https://api1.example.com", latency_ms=50.0)
-        node = lb._endpoints["https://api1.example.com"]
-        assert node.total_requests == 1
-        assert node.avg_latency_ms == 50.0
-
-    def test_record_success_latency_moving_average(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        lb.record_success("https://api1.example.com", latency_ms=100.0)
-        lb.record_success("https://api1.example.com", latency_ms=50.0)
-        node = lb._endpoints["https://api1.example.com"]
-        assert node.total_requests == 2
-        # EMA: 0.8 * 100 + 0.2 * 50 = 90
-        assert node.avg_latency_ms == pytest.approx(90.0)
-
-    def test_record_failure(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        lb.record_failure("https://api1.example.com")
-        node = lb._endpoints["https://api1.example.com"]
-        assert node.is_healthy is False
-        assert node.failure_count == 1
-
-    def test_get_endpoint_no_endpoints(self):
-        lb = LoadBalancer()
-        assert lb.get_endpoint() is None
-
-    def test_get_endpoint_all_unhealthy(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        lb.mark_unhealthy("https://api1.example.com")
-        assert lb.get_endpoint() is None
-
-    def test_round_robin_distribution(self):
-        lb = LoadBalancer(LoadBalancingStrategy.ROUND_ROBIN)
-        lb.add_endpoint("https://api1.example.com")
-        lb.add_endpoint("https://api2.example.com")
-        lb.add_endpoint("https://api3.example.com")
-
-        results = [lb.get_endpoint().url for _ in range(6)]
-        assert results == [
-            "https://api1.example.com",
-            "https://api2.example.com",
-            "https://api3.example.com",
-            "https://api1.example.com",
-            "https://api2.example.com",
-            "https://api3.example.com",
-        ]
-
-    def test_round_robin_skips_unhealthy(self):
-        lb = LoadBalancer(LoadBalancingStrategy.ROUND_ROBIN)
-        lb.add_endpoint("https://api1.example.com")
-        lb.add_endpoint("https://api2.example.com")
-        lb.mark_unhealthy("https://api1.example.com")
-
-        results = [lb.get_endpoint().url for _ in range(3)]
-        assert all(r == "https://api2.example.com" for r in results)
-
-    def test_weighted_distribution(self):
-        lb = LoadBalancer(LoadBalancingStrategy.WEIGHTED)
-        lb.add_endpoint("https://api1.example.com", weight=3)
-        lb.add_endpoint("https://api2.example.com", weight=1)
-
-        # With 3:1 weight ratio, api1 should get ~75% of traffic
-        results = [lb.get_endpoint().url for _ in range(1000)]
-        api1_count = results.count("https://api1.example.com")
-        api2_count = results.count("https://api2.example.com")
-        # Allow some variance due to randomness
-        assert api1_count > 600
-        assert api2_count > 100
-
-    def test_least_connections_distribution(self):
-        lb = LoadBalancer(LoadBalancingStrategy.LEAST_CONNECTIONS)
-        lb.add_endpoint("https://api1.example.com")
-        lb.add_endpoint("https://api2.example.com")
-
-        # First call should pick one with 0 connections
-        ep1 = lb.get_endpoint()
-        lb.increment_connections(ep1.url)
-
-        # Second call should pick the other one
-        ep2 = lb.get_endpoint()
-        assert ep2.url != ep1.url
-
-    def test_increment_decrement_connections(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-
-        lb.increment_connections("https://api1.example.com")
-        assert lb._endpoints["https://api1.example.com"].active_connections == 1
-
-        lb.increment_connections("https://api1.example.com")
-        assert lb._endpoints["https://api1.example.com"].active_connections == 2
-
-        lb.decrement_connections("https://api1.example.com")
-        assert lb._endpoints["https://api1.example.com"].active_connections == 1
-
-    def test_decrement_connections_minimum_zero(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        lb.decrement_connections("https://api1.example.com")
-        assert lb._endpoints["https://api1.example.com"].active_connections == 0
-
-    def test_endpoint_count(self):
-        lb = LoadBalancer()
-        assert lb.endpoint_count == 0
-        lb.add_endpoint("https://api1.example.com")
-        assert lb.endpoint_count == 1
-        lb.add_endpoint("https://api2.example.com")
-        assert lb.endpoint_count == 2
-
-    def test_healthy_count(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        lb.add_endpoint("https://api2.example.com")
-        assert lb.healthy_count == 2
-
-        lb.mark_unhealthy("https://api1.example.com")
-        assert lb.healthy_count == 1
-
-    def test_get_stats(self):
-        lb = LoadBalancer(LoadBalancingStrategy.WEIGHTED)
-        lb.add_endpoint("https://api1.example.com", weight=2)
-        lb.add_endpoint("https://api2.example.com")
-
-        stats = lb.get_stats()
-        assert stats["strategy"] == "weighted"
-        assert stats["total_endpoints"] == 2
-        assert stats["healthy_endpoints"] == 2
-        assert stats["unhealthy_endpoints"] == 0
-        assert "https://api1.example.com" in stats["endpoints"]
-        assert "https://api2.example.com" in stats["endpoints"]
-
-
-# ── FailoverConfig Tests ───────────────────────────────────
-
-
-class TestFailoverConfig:
-    """Tests for FailoverConfig dataclass."""
+class TestWarmupResult:
+    """Tests for WarmupResult dataclass."""
 
     def test_default_values(self):
-        config = FailoverConfig()
-        assert config.max_failures == 3
-        assert config.recovery_check_interval == 30.0
-        assert config.recovery_timeout == 5.0
-        assert config.enable_auto_recovery is True
-        assert config.circuit_breaker_threshold == 0.5
-        assert config.circuit_breaker_reset_seconds == 60.0
+        r = WarmupResult()
+        assert r.platform == ""
+        assert r.cache_key == ""
+        assert r.success is True
+        assert r.latency_ms == 0.0
+        assert r.error == ""
 
-    def test_custom_values(self):
-        config = FailoverConfig(
-            max_failures=5,
-            recovery_check_interval=10.0,
-            recovery_timeout=3.0,
-            enable_auto_recovery=False,
-            circuit_breaker_threshold=0.7,
-            circuit_breaker_reset_seconds=30.0,
+    def test_with_values(self):
+        r = WarmupResult(
+            platform="TEST",
+            cache_key="key1",
+            success=False,
+            latency_ms=42.5,
+            error="timeout",
         )
-        assert config.max_failures == 5
-        assert config.recovery_check_interval == 10.0
-        assert config.recovery_timeout == 3.0
-        assert config.enable_auto_recovery is False
-        assert config.circuit_breaker_threshold == 0.7
-        assert config.circuit_breaker_reset_seconds == 30.0
+        assert r.platform == "TEST"
+        assert r.cache_key == "key1"
+        assert r.success is False
+        assert r.latency_ms == 42.5
+        assert r.error == "timeout"
 
 
-# ── CircuitBreakerState Tests ──────────────────────────────
+# ── CacheWarmer Tests ─────────────────────────────────────
 
 
-class TestCircuitBreakerState:
-    """Tests for CircuitBreakerState dataclass."""
+class TestCacheWarmer:
+    """Tests for CacheWarmer."""
 
-    def test_default_values(self):
-        cb = CircuitBreakerState()
-        assert cb.url == ""
-        assert cb.is_open is False
-        assert cb.failure_count == 0
-        assert cb.success_count == 0
-        assert cb.last_failure_time == 0.0
-        assert cb.opened_at == 0.0
+    def test_register_task(self):
+        warmer = CacheWarmer()
 
-    def test_custom_values(self):
-        cb = CircuitBreakerState(
-            url="https://api.example.com",
-            is_open=True,
-            failure_count=5,
-        )
-        assert cb.url == "https://api.example.com"
-        assert cb.is_open is True
-        assert cb.failure_count == 5
+        async def fetch():
+            return {"data": 1}
 
+        warmer.register("TEST", "key1", fetch)
+        stats = warmer.get_stats()
+        assert stats["registered_tasks"] == 1
 
-# ── FailoverManager Tests ──────────────────────────────────
+    def test_register_multiple_tasks(self):
+        warmer = CacheWarmer()
 
+        async def fetch1():
+            return {}
 
-class TestFailoverManager:
-    """Tests for FailoverManager."""
+        async def fetch2():
+            return {}
 
-    def test_init(self):
-        lb = LoadBalancer()
-        fm = FailoverManager(load_balancer=lb)
-        assert fm.config.max_failures == 3
+        warmer.register("TEST", "key1", fetch1, priority=1)
+        warmer.register("TEST", "key2", fetch2, priority=0)
+        stats = warmer.get_stats()
+        assert stats["registered_tasks"] == 2
 
-    def test_init_custom_config(self):
-        lb = LoadBalancer()
-        config = FailoverConfig(max_failures=5)
-        fm = FailoverManager(load_balancer=lb, config=config)
-        assert fm.config.max_failures == 5
+    def test_unregister_task(self):
+        warmer = CacheWarmer()
 
-    def test_report_success(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        fm = FailoverManager(load_balancer=lb)
+        async def fetch():
+            return {}
 
-        fm.report_success("https://api1.example.com", latency_ms=50.0)
-        node = lb._endpoints["https://api1.example.com"]
-        assert node.total_requests == 1
-        assert node.is_healthy is True
+        warmer.register("TEST", "key1", fetch)
+        assert warmer.unregister("TEST", "key1") is True
+        stats = warmer.get_stats()
+        assert stats["registered_tasks"] == 0
 
-    def test_report_success_resets_circuit_breaker(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        fm = FailoverManager(load_balancer=lb)
+    def test_unregister_nonexistent(self):
+        warmer = CacheWarmer()
+        assert warmer.unregister("TEST", "missing") is False
 
-        # Simulate failures to open circuit breaker
-        for _ in range(10):
-            fm.report_failure("https://api1.example.com", error="test")
+    @pytest.mark.asyncio
+    async def test_warmup_all(self):
+        warmer = CacheWarmer()
+        call_count = 0
 
-        # Report success should close circuit
-        fm.report_success("https://api1.example.com")
-        assert fm.is_circuit_open("https://api1.example.com") is False
+        async def fetch():
+            nonlocal call_count
+            call_count += 1
+            return {"id": call_count}
 
-    def test_report_failure_increments_count(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        fm = FailoverManager(load_balancer=lb)
+        warmer.register("TEST", "key1", fetch)
+        warmer.register("TEST", "key2", fetch)
+        results = await warmer.warmup_all()
+        assert len(results) == 2
+        assert all(r.success for r in results)
+        assert call_count == 2
 
-        fm.report_failure("https://api1.example.com", error="connection refused")
-        node = lb._endpoints["https://api1.example.com"]
-        assert node.failure_count == 1
-        assert node.total_failures == 1
+    @pytest.mark.asyncio
+    async def test_warmup_all_skips_disabled(self):
+        warmer = CacheWarmer()
 
-    def test_report_failure_marks_unhealthy_after_threshold(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        fm = FailoverManager(load_balancer=lb, config=FailoverConfig(max_failures=3))
+        async def fetch():
+            return {}
 
-        fm.report_failure("https://api1.example.com")
-        fm.report_failure("https://api1.example.com")
-        assert lb._endpoints["https://api1.example.com"].is_healthy is True
+        warmer.register("TEST", "key1", fetch, enabled=False)
+        warmer.register("TEST", "key2", fetch, enabled=True)
+        results = await warmer.warmup_all()
+        assert len(results) == 1
+        assert results[0].cache_key == "key2"
 
-        fm.report_failure("https://api1.example.com")
-        assert lb._endpoints["https://api1.example.com"].is_healthy is False
+    @pytest.mark.asyncio
+    async def test_warmup_all_handles_failure(self):
+        warmer = CacheWarmer()
 
-    def test_report_failure_records_history(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        fm = FailoverManager(load_balancer=lb)
+        async def fetch_ok():
+            return {"ok": True}
 
-        fm.report_failure("https://api1.example.com", error="timeout")
-        assert len(fm._failure_history) == 1
-        assert fm._failure_history[0]["url"] == "https://api1.example.com"
-        assert fm._failure_history[0]["error"] == "timeout"
+        async def fetch_fail():
+            raise ValueError("fetch error")
 
-    def test_report_failure_history_bounded(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        fm = FailoverManager(load_balancer=lb)
+        warmer.register("TEST", "ok_key", fetch_ok)
+        warmer.register("TEST", "fail_key", fetch_fail)
+        results = await warmer.warmup_all()
+        assert len(results) == 2
+        assert results[0].success is True
+        assert results[1].success is False
+        assert "fetch error" in results[1].error
 
-        # Add more than 1000 entries
-        for i in range(1100):
-            fm.report_failure("https://api1.example.com", error=f"error {i}")
+    @pytest.mark.asyncio
+    async def test_warmup_platform(self):
+        warmer = CacheWarmer()
 
-        assert len(fm._failure_history) <= 500
+        async def fetch1():
+            return {"p1": 1}
 
-    def test_report_failure_ignores_unknown_url(self):
-        lb = LoadBalancer()
-        fm = FailoverManager(load_balancer=lb)
+        async def fetch2():
+            return {"p2": 2}
 
-        # Should not raise
-        fm.report_failure("https://unknown.com", error="test")
+        warmer.register("P1", "key1", fetch1)
+        warmer.register("P2", "key2", fetch2)
+        results = await warmer.warmup_platform("P1")
+        assert len(results) == 1
+        assert results[0].platform == "P1"
 
-    def test_circuit_breaker_opens_on_high_failure_rate(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        fm = FailoverManager(
-            load_balancer=lb,
-            config=FailoverConfig(
-                max_failures=3,
-                circuit_breaker_threshold=0.5,
-            ),
-        )
+    @pytest.mark.asyncio
+    async def test_warmup_platform_empty(self):
+        warmer = CacheWarmer()
+        results = await warmer.warmup_platform("UNKNOWN")
+        assert len(results) == 0
 
-        # Need at least 5 requests to evaluate circuit breaker
-        for _ in range(3):
-            fm.report_failure("https://api1.example.com")
-        for _ in range(2):
-            fm.report_success("https://api1.example.com")
+    @pytest.mark.asyncio
+    async def test_get_cached_after_warmup(self):
+        warmer = CacheWarmer()
 
-        # 3 failures out of 5 = 60% > 50% threshold
-        assert fm.is_circuit_open("https://api1.example.com") is True
+        async def fetch():
+            return {"products": [1, 2, 3]}
 
-    def test_circuit_breaker_stays_closed_on_low_failure_rate(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        fm = FailoverManager(load_balancer=lb, config=FailoverConfig(circuit_breaker_threshold=0.5))
+        warmer.register("TEST", "products", fetch, ttl_seconds=60)
+        await warmer.warmup_all()
+        cached = warmer.get_cached("products")
+        assert cached == {"products": [1, 2, 3]}
 
-        # 2 failures out of 5 = 40% < 50% threshold
-        for _ in range(2):
-            fm.report_failure("https://api1.example.com")
-        for _ in range(3):
-            fm.report_success("https://api1.example.com")
+    def test_get_cached_miss(self):
+        warmer = CacheWarmer()
+        assert warmer.get_cached("missing") is None
 
-        assert fm.is_circuit_open("https://api1.example.com") is False
+    @pytest.mark.asyncio
+    async def test_get_cached_expired(self):
+        warmer = CacheWarmer()
 
-    def test_circuit_breaker_resets_after_timeout(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        fm = FailoverManager(
-            load_balancer=lb,
-            config=FailoverConfig(
-                circuit_breaker_threshold=0.5,
-                circuit_breaker_reset_seconds=0.01,  # Very short timeout
-            ),
-        )
+        async def fetch():
+            return {"data": 1}
 
-        # Open the circuit breaker
-        for _ in range(5):
-            fm.report_failure("https://api1.example.com")
-
-        assert fm.is_circuit_open("https://api1.example.com") is True
-
-        # Wait for reset timeout
+        warmer.register("TEST", "key1", fetch, ttl_seconds=0)
+        await warmer.warmup_all()
+        # TTL is 0, so it should be expired immediately
+        # (depending on timing, but practically immediate)
         import time as _time
 
-        _time.sleep(0.02)
+        _time.sleep(0.01)
+        assert warmer.get_cached("key1") is None
 
-        # Should be closed now
-        assert fm.is_circuit_open("https://api1.example.com") is False
+    def test_set_cached(self):
+        warmer = CacheWarmer()
+        warmer.set_cached("manual_key", {"value": 42}, ttl_seconds=60)
+        assert warmer.get_cached("manual_key") == {"value": 42}
 
-    def test_get_healthy_endpoint(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        lb.add_endpoint("https://api2.example.com")
-        fm = FailoverManager(load_balancer=lb)
+    def test_invalidate_single(self):
+        warmer = CacheWarmer()
+        warmer.set_cached("key1", "val1")
+        warmer.set_cached("key2", "val2")
+        warmer.invalidate("key1")
+        assert warmer.get_cached("key1") is None
+        assert warmer.get_cached("key2") == "val2"
 
-        endpoint = fm.get_healthy_endpoint()
-        assert endpoint is not None
-        assert endpoint.url in ["https://api1.example.com", "https://api2.example.com"]
-
-    def test_get_healthy_endpoint_skips_open_circuit(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        lb.add_endpoint("https://api2.example.com")
-        fm = FailoverManager(load_balancer=lb, config=FailoverConfig(circuit_breaker_threshold=0.5))
-
-        # Open circuit for api1
-        for _ in range(5):
-            fm.report_failure("https://api1.example.com")
-
-        # Should get api2
-        endpoint = fm.get_healthy_endpoint()
-        assert endpoint is not None
-        assert endpoint.url == "https://api2.example.com"
-
-    def test_get_healthy_endpoint_none_when_all_unhealthy(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        fm = FailoverManager(load_balancer=lb)
-
-        lb.mark_unhealthy("https://api1.example.com")
-        assert fm.get_healthy_endpoint() is None
+    def test_invalidate_all(self):
+        warmer = CacheWarmer()
+        warmer.set_cached("key1", "val1")
+        warmer.set_cached("key2", "val2")
+        warmer.invalidate()
+        assert warmer.get_cached("key1") is None
+        assert warmer.get_cached("key2") is None
 
     @pytest.mark.asyncio
-    async def test_check_recovery_success(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        lb.mark_unhealthy("https://api1.example.com")
-        fm = FailoverManager(load_balancer=lb)
+    async def test_warmup_latency_tracked(self):
+        warmer = CacheWarmer()
 
-        mock_response = AsyncMock()
-        mock_response.status_code = 200
+        async def fetch():
+            import asyncio
 
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.head.return_value = mock_response
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
+            await asyncio.sleep(0.01)
+            return {}
 
-            result = await fm.check_recovery("https://api1.example.com")
-
-        assert result is True
-        assert lb._endpoints["https://api1.example.com"].is_healthy is True
+        warmer.register("TEST", "key1", fetch)
+        results = await warmer.warmup_all()
+        assert results[0].latency_ms > 0
 
     @pytest.mark.asyncio
-    async def test_check_recovery_failure(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        lb.mark_unhealthy("https://api1.example.com")
-        fm = FailoverManager(load_balancer=lb)
+    async def test_warmup_history(self):
+        warmer = CacheWarmer()
 
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.head.side_effect = httpx.ConnectError("refused")
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
+        async def fetch_ok():
+            return {}
 
-            result = await fm.check_recovery("https://api1.example.com")
+        async def fetch_fail():
+            raise RuntimeError("fail")
 
-        assert result is False
-        assert lb._endpoints["https://api1.example.com"].is_healthy is False
-
-    @pytest.mark.asyncio
-    async def test_recovery_monitor_disabled(self):
-        lb = LoadBalancer()
-        fm = FailoverManager(load_balancer=lb, config=FailoverConfig(enable_auto_recovery=False))
-
-        await fm.start_recovery_monitor()
-        assert fm._recovery_task is None
+        warmer.register("TEST", "ok", fetch_ok)
+        warmer.register("TEST", "fail", fetch_fail)
+        await warmer.warmup_all()
+        history = warmer.get_history()
+        assert len(history) == 2
+        assert history[0]["success"] is True
+        assert history[1]["success"] is False
 
     @pytest.mark.asyncio
-    async def test_recovery_monitor_start_stop(self):
-        lb = LoadBalancer()
-        fm = FailoverManager(
-            load_balancer=lb,
-            config=FailoverConfig(
-                enable_auto_recovery=True,
-                recovery_check_interval=0.05,
-            ),
-        )
+    async def test_warmup_history_limit(self):
+        warmer = CacheWarmer()
 
-        await fm.start_recovery_monitor()
-        assert fm._recovery_task is not None
+        async def fetch():
+            return {}
 
-        fm.stop_recovery_monitor()
+        for i in range(10):
+            warmer.register("TEST", f"key{i}", fetch)
+        await warmer.warmup_all()
+        history = warmer.get_history(limit=5)
+        assert len(history) == 5
+
+    @pytest.mark.asyncio
+    async def test_scheduled_warmup_start_stop(self):
+        warmer = CacheWarmer()
+        assert warmer.is_scheduled is False
+
+        async def fetch():
+            return {}
+
+        warmer.register("TEST", "key1", fetch)
+        task = warmer.start_scheduled(interval_seconds=0.1)
+        assert warmer.is_scheduled is True
+        assert task is not None
+
+        warmer.stop_scheduled()
+        # Give a moment for cancellation to propagate
+        import asyncio
+
         await asyncio.sleep(0.05)
-        assert fm._recovery_task is None
+        assert warmer.is_scheduled is False
 
-    def test_get_stats(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        fm = FailoverManager(load_balancer=lb)
+    @pytest.mark.asyncio
+    async def test_scheduled_warmup_runs(self):
+        warmer = CacheWarmer()
+        call_count = 0
 
-        fm.report_failure("https://api1.example.com", error="test")
-        stats = fm.get_stats()
+        async def fetch():
+            nonlocal call_count
+            call_count += 1
+            return {"count": call_count}
 
-        assert "config" in stats
-        assert "circuit_breakers" in stats
-        assert "recent_failures" in stats
-        assert "total_failure_events" in stats
-        assert "load_balancer" in stats
-        assert stats["total_failure_events"] == 1
+        warmer.register("TEST", "key1", fetch)
+        warmer.start_scheduled(interval_seconds=0.05)
+        import asyncio
 
-    def test_reset(self):
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        fm = FailoverManager(load_balancer=lb)
+        await asyncio.sleep(0.2)  # Let it run a few cycles
+        warmer.stop_scheduled()
+        # Should have been called at least twice
+        assert call_count >= 2
 
-        fm.report_failure("https://api1.example.com", error="test")
-        fm.reset()
+    @pytest.mark.asyncio
+    async def test_scheduled_warmup_platforms_filter(self):
+        warmer = CacheWarmer()
+        p1_count = 0
+        p2_count = 0
 
-        assert len(fm._failure_history) == 0
-        assert len(fm._circuit_breakers) == 0
-        assert lb._endpoints["https://api1.example.com"].is_healthy is True
-        assert lb._endpoints["https://api1.example.com"].failure_count == 0
+        async def fetch_p1():
+            nonlocal p1_count
+            p1_count += 1
+            return {}
 
+        async def fetch_p2():
+            nonlocal p2_count
+            p2_count += 1
+            return {}
 
-# ── LoadBalancer Concurrency Tests ─────────────────────────
+        warmer.register("P1", "key1", fetch_p1)
+        warmer.register("P2", "key2", fetch_p2)
+        warmer.start_scheduled(interval_seconds=0.05, warmup_platforms=["P1"])
+        import asyncio
 
+        await asyncio.sleep(0.2)
+        warmer.stop_scheduled()
+        assert p1_count >= 2
+        assert p2_count == 0  # P2 should not be warmed
 
-class TestLoadBalancerConcurrency:
-    """Thread-safety tests for LoadBalancer."""
+    @pytest.mark.asyncio
+    async def test_warmup_stats_after_execution(self):
+        warmer = CacheWarmer()
 
-    def test_concurrent_add_remove(self):
-        import threading
+        async def fetch():
+            return {}
 
-        lb = LoadBalancer()
-        errors = []
-
-        def add_endpoints():
-            try:
-                for i in range(50):
-                    lb.add_endpoint(f"https://api{i}.example.com")
-            except Exception as e:
-                errors.append(e)
-
-        def remove_endpoints():
-            try:
-                for i in range(50):
-                    lb.remove_endpoint(f"https://api{i}.example.com")
-            except Exception as e:
-                errors.append(e)
-
-        threads = [threading.Thread(target=add_endpoints), threading.Thread(target=remove_endpoints)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert errors == []
-
-    def test_concurrent_get_endpoint(self):
-        import threading
-
-        lb = LoadBalancer(LoadBalancingStrategy.ROUND_ROBIN)
-        for i in range(5):
-            lb.add_endpoint(f"https://api{i}.example.com")
-
-        results = []
-        errors = []
-
-        def get_endpoints():
-            try:
-                for _ in range(100):
-                    ep = lb.get_endpoint()
-                    if ep:
-                        results.append(ep.url)
-            except Exception as e:
-                errors.append(e)
-
-        threads = [threading.Thread(target=get_endpoints) for _ in range(4)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert errors == []
-        assert len(results) == 400
-
-    def test_concurrent_health_status_changes(self):
-        import threading
-
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        errors = []
-
-        def toggle_health():
-            try:
-                for _ in range(100):
-                    lb.mark_unhealthy("https://api1.example.com")
-                    lb.mark_healthy("https://api1.example.com")
-            except Exception as e:
-                errors.append(e)
-
-        threads = [threading.Thread(target=toggle_health) for _ in range(4)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert errors == []
+        warmer.register("TEST", "key1", fetch)
+        await warmer.warmup_all()
+        stats = warmer.get_stats()
+        assert stats["registered_tasks"] == 1
+        assert "key1" in stats["cached_keys"]
+        assert stats["cached_count"] == 1
+        assert stats["history"]["total"] == 1
+        assert stats["history"]["succeeded"] == 1
 
 
-# ── FailoverManager Concurrency Tests ──────────────────────
+# ── CompressionMethod Tests ───────────────────────────────
 
 
-class TestFailoverManagerConcurrency:
-    """Thread-safety tests for FailoverManager."""
+class TestCompressionMethod:
+    """Tests for CompressionMethod enum."""
 
-    def test_concurrent_report_success_failure(self):
-        import threading
+    def test_none(self):
+        assert CompressionMethod.NONE == "none"
 
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        fm = FailoverManager(load_balancer=lb)
-        errors = []
+    def test_gzip(self):
+        assert CompressionMethod.GZIP == "gzip"
 
-        def report_successes():
-            try:
-                for _ in range(100):
-                    fm.report_success("https://api1.example.com", latency_ms=10.0)
-            except Exception as e:
-                errors.append(e)
+    def test_deflate(self):
+        assert CompressionMethod.DEFLATE == "deflate"
 
-        def report_failures():
-            try:
-                for _ in range(100):
-                    fm.report_failure("https://api1.example.com", error="test")
-            except Exception as e:
-                errors.append(e)
-
-        threads = [
-            threading.Thread(target=report_successes),
-            threading.Thread(target=report_failures),
-        ]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert errors == []
-
-    def test_concurrent_circuit_breaker_checks(self):
-        import threading
-
-        lb = LoadBalancer()
-        lb.add_endpoint("https://api1.example.com")
-        fm = FailoverManager(load_balancer=lb)
-        errors = []
-
-        def check_circuit():
-            try:
-                for _ in range(100):
-                    fm.is_circuit_open("https://api1.example.com")
-            except Exception as e:
-                errors.append(e)
-
-        def report_failures():
-            try:
-                for _ in range(50):
-                    fm.report_failure("https://api1.example.com", error="test")
-            except Exception as e:
-                errors.append(e)
-
-        threads = [
-            threading.Thread(target=check_circuit),
-            threading.Thread(target=report_failures),
-        ]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert errors == []
+    def test_auto(self):
+        assert CompressionMethod.AUTO == "auto"
 
 
-# ── ConnectionPool Tests ──────────────────────────────────
+# ── CompressionConfig Tests ───────────────────────────────
 
 
-class TestConnectionPoolStats:
-    """Tests for ConnectionPoolStats."""
+class TestCompressionConfig:
+    """Tests for CompressionConfig dataclass."""
 
     def test_default_values(self):
-        from cn_commerce_base import ConnectionPoolStats
-
-        stats = ConnectionPoolStats()
-        assert stats.total_connections == 0
-        assert stats.active_connections == 0
-        assert stats.connections_reused == 0
-
-    def test_reuse_ratio_no_data(self):
-        from cn_commerce_base import ConnectionPoolStats
-
-        stats = ConnectionPoolStats()
-        assert stats.reuse_ratio == 0.0
-
-    def test_reuse_ratio_with_data(self):
-        from cn_commerce_base import ConnectionPoolStats
-
-        stats = ConnectionPoolStats(connections_reused=8, connections_created=2)
-        assert stats.reuse_ratio == 0.8
-
-    def test_to_dict(self):
-        from cn_commerce_base import ConnectionPoolStats
-
-        stats = ConnectionPoolStats(connections_reused=5, connections_created=5)
-        d = stats.to_dict()
-        assert d["connections_reused"] == 5
-        assert d["reuse_ratio"] == 0.5
-        assert "avg_connection_age_ms" in d
-
-    def test_reset(self):
-        from cn_commerce_base import ConnectionPoolStats
-
-        stats = ConnectionPoolStats(
-            total_connections=10,
-            connections_reused=5,
-            health_checks_passed=3,
-        )
-        stats.reset()
-        assert stats.total_connections == 0
-        assert stats.connections_reused == 0
-        assert stats.health_checks_passed == 0
-
-
-class TestConnectionPoolConfig:
-    """Tests for ConnectionPoolConfig."""
-
-    def test_defaults(self):
-        from cn_commerce_base import ConnectionPoolConfig
-
-        config = ConnectionPoolConfig()
-        assert config.max_connections == 20
-        assert config.max_keepalive_connections == 10
-        assert config.http2 is False
-        assert config.health_check_interval == 30.0
+        cfg = CompressionConfig()
+        assert cfg.method == CompressionMethod.NONE
+        assert cfg.min_size_bytes == 1024
+        assert cfg.gzip_level == 6
+        assert cfg.include_content_encoding is True
 
     def test_custom_values(self):
-        from cn_commerce_base import ConnectionPoolConfig
-
-        config = ConnectionPoolConfig(
-            http2=True,
-            max_connections=50,
-            health_check_interval=60.0,
+        cfg = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=512,
+            gzip_level=9,
+            include_content_encoding=False,
         )
-        assert config.http2 is True
-        assert config.max_connections == 50
-        assert config.health_check_interval == 60.0
-
-
-class TestConnectionPool:
-    """Tests for ConnectionPool."""
-
-    @pytest.mark.asyncio
-    async def test_acquire_creates_client(self):
-        from cn_commerce_base import ConnectionPool, ConnectionPoolConfig
-
-        pool = ConnectionPool(ConnectionPoolConfig(http2=False))
-        client = await pool.acquire()
-        assert isinstance(client, httpx.AsyncClient)
-        assert not client.is_closed
-        await pool.close()
-
-    @pytest.mark.asyncio
-    async def test_acquire_reuses_client(self):
-        from cn_commerce_base import ConnectionPool
-
-        pool = ConnectionPool()
-        client1 = await pool.acquire()
-        client2 = await pool.acquire()
-        assert client1 is client2
-        stats = pool.get_stats()
-        assert stats.connections_reused == 1
-        assert stats.connections_created == 1
-        await pool.close()
-
-    @pytest.mark.asyncio
-    async def test_acquire_after_close_creates_new(self):
-        from cn_commerce_base import ConnectionPool
-
-        pool = ConnectionPool()
-        client1 = await pool.acquire()
-        await pool.close()
-        client2 = await pool.acquire()
-        assert client1 is not client2
-        assert not client2.is_closed
-        await pool.close()
-
-    @pytest.mark.asyncio
-    async def test_release_same_client(self):
-        from cn_commerce_base import ConnectionPool
-
-        pool = ConnectionPool()
-        client = await pool.acquire()
-        await pool.release(client)
-        # Same client should still be in the pool
-        client2 = await pool.acquire()
-        assert client is client2
-        await pool.close()
-
-    @pytest.mark.asyncio
-    async def test_release_different_client_closes_it(self):
-        from cn_commerce_base import ConnectionPool
-
-        pool = ConnectionPool()
-        await pool.acquire()
-        client2 = httpx.AsyncClient()
-        await pool.release(client2)
-        assert client2.is_closed
-        stats = pool.get_stats()
-        assert stats.connections_closed == 1
-        await pool.close()
-
-    @pytest.mark.asyncio
-    async def test_health_check_no_client(self):
-        from cn_commerce_base import ConnectionPool
-
-        pool = ConnectionPool()
-        result = await pool.health_check()
-        assert result is False
-        assert pool.is_healthy is False
-        stats = pool.get_stats()
-        assert stats.health_checks_failed == 1
-        await pool.close()
-
-    @pytest.mark.asyncio
-    async def test_health_check_no_url(self):
-        from cn_commerce_base import ConnectionPool, ConnectionPoolConfig
-
-        pool = ConnectionPool(ConnectionPoolConfig(health_check_url=""))
-        await pool.acquire()
-        result = await pool.health_check()
-        assert result is True
-        assert pool.is_healthy is True
-        stats = pool.get_stats()
-        assert stats.health_checks_passed == 1
-        await pool.close()
-
-    @pytest.mark.asyncio
-    async def test_health_check_with_url_success(self):
-        from cn_commerce_base import ConnectionPool, ConnectionPoolConfig
-
-        config = ConnectionPoolConfig(health_check_url="https://api.example.com/health")
-        pool = ConnectionPool(config)
-        await pool.acquire()
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        pool._client.head = AsyncMock(return_value=mock_resp)
-
-        result = await pool.health_check()
-        assert result is True
-        assert pool.is_healthy is True
-        await pool.close()
-
-    @pytest.mark.asyncio
-    async def test_health_check_with_url_failure(self):
-        from cn_commerce_base import ConnectionPool, ConnectionPoolConfig
-
-        config = ConnectionPoolConfig(
-            health_check_url="https://api.example.com/health",
-            health_check_timeout=5.0,
-        )
-        pool = ConnectionPool(config)
-        await pool.acquire()
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 500
-        pool._client.head = AsyncMock(return_value=mock_resp)
-
-        result = await pool.health_check()
-        assert result is False
-        assert pool.is_healthy is False
-        await pool.close()
-
-    @pytest.mark.asyncio
-    async def test_get_stats(self):
-        from cn_commerce_base import ConnectionPool
-
-        pool = ConnectionPool()
-        stats = pool.get_stats()
-        assert stats.active_connections == 0
-        assert stats.connections_created == 0
-
-        await pool.acquire()
-        stats = pool.get_stats()
-        assert stats.active_connections == 1
-        assert stats.connections_created == 1
-        await pool.close()
-
-    @pytest.mark.asyncio
-    async def test_close(self):
-        from cn_commerce_base import ConnectionPool
-
-        pool = ConnectionPool()
-        await pool.acquire()
-        await pool.close()
-        stats = pool.get_stats()
-        assert stats.active_connections == 0
-        assert stats.connections_closed == 1
-
-    @pytest.mark.asyncio
-    async def test_close_idempotent(self):
-        from cn_commerce_base import ConnectionPool
-
-        pool = ConnectionPool()
-        await pool.acquire()
-        await pool.close()
-        await pool.close()  # Should not raise
-
-    @pytest.mark.asyncio
-    async def test_http2_config(self):
-        from cn_commerce_base import ConnectionPool, ConnectionPoolConfig
-
-        config = ConnectionPoolConfig(http2=True)
-        pool = ConnectionPool(config)
-        client = await pool.acquire()
-        # httpx.AsyncClient with http2=True should be created
-        assert isinstance(client, httpx.AsyncClient)
-        await pool.close()
-
-    def test_start_health_monitor_no_loop(self):
-        """start_health_monitor should not raise outside an event loop."""
-        from cn_commerce_base import ConnectionPool, ConnectionPoolConfig
-
-        config = ConnectionPoolConfig(health_check_interval=10.0)
-        pool = ConnectionPool(config)
-        pool.start_health_monitor()  # Should not raise
-
-    def test_stop_health_monitor_no_task(self):
-        """stop_health_monitor should be a no-op when no task exists."""
-        from cn_commerce_base import ConnectionPool
-
-        pool = ConnectionPool()
-        pool.stop_health_monitor()  # Should not raise
-
-
-# ── AsyncRequestQueue Tests ───────────────────────────────
-
-
-class TestQueuePriority:
-    """Tests for QueuePriority enum."""
-
-    def test_critical_value(self):
-        from cn_commerce_base import QueuePriority
-
-        assert QueuePriority.CRITICAL == "critical"
-
-    def test_high_value(self):
-        from cn_commerce_base import QueuePriority
-
-        assert QueuePriority.HIGH == "high"
-
-    def test_normal_value(self):
-        from cn_commerce_base import QueuePriority
-
-        assert QueuePriority.NORMAL == "normal"
-
-    def test_low_value(self):
-        from cn_commerce_base import QueuePriority
-
-        assert QueuePriority.LOW == "low"
-
-
-class TestAsyncQueueStats:
-    """Tests for AsyncQueueStats."""
-
-    def test_default_values(self):
-        from cn_commerce_base import AsyncQueueStats
-
-        stats = AsyncQueueStats()
-        assert stats.total_enqueued == 0
-        assert stats.total_processed == 0
-        assert stats.total_failed == 0
-        assert stats.current_depth == 0
+        assert cfg.method == CompressionMethod.GZIP
+        assert cfg.min_size_bytes == 512
+        assert cfg.gzip_level == 9
+        assert cfg.include_content_encoding is False
 
     def test_to_dict(self):
-        from cn_commerce_base import AsyncQueueStats
+        cfg = CompressionConfig(method=CompressionMethod.GZIP)
+        d = cfg.to_dict()
+        assert d["method"] == "gzip"
+        assert d["min_size_bytes"] == 1024
 
-        stats = AsyncQueueStats(
-            total_enqueued=10,
-            total_processed=8,
-            total_failed=2,
-            avg_wait_time_ms=15.5,
-            priority_counts={"high": 3, "normal": 7},
+    def test_from_dict(self):
+        data = {
+            "method": "deflate",
+            "min_size_bytes": 2048,
+            "gzip_level": 3,
+            "include_content_encoding": False,
+        }
+        cfg = CompressionConfig.from_dict(data)
+        assert cfg.method == CompressionMethod.DEFLATE
+        assert cfg.min_size_bytes == 2048
+        assert cfg.gzip_level == 3
+        assert cfg.include_content_encoding is False
+
+    def test_roundtrip(self):
+        original = CompressionConfig(method=CompressionMethod.GZIP, min_size_bytes=512)
+        d = original.to_dict()
+        restored = CompressionConfig.from_dict(d)
+        assert restored.method == original.method
+        assert restored.min_size_bytes == original.min_size_bytes
+
+
+# ── RequestCompressor Tests ───────────────────────────────
+
+
+class TestRequestCompressor:
+    """Tests for RequestCompressor."""
+
+    def test_default_no_compression(self):
+        compressor = RequestCompressor()
+        body = b'{"data": "test"}'
+        result, headers = compressor.compress(body)
+        assert result == body
+        assert headers == {}
+
+    def test_gzip_compression(self):
+        config = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=0,
         )
-        d = stats.to_dict()
-        assert d["total_enqueued"] == 10
-        assert d["total_processed"] == 8
-        assert d["priority_counts"]["high"] == 3
+        compressor = RequestCompressor(config)
+        body = b'{"data": "' + b"x" * 2000 + b'"}'
+        result, headers = compressor.compress(body)
+        assert len(result) < len(body)
+        assert headers.get("Content-Encoding") == "gzip"
 
-    def test_reset(self):
-        from cn_commerce_base import AsyncQueueStats
-
-        stats = AsyncQueueStats(
-            total_enqueued=10,
-            total_processed=8,
-            priority_counts={"high": 3},
+    def test_deflate_compression(self):
+        config = CompressionConfig(
+            method=CompressionMethod.DEFLATE,
+            min_size_bytes=0,
         )
-        stats.reset()
-        assert stats.total_enqueued == 0
-        assert stats.total_processed == 0
-        assert len(stats.priority_counts) == 0
+        compressor = RequestCompressor(config)
+        body = b'{"data": "' + b"x" * 2000 + b'"}'
+        result, headers = compressor.compress(body)
+        assert len(result) < len(body)
+        assert headers.get("Content-Encoding") == "deflate"
 
-
-class TestAsyncRequestQueue:
-    """Tests for AsyncRequestQueue."""
-
-    @pytest.mark.asyncio
-    async def test_enqueue_and_process(self):
-        from cn_commerce_base import AsyncRequestQueue
-
-        queue = AsyncRequestQueue(max_workers=2)
-
-        async def processor(method, path, params, data):
-            return {"method": method, "path": path}
-
-        queue.set_processor(processor)
-        result = await queue.enqueue("GET", "/test")
-        assert result == {"method": "GET", "path": "/test"}
-        await queue.close()
-
-    @pytest.mark.asyncio
-    async def test_priority_ordering(self):
-        from cn_commerce_base import AsyncRequestQueue, QueuePriority
-
-        processed_order = []
-        queue = AsyncRequestQueue(max_workers=1)
-
-        async def processor(method, path, params, data):
-            processed_order.append(path)
-            return path
-
-        queue.set_processor(processor)
-        await queue.start()
-
-        # Add a blocker to ensure items queue up before being processed
-
-        blocker_done = asyncio.Event()
-        asyncio.get_event_loop()
-
-        async def blocking_processor(method, path, params, data):
-            if path == "/blocker":
-                await blocker_done.wait()
-            processed_order.append(path)
-            return path
-
-        queue._processor = blocking_processor
-
-        # Enqueue blocker first
-        blocker_f = queue.enqueue_nowait("GET", "/blocker")
-        await asyncio.sleep(0.05)  # Let worker pick up blocker
-
-        # Now enqueue rest while blocker is held
-        f_low = queue.enqueue_nowait("GET", "/low", priority=QueuePriority.LOW)
-        f_normal = queue.enqueue_nowait("GET", "/normal", priority=QueuePriority.NORMAL)
-        f_critical = queue.enqueue_nowait("GET", "/critical", priority=QueuePriority.CRITICAL)
-        f_high = queue.enqueue_nowait("GET", "/high", priority=QueuePriority.HIGH)
-
-        # Release the blocker
-        blocker_done.set()
-
-        # Wait for all
-        await asyncio.gather(blocker_f, f_low, f_normal, f_critical, f_high)
-
-        # After blocker, critical and high should come before normal and low
-        assert "/blocker" == processed_order[0]
-        assert "/critical" == processed_order[1]
-        assert "/high" == processed_order[2]
-        await queue.close()
-
-    @pytest.mark.asyncio
-    async def test_enqueue_nowait(self):
-        from cn_commerce_base import AsyncRequestQueue
-
-        queue = AsyncRequestQueue(max_workers=2)
-
-        async def processor(method, path, params, data):
-            return {"result": "ok"}
-
-        queue.set_processor(processor)
-        await queue.start()
-        future = queue.enqueue_nowait("GET", "/test")
-        result = await future
-        assert result == {"result": "ok"}
-        await queue.close()
-
-    @pytest.mark.asyncio
-    async def test_stats_tracking(self):
-        from cn_commerce_base import AsyncRequestQueue, QueuePriority
-
-        queue = AsyncRequestQueue(max_workers=2)
-
-        async def processor(method, path, params, data):
-            return "ok"
-
-        queue.set_processor(processor)
-        await queue.enqueue("GET", "/1", priority=QueuePriority.HIGH)
-        await queue.enqueue("GET", "/2", priority=QueuePriority.NORMAL)
-
-        stats = queue.get_stats()
-        assert stats.total_enqueued == 2
-        assert stats.total_processed == 2
-        assert stats.priority_counts.get("high") == 1
-        assert stats.priority_counts.get("normal") == 1
-        await queue.close()
-
-    @pytest.mark.asyncio
-    async def test_error_handling(self):
-        from cn_commerce_base import AsyncRequestQueue
-
-        queue = AsyncRequestQueue(max_workers=2)
-
-        async def failing_processor(method, path, params, data):
-            raise ValueError("test error")
-
-        queue.set_processor(failing_processor)
-        with pytest.raises(ValueError, match="test error"):
-            await queue.enqueue("GET", "/fail")
-
-        stats = queue.get_stats()
-        assert stats.total_failed == 1
-        assert stats.processing_errors.get("ValueError") == 1
-        await queue.close()
-
-    @pytest.mark.asyncio
-    async def test_no_processor_raises(self):
-        from cn_commerce_base import AsyncRequestQueue
-
-        queue = AsyncRequestQueue(max_workers=2)
-        with pytest.raises(RuntimeError, match="No processor"):
-            await queue.enqueue("GET", "/test")
-        await queue.close()
-
-    @pytest.mark.asyncio
-    async def test_queue_size_limit(self):
-        from cn_commerce_base import AsyncRequestQueue
-
-        async def processor(method, path, params, data):
-            return "ok"
-
-        queue = AsyncRequestQueue(max_workers=1, max_queue_size=2)
-        queue.set_processor(processor)
-
-        # Don't start the queue (no auto-start), put items directly
-        queue._running = True  # Prevent auto-start in enqueue
-        # Manually put items to fill the queue
-        from cn_commerce_base import QueuedRequest
-
-        for i in range(2):
-            loop = asyncio.get_event_loop()
-            future = loop.create_future()
-            req = QueuedRequest(priority_num=2, sequence=i, method="GET", path=f"/{i}", future=future)
-            queue._queue.put_nowait(req)
-
-        # Queue should be full now
-        with pytest.raises(RuntimeError, match="Queue is full"):
-            queue.enqueue_nowait("GET", "/overflow")
-
-        queue._running = False
-        await queue.close()
-
-    @pytest.mark.asyncio
-    async def test_close(self):
-        from cn_commerce_base import AsyncRequestQueue
-
-        queue = AsyncRequestQueue(max_workers=2)
-        assert queue.is_running is False
-        await queue.start()
-        assert queue.is_running is True
-        await queue.close()
-        assert queue.is_running is False
-
-    @pytest.mark.asyncio
-    async def test_depth(self):
-        from cn_commerce_base import AsyncRequestQueue
-
-        queue = AsyncRequestQueue(max_workers=2)
-
-        async def processor(method, path, params, data):
-            return "ok"
-
-        queue.set_processor(processor)
-        assert queue.depth == 0
-        await queue.enqueue("GET", "/test")
-        assert queue.depth == 0  # Processed immediately
-        await queue.close()
-
-    @pytest.mark.asyncio
-    async def test_start_idempotent(self):
-        from cn_commerce_base import AsyncRequestQueue
-
-        queue = AsyncRequestQueue(max_workers=2)
-        await queue.start()
-        await queue.start()  # Should not create duplicate workers
-        assert queue.is_running is True
-        await queue.close()
-
-    @pytest.mark.asyncio
-    async def test_enqueue_with_params_and_data(self):
-        from cn_commerce_base import AsyncRequestQueue
-
-        captured = {}
-        queue = AsyncRequestQueue(max_workers=2)
-
-        async def processor(method, path, params, data):
-            captured["method"] = method
-            captured["path"] = path
-            captured["params"] = params
-            captured["data"] = data
-            return "ok"
-
-        queue.set_processor(processor)
-        await queue.enqueue(
-            "POST",
-            "/api/orders",
-            params={"page": 1},
-            data={"item_id": 123},
-            request_id="req-1",
+    def test_min_size_threshold(self):
+        config = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=1000,
         )
-        assert captured["method"] == "POST"
-        assert captured["path"] == "/api/orders"
-        assert captured["params"]["page"] == 1
-        assert captured["data"]["item_id"] == 123
-        await queue.close()
+        compressor = RequestCompressor(config)
+        small_body = b"small"
+        result, headers = compressor.compress(small_body)
+        assert result == small_body
+        assert headers == {}
+
+    def test_auto_selects_gzip(self):
+        config = CompressionConfig(method=CompressionMethod.AUTO, min_size_bytes=0)
+        compressor = RequestCompressor(config)
+        body = b'{"data": "' + b"x" * 2000 + b'"}'
+        result, headers = compressor.compress(body)
+        assert headers.get("Content-Encoding") == "gzip"
+
+    def test_auto_with_accept_encoding_gzip(self):
+        config = CompressionConfig(method=CompressionMethod.AUTO, min_size_bytes=0)
+        compressor = RequestCompressor(config)
+        body = b'{"data": "' + b"x" * 2000 + b'"}'
+        result, headers = compressor.compress(body, accept_encoding="gzip, deflate")
+        assert headers.get("Content-Encoding") == "gzip"
+
+    def test_auto_with_accept_encoding_deflate_only(self):
+        config = CompressionConfig(method=CompressionMethod.AUTO, min_size_bytes=0)
+        compressor = RequestCompressor(config)
+        body = b'{"data": "' + b"x" * 2000 + b'"}'
+        result, headers = compressor.compress(body, accept_encoding="deflate")
+        assert headers.get("Content-Encoding") == "deflate"
+
+    def test_no_content_encoding_header_when_disabled(self):
+        config = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=0,
+            include_content_encoding=False,
+        )
+        compressor = RequestCompressor(config)
+        body = b'{"data": "' + b"x" * 2000 + b'"}'
+        result, headers = compressor.compress(body)
+        assert len(result) < len(body)
+        assert "Content-Encoding" not in headers
+
+    def test_compression_actually_works_gzip(self):
+        """Verify gzip-compressed data can be decompressed."""
+        import gzip as gzip_mod
+
+        config = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=0,
+        )
+        compressor = RequestCompressor(config)
+        original = b'{"products": ["a", "b", "c"]}' * 100
+        compressed, _ = compressor.compress(original)
+        decompressed = gzip_mod.decompress(compressed)
+        assert decompressed == original
+
+    def test_compression_actually_works_deflate(self):
+        """Verify deflate-compressed data can be decompressed."""
+        config = CompressionConfig(
+            method=CompressionMethod.DEFLATE,
+            min_size_bytes=0,
+        )
+        compressor = RequestCompressor(config)
+        original = b'{"products": ["a", "b", "c"]}' * 100
+        compressed, _ = compressor.compress(original)
+        decompressed = zlib.decompress(compressed)
+        assert decompressed == original
+
+    def test_stats_tracking(self):
+        config = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=0,
+        )
+        compressor = RequestCompressor(config)
+        compressor.compress(b"x" * 1000)
+        compressor.compress(b"y" * 500)
+        stats = compressor.get_stats()
+        assert stats["total_requests"] == 2
+        assert stats["compressed_requests"] == 2
+        assert stats["total_original_bytes"] == 1500
+        assert stats["bytes_saved"] > 0
+
+    def test_stats_compression_rate(self):
+        config = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=500,  # Skip small bodies
+        )
+        compressor = RequestCompressor(config)
+        compressor.compress(b"small")  # Skipped
+        compressor.compress(b"x" * 1000)  # Compressed
+        stats = compressor.get_stats()
+        assert stats["total_requests"] == 2
+        assert stats["compressed_requests"] == 1
+        assert stats["compression_rate"] == 0.5
+
+    def test_reset_stats(self):
+        config = CompressionConfig(method=CompressionMethod.GZIP, min_size_bytes=0)
+        compressor = RequestCompressor(config)
+        compressor.compress(b"x" * 1000)
+        compressor.reset_stats()
+        stats = compressor.get_stats()
+        assert stats["total_requests"] == 0
+        assert stats["total_original_bytes"] == 0
+
+    def test_empty_body(self):
+        compressor = RequestCompressor()
+        result, headers = compressor.compress(b"")
+        assert result == b""
+        assert headers == {}
+
+
+# ── CommerceMCPBase Compression Integration ───────────────
+
+
+class TestCommerceMCPBaseCompression:
+    """Tests for CommerceMCPBase compression integration."""
+
+    def test_default_no_compression(self):
+        client = CommerceMCPBase()
+        assert client._compressor.config.method == CompressionMethod.NONE
+
+    def test_custom_compression_config(self):
+        config = CompressionConfig(method=CompressionMethod.GZIP)
+        client = CommerceMCPBase(compression_config=config)
+        assert client._compressor.config.method == CompressionMethod.GZIP
+
+    def test_get_compression_stats(self):
+        client = CommerceMCPBase()
+        stats = client.get_compression_stats()
+        assert "total_requests" in stats
+        assert "compressed_requests" in stats
 
     @pytest.mark.asyncio
-    async def test_multiple_workers_concurrent(self):
-        from cn_commerce_base import AsyncRequestQueue
+    async def test_post_with_gzip_compression(self):
+        config = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=0,
+        )
+        client = CommerceMCPBase(app_key="k", app_secret="s", compression_config=config)
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": "ok"}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.is_closed = False
 
-        results_log = []
-        queue = AsyncRequestQueue(max_workers=3)
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            await client._request("POST", "/api/test", data={"key": "x" * 100})
 
-        async def processor(method, path, params, data):
-            results_log.append(path)
-            return f"ok-{path}"
+        # Verify post was called with compressed content
+        call_kwargs = mock_client.post.call_args.kwargs
+        assert "content" in call_kwargs
+        assert call_kwargs["headers"]["Content-Encoding"] == "gzip"
 
-        queue.set_processor(processor)
-        # enqueue auto-starts the queue
-        r1 = await queue.enqueue("GET", "/1")
-        r2 = await queue.enqueue("GET", "/2")
-        r3 = await queue.enqueue("GET", "/3")
-        assert r1 == "ok-/1"
-        assert r2 == "ok-/2"
-        assert r3 == "ok-/3"
-        assert len(results_log) == 3
-        await queue.close()
+    @pytest.mark.asyncio
+    async def test_post_small_body_not_compressed(self):
+        config = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=10000,  # Very high threshold
+        )
+        client = CommerceMCPBase(app_key="k", app_secret="s", compression_config=config)
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": "ok"}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            await client._request("POST", "/api/test", data={"key": "small"})
+
+        # Verify post was called with json= (not compressed)
+        call_kwargs = mock_client.post.call_args.kwargs
+        assert "json" in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_get_not_compressed(self):
+        config = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=0,
+        )
+        client = CommerceMCPBase(app_key="k", app_secret="s", compression_config=config)
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": "ok"}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            await client._request("GET", "/api/test")
+
+        # GET should use normal params, not compression
+        mock_client.get.assert_called_once()
+
+
+# ── CommerceMCPBase CacheWarmer Integration ───────────────
+
+
+class TestCommerceMCPBaseCacheWarmer:
+    """Tests for CommerceMCPBase cache_warmer integration."""
+
+    def test_has_cache_warmer(self):
+        client = CommerceMCPBase()
+        assert isinstance(client.cache_warmer, CacheWarmer)
+
+    @pytest.mark.asyncio
+    async def test_warmup_cache_all(self):
+        client = CommerceMCPBase()
+        call_count = 0
+
+        async def fetch():
+            nonlocal call_count
+            call_count += 1
+            return {"data": call_count}
+
+        client.cache_warmer.register("TEST", "key1", fetch)
+        results = await client.warmup_cache()
+        assert len(results) == 1
+        assert results[0]["success"] is True
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_warmup_cache_specific_platform(self):
+        client = CommerceMCPBase()
+
+        async def fetch_p1():
+            return {"p1": 1}
+
+        async def fetch_p2():
+            return {"p2": 2}
+
+        client.cache_warmer.register("P1", "key1", fetch_p1)
+        client.cache_warmer.register("P2", "key2", fetch_p2)
+        results = await client.warmup_cache(platforms=["P1"])
+        assert len(results) == 1
+        assert results[0]["platform"] == "P1"
+
+    @pytest.mark.asyncio
+    async def test_warmup_cache_returns_dicts(self):
+        """warmup_cache should return JSON-serializable dicts."""
+        client = CommerceMCPBase()
+
+        async def fetch():
+            return {}
+
+        client.cache_warmer.register("TEST", "key1", fetch)
+        results = await client.warmup_cache()
+        assert isinstance(results, list)
+        assert isinstance(results[0], dict)
+        assert "platform" in results[0]
+        assert "cache_key" in results[0]
+        assert "success" in results[0]
+        assert "latency_ms" in results[0]
+        assert "error" in results[0]
+
+
+# ── Concurrency Tests for New Features ────────────────────
+
+
+class TestCacheWarmerConcurrency:
+    """Thread-safety tests for CacheWarmer."""
+
+    def test_concurrent_set_and_get_cached(self):
+        import threading
+
+        warmer = CacheWarmer()
+        errors = []
+
+        def writer():
+            for i in range(100):
+                warmer.set_cached(f"key_{i}", f"value_{i}")
+
+        def reader():
+            for i in range(100):
+                try:
+                    warmer.get_cached(f"key_{i}")
+                except Exception as e:
+                    errors.append(e)
+
+        threads = [threading.Thread(target=writer), threading.Thread(target=reader)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == []
+
+    def test_concurrent_invalidate(self):
+        import threading
+
+        warmer = CacheWarmer()
+
+        def writer():
+            for i in range(50):
+                warmer.set_cached(f"k{i}", f"v{i}")
+
+        def invalidator():
+            for _ in range(50):
+                warmer.invalidate()
+
+        threads = [threading.Thread(target=writer), threading.Thread(target=invalidator)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        # Should not raise
+
+
+class TestRequestCompressorConcurrency:
+    """Thread-safety tests for RequestCompressor."""
+
+    def test_concurrent_compress(self):
+        import threading
+
+        config = CompressionConfig(method=CompressionMethod.GZIP, min_size_bytes=0)
+        compressor = RequestCompressor(config)
+        errors = []
+
+        def compress_batch():
+            try:
+                for _ in range(50):
+                    compressor.compress(b"x" * 500)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=compress_batch) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == []
+        stats = compressor.get_stats()
+        assert stats["total_requests"] == 200

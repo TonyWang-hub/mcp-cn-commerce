@@ -2704,10 +2704,7 @@ class RequestResultCache:
         """
         now = time.time()
         with self._lock:
-            expired_keys = [
-                k for k, (stored_at, ttl, _) in self._cache.items()
-                if now - stored_at > ttl
-            ]
+            expired_keys = [k for k, (stored_at, ttl, _) in self._cache.items() if now - stored_at > ttl]
             for k in expired_keys:
                 del self._cache[k]
             self._stats.total_evicted += len(expired_keys)
@@ -2854,6 +2851,7 @@ class ResponseDecompressor:
                 # Brotli -- attempt if available
                 try:
                     import brotli
+
                     decompressed = brotli.decompress(body)
                 except ImportError:
                     logger.warning("Brotli decompression requested but brotli not installed")
@@ -2870,10 +2868,7 @@ class ResponseDecompressor:
                 self._stats.decompressed_responses += 1
                 self._stats.total_decompressed_bytes += len(decompressed)
 
-            logger.debug(
-                f"Decompressed {len(body)} -> {len(decompressed)} bytes "
-                f"(encoding={encoding})"
-            )
+            logger.debug(f"Decompressed {len(body)} -> {len(decompressed)} bytes " f"(encoding={encoding})")
             return decompressed
 
         except Exception as exc:
@@ -3212,9 +3207,7 @@ class RequestEncryptor:
             self._total_encrypted += 1
             self._total_bytes_encrypted += len(body)
 
-        logger.debug(
-            f"Encrypted {len(body)} bytes using {self.config.method.value}"
-        )
+        logger.debug(f"Encrypted {len(body)} bytes using {self.config.method.value}")
         return encrypted, headers
 
     def decrypt(self, data: bytes) -> bytes:
@@ -3241,9 +3234,7 @@ class RequestEncryptor:
             self._total_decrypted += 1
             self._total_bytes_decrypted += len(decrypted)
 
-        logger.debug(
-            f"Decrypted {len(data)} -> {len(decrypted)} bytes using {self.config.method.value}"
-        )
+        logger.debug(f"Decrypted {len(data)} -> {len(decrypted)} bytes using {self.config.method.value}")
         return decrypted
 
     def _do_encrypt(self, body: bytes) -> bytes:
@@ -3296,10 +3287,7 @@ class RequestEncryptor:
         try:
             import pyaes
         except ImportError:
-            raise ImportError(
-                "pyaes is required for AES encryption. "
-                "Install it with: pip install pyaes"
-            )
+            raise ImportError("pyaes is required for AES encryption. " "Install it with: pip install pyaes")
 
         iv = os.urandom(16)
         padded = self._pkcs7_pad(body, 16)
@@ -3322,10 +3310,7 @@ class RequestEncryptor:
         try:
             import pyaes
         except ImportError:
-            raise ImportError(
-                "pyaes is required for AES decryption. "
-                "Install it with: pip install pyaes"
-            )
+            raise ImportError("pyaes is required for AES decryption. " "Install it with: pip install pyaes")
 
         iv = data[:16]
         ciphertext = data[16:]
@@ -3577,9 +3562,16 @@ class AuditLog:
             return ""
 
         fields = [
-            "audit_id", "request_id", "method", "path",
-            "platform", "timestamp", "status_code",
-            "latency_ms", "encrypted", "error",
+            "audit_id",
+            "request_id",
+            "method",
+            "path",
+            "platform",
+            "timestamp",
+            "status_code",
+            "latency_ms",
+            "encrypted",
+            "error",
         ]
         output = io.StringIO()
         writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
@@ -3932,15 +3924,17 @@ class CommerceMCPBase:
                         self._result_cache.set(cache_key, result, ttl_seconds=cache_ttl)
 
                 # ── Audit: log successful request ──
-                self._audit_log.log(AuditEntry(
-                    request_id=request_id,
-                    method=method.upper(),
-                    path=path,
-                    platform=self.__class__.__name__.upper(),
-                    status_code=resp.status_code,
-                    latency_ms=(time.time() - request_start) * 1000,
-                    encrypted=is_encrypted,
-                ))
+                self._audit_log.log(
+                    AuditEntry(
+                        request_id=request_id,
+                        method=method.upper(),
+                        path=path,
+                        platform=self.__class__.__name__.upper(),
+                        status_code=resp.status_code,
+                        latency_ms=(time.time() - request_start) * 1000,
+                        encrypted=is_encrypted,
+                    )
+                )
 
                 return result
 
@@ -3948,16 +3942,18 @@ class CommerceMCPBase:
                 last_exc = exc
 
                 # ── Audit: log failed request ──
-                self._audit_log.log(AuditEntry(
-                    request_id=request_id,
-                    method=method.upper(),
-                    path=path,
-                    platform=self.__class__.__name__.upper(),
-                    status_code=getattr(exc, "status_code", 0),
-                    latency_ms=(time.time() - request_start) * 1000,
-                    encrypted=is_encrypted,
-                    error=str(exc),
-                ))
+                self._audit_log.log(
+                    AuditEntry(
+                        request_id=request_id,
+                        method=method.upper(),
+                        path=path,
+                        platform=self.__class__.__name__.upper(),
+                        status_code=getattr(exc, "status_code", 0),
+                        latency_ms=(time.time() - request_start) * 1000,
+                        encrypted=is_encrypted,
+                        error=str(exc),
+                    )
+                )
 
                 # If no retry config or not retryable, re-raise immediately
                 if not retry_config or not retry_config.should_retry_exception(exc):
@@ -6523,7 +6519,7 @@ class RequestRecorder:
         with self._lock:
             self._records.append(rec)
             if len(self._records) > self.config.max_records:
-                self._records = self._records[-self.config.max_records:]
+                self._records = self._records[-self.config.max_records :]
             self._stats["total_recorded"] += 1
 
         logger.debug(f"Recorded request: {rec.method} {rec.path} [{rec.record_id[:8]}]")
@@ -6590,7 +6586,7 @@ class RequestRecorder:
         with self._lock:
             self._records.extend(records)
             if len(self._records) > self.config.max_records:
-                self._records = self._records[-self.config.max_records:]
+                self._records = self._records[-self.config.max_records :]
             self._stats["total_imported"] += len(records)
         logger.debug(f"Imported {len(records)} request records")
         return len(records)
@@ -6714,7 +6710,10 @@ class RequestReplayer:
     ) -> list[dict[str, Any]]:
         """Replay filtered recorded requests."""
         records = self._recorder.filter(
-            method=method, path=path, platform=platform, tags=tags,
+            method=method,
+            path=path,
+            platform=platform,
+            tags=tags,
         )
         results: list[dict[str, Any]] = []
         for record in records:
@@ -6739,11 +6738,13 @@ class RequestReplayer:
             result = await self.replay(record, execute_fn)
             if not result["success"]:
                 mismatched += 1
-                details.append({
-                    "record_id": record.record_id,
-                    "status": "error",
-                    "error": result.get("error", ""),
-                })
+                details.append(
+                    {
+                        "record_id": record.record_id,
+                        "status": "error",
+                        "error": result.get("error", ""),
+                    }
+                )
                 continue
 
             original = record.response or {}
@@ -6751,18 +6752,22 @@ class RequestReplayer:
 
             if self._responses_match(original, new):
                 matched += 1
-                details.append({
-                    "record_id": record.record_id,
-                    "status": "matched",
-                })
+                details.append(
+                    {
+                        "record_id": record.record_id,
+                        "status": "matched",
+                    }
+                )
             else:
                 mismatched += 1
-                details.append({
-                    "record_id": record.record_id,
-                    "status": "mismatched",
-                    "original_keys": sorted(original.keys()) if isinstance(original, dict) else [],
-                    "new_keys": sorted(new.keys()) if isinstance(new, dict) else [],
-                })
+                details.append(
+                    {
+                        "record_id": record.record_id,
+                        "status": "mismatched",
+                        "original_keys": sorted(original.keys()) if isinstance(original, dict) else [],
+                        "new_keys": sorted(new.keys()) if isinstance(new, dict) else [],
+                    }
+                )
 
         self._stats["total_matched"] += matched
         self._stats["total_mismatched"] += mismatched
@@ -6841,11 +6846,13 @@ class TraceSpan:
 
     def add_event(self, name: str, attributes: dict[str, Any] | None = None) -> None:
         """Add a timestamped event to the span."""
-        self.events.append({
-            "name": name,
-            "timestamp": time.time(),
-            "attributes": attributes or {},
-        })
+        self.events.append(
+            {
+                "name": name,
+                "timestamp": time.time(),
+                "attributes": attributes or {},
+            }
+        )
 
     def finish(self, status: str = "ok") -> None:
         """Mark the span as finished."""
@@ -7090,7 +7097,7 @@ class DebugLogger:
         with self._lock:
             self._entries.append(entry)
             if len(self._entries) > self._max_entries:
-                self._entries = self._entries[-self._max_entries:]
+                self._entries = self._entries[-self._max_entries :]
             self._stats["total_logged"] += 1
 
         return entry
@@ -7276,12 +7283,14 @@ class DebugBreakpointManager:
 
     def _record_hit(self, bp: DebugBreakpoint, context: dict[str, Any]) -> None:
         """Record a breakpoint hit in history."""
-        self._hit_history.append({
-            "breakpoint_id": bp.breakpoint_id,
-            "name": bp.name,
-            "timestamp": time.time(),
-            "context": context,
-        })
+        self._hit_history.append(
+            {
+                "breakpoint_id": bp.breakpoint_id,
+                "name": bp.name,
+                "timestamp": time.time(),
+                "context": context,
+            }
+        )
         if len(self._hit_history) > 1000:
             self._hit_history = self._hit_history[-500:]
 

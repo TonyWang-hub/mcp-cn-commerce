@@ -90,17 +90,11 @@
 #### 从 PyPI 安装（推荐）
 
 ```bash
-# 安装基础包
+# 一次安装，包含所有 8 个平台
 pip install mcp-cn-commerce
-
-# 安装单个平台
-pip install mcp-cn-commerce[doudian]      # 抖店
-pip install mcp-cn-commerce[jd]           # 京东
-pip install mcp-cn-commerce[oceanengine]  # 巨量引擎
-
-# 安装所有平台
-pip install mcp-cn-commerce[all]
 ```
+
+所有平台 server 都在包内，通过 MCP 客户端配置选择使用哪些。
 
 #### 从 GitHub Releases 下载
 
@@ -247,14 +241,14 @@ export JD_ACCESS_TOKEN="你的 Access Token"
 | pinduoduo | 17 | 订单、商品、售后、物流、评价、店铺、营销、多多客 |
 | kuaishou | 16 | 订单、商品、售后、物流、评价、店铺、营销 |
 | xiaohongshu | 17 | 订单、商品、售后、物流、评价、店铺、营销、库存、财务 |
-| weixin-store | 15 | 订单、商品、售后、物流、店铺、营销、供货、类目 |
+| weixin_store | 15 | 订单、商品、售后、物流、店铺、营销、供货、类目 |
 | **合计** | **147** | 平台工具 + 每个 server 额外 4 个通用运维工具 |
 
 每个 server 还额外暴露 **4 个跨平台运维工具**（已计入上表）：`get_metrics`（各接口延迟/成功/错误统计）、
 `get_traces`（最近请求链路）、`get_alerts`（按实时指标评估告警规则）、`export_data`（导出记录为 CSV/JSON）。
 请求链路追踪与指标在每次调用时自动采集。
 
-每个工具的具体用法见各 `servers/<平台>/src/` 目录下的源码。
+每个工具的具体用法见各 `servers/<平台>/server.py` 源码。
 
 ## 架构
 
@@ -263,17 +257,17 @@ mcp-cn-commerce/
 ├── .github/workflows/test.yml       # CI: push 自动跑 pytest
 ├── shared/                           # 共享基类：签名/请求/分页
 │   └── cn_commerce_base.py           # 继承此基类即可新建平台
-├── servers/
-│   ├── oceanengine/  22 tools        ├── doudian/    24 tools
-│   ├── jd/           19 tools        ├── taobao/     17 tools
-│   ├── pinduoduo/    17 tools        ├── kuaishou/   16 tools
-│   ├── xiaohongshu/  17 tools        └── weixin-store/ 15 tools
+├── servers/                          # 所有平台 server（单一包，按需启动）
+│   ├── oceanengine/server.py         ├── doudian/server.py
+│   ├── jd/server.py                  ├── taobao/server.py
+│   ├── pinduoduo/server.py           ├── kuaishou/server.py
+│   ├── xiaohongshu/server.py         └── weixin_store/server.py
 ├── docs/platforms.md                 # 8 平台 API 对比 & 认证方式矩阵
 ├── README.md / README_en.md          # 简体中文 / English
 └── LICENSE                           # MIT
 ```
 
-Monorepo 架构：每个平台是一个独立的 MCP Server，用户按需安装。
+单一包架构：`pip install mcp-cn-commerce` 一次安装，8 个平台 server 都在包内，通过 MCP 客户端配置选择使用哪些。
 
 ## 安全
 

@@ -14,7 +14,7 @@ os.environ.setdefault("JD_APP_KEY", "test_key")
 os.environ.setdefault("JD_APP_SECRET", "test_secret")
 os.environ.setdefault("JD_ACCESS_TOKEN", "test_token")
 
-from mcp_jd.server import (
+from servers.jd.server import (
     get_after_sale_detail,
     get_after_sale_list,
     get_inventory,
@@ -32,7 +32,6 @@ from mcp_jd.server import (
     list_coupons,
     list_promotions,
 )
-
 from shared.cn_commerce_base import CommerceAPIError
 
 # ── Helpers ─────────────────────────────────────────────────────────────────

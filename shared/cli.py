@@ -22,42 +22,42 @@ from shared import __version__
 # Maps short platform names to their module paths and env var prefixes
 SERVER_REGISTRY: dict[str, dict[str, str]] = {
     "oceanengine": {
-        "module": "mcp_oceanengine.server",
+        "module": "servers.oceanengine.server",
         "env_prefix": "OCEANENGINE",
         "description": "Ocean Engine (巨量引擎) advertising platform",
     },
     "doudian": {
-        "module": "mcp_doudian.server",
+        "module": "servers.doudian.server",
         "env_prefix": "DOUDIAN",
         "description": "Douyin Shop (抖店) e-commerce platform",
     },
     "jd": {
-        "module": "mcp_jd.server",
+        "module": "servers.jd.server",
         "env_prefix": "JD",
         "description": "JD.com (京东) e-commerce platform",
     },
     "taobao": {
-        "module": "mcp_taobao.server",
+        "module": "servers.taobao.server",
         "env_prefix": "TAOBAO",
         "description": "Taobao (淘宝) e-commerce platform",
     },
     "pinduoduo": {
-        "module": "mcp_pinduoduo.server",
+        "module": "servers.pinduoduo.server",
         "env_prefix": "PINDUODUO",
         "description": "Pinduoduo (拼多多) e-commerce platform",
     },
     "kuaishou": {
-        "module": "mcp_kuaishou.server",
+        "module": "servers.kuaishou.server",
         "env_prefix": "KUAISHOU",
         "description": "Kuaishou (快手) e-commerce platform",
     },
     "xiaohongshu": {
-        "module": "mcp_xiaohongshu.server",
+        "module": "servers.xiaohongshu.server",
         "env_prefix": "XIAOHONGSHU",
         "description": "Xiaohongshu (小红书) e-commerce platform",
     },
-    "weixin-store": {
-        "module": "mcp_weixin_store.server",
+    "weixin_store": {
+        "module": "servers.weixin_store.server",
         "env_prefix": "WEIXIN_STORE",
         "description": "Weixin Store (微信小店) e-commerce platform",
     },
@@ -117,7 +117,7 @@ def get_src_path(platform: str) -> Path:
 
 
 def build_pythonpath(platforms: list[str]) -> str:
-    """Build PYTHONPATH string including shared dir and platform src dirs.
+    """Build PYTHONPATH string including shared dir and repo root.
 
     Args:
         platforms: List of platform names.
@@ -125,11 +125,7 @@ def build_pythonpath(platforms: list[str]) -> str:
     Returns:
         Colon-separated PYTHONPATH value.
     """
-    paths = [str(_SHARED_DIR)]
-    for platform in platforms:
-        src = get_src_path(platform)
-        if src.is_dir():
-            paths.append(str(src))
+    paths = [str(_SHARED_DIR), str(_REPO_ROOT)]
     return os.pathsep.join(paths)
 
 
@@ -178,14 +174,14 @@ def check_server_health(platform: str) -> dict[str, Any]:
     result["env_configured"] = has_key and has_secret
 
     # Check if module is importable
-    src_path = get_src_path(platform)
-    if src_path.is_dir():
-        result["src_path"] = str(src_path)
+    server_path = _REPO_ROOT / "servers" / platform / "server.py"
+    if server_path.is_file():
+        result["server_path"] = str(server_path)
         # Try importing by adding paths
         old_path = sys.path.copy()
         try:
             sys.path.insert(0, str(_SHARED_DIR))
-            sys.path.insert(0, str(src_path))
+            sys.path.insert(0, str(_REPO_ROOT))
             __import__(info["module"])
             result["importable"] = True
         except Exception as e:
@@ -193,7 +189,7 @@ def check_server_health(platform: str) -> dict[str, Any]:
         finally:
             sys.path = old_path
     else:
-        result["error"] = f"Source directory not found: {src_path}"
+        result["error"] = f"Server file not found: {server_path}"
 
     # Determine overall status
     if result["importable"] and result["env_configured"]:

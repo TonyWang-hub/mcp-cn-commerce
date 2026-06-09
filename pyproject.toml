@@ -50,37 +50,27 @@ classifiers = [
 urls = {Repository = "https://github.com/TonyWang-hub/mcp-cn-commerce", Issues = "https://github.com/TonyWang-hub/mcp-cn-commerce/issues", Documentation = "https://github.com/TonyWang-hub/mcp-cn-commerce#readme", Changelog = "https://github.com/TonyWang-hub/mcp-cn-commerce/blob/main/CHANGELOG.md"}
 
 [project.optional-dependencies]
-oceanengine = ["mcp-cn-oceanengine"]
-doudian = ["mcp-cn-doudian"]
-jd = ["mcp-cn-jd"]
-taobao = ["mcp-cn-taobao"]
-pinduoduo = ["mcp-cn-pinduoduo"]
-kuaishou = ["mcp-cn-kuaishou"]
-xiaohongshu = ["mcp-cn-xiaohongshu"]
-weixin-store = ["mcp-cn-weixin-store"]
-all = [
-    "mcp-cn-oceanengine",
-    "mcp-cn-doudian",
-    "mcp-cn-jd",
-    "mcp-cn-taobao",
-    "mcp-cn-pinduoduo",
-    "mcp-cn-kuaishou",
-    "mcp-cn-xiaohongshu",
-    "mcp-cn-weixin-store",
-]
 dev = ["pytest>=7.0", "pytest-asyncio", "pytest-cov", "black", "ruff"]
 
 [project.scripts]
 mcp-cn-commerce = "shared.cli:main"
+mcp-cn-oceanengine = "servers.oceanengine.server:main"
+mcp-cn-doudian = "servers.doudian.server:main"
+mcp-cn-jd = "servers.jd.server:main"
+mcp-cn-taobao = "servers.taobao.server:main"
+mcp-cn-pinduoduo = "servers.pinduoduo.server:main"
+mcp-cn-kuaishou = "servers.kuaishou.server:main"
+mcp-cn-xiaohongshu = "servers.xiaohongshu.server:main"
+mcp-cn-weixin-store = "servers.weixin_store.server:main"
 
 [tool.setuptools.packages.find]
-include = ["shared*"]
+include = ["shared*", "servers*"]
 
 [tool.setuptools.dynamic]
 version = {attr = "shared.__version__"}
 
 [tool.pytest.ini_options]
-pythonpath = [".", "servers/oceanengine/src", "servers/doudian/src", "servers/jd/src", "servers/taobao/src", "servers/pinduoduo/src", "servers/kuaishou/src", "servers/xiaohongshu/src", "servers/weixin-store/src"]
+pythonpath = ["."]
 testpaths = ["tests", "servers"]
 
 [tool.black]

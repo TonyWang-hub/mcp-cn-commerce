@@ -1297,10 +1297,7 @@ class CacheWarmer:
             True if the task was found and removed.
         """
         before = len(self._tasks)
-        self._tasks = [
-            t for t in self._tasks
-            if not (t.platform == platform and t.cache_key == cache_key)
-        ]
+        self._tasks = [t for t in self._tasks if not (t.platform == platform and t.cache_key == cache_key)]
         removed = len(self._tasks) < before
         if removed:
             self._cache_ttl.pop(cache_key, None)
@@ -1480,10 +1477,7 @@ class CacheWarmer:
         """
         with self._lock:
             now = time.time()
-            valid_keys = [
-                k for k, ts in self._cache_timestamps.items()
-                if now - ts <= self._cache_ttl.get(k, 300.0)
-            ]
+            valid_keys = [k for k, ts in self._cache_timestamps.items() if now - ts <= self._cache_ttl.get(k, 300.0)]
             total = len(self._history)
             succeeded = sum(1 for r in self._history if r.success)
             return {
@@ -1705,9 +1699,7 @@ class RequestCompressor:
                 "total_requests": self._total_requests,
                 "compressed_requests": self._compressed_requests,
                 "compression_rate": (
-                    round(self._compressed_requests / self._total_requests, 4)
-                    if self._total_requests > 0
-                    else 0.0
+                    round(self._compressed_requests / self._total_requests, 4) if self._total_requests > 0 else 0.0
                 ),
                 "total_original_bytes": self._total_original_bytes,
                 "total_compressed_bytes": self._total_compressed_bytes,
@@ -3464,10 +3456,7 @@ class LoadBalancer:
                 node.failure_count += 1
                 node.total_failures += 1
                 node.last_failure_time = time.time()
-                logger.warning(
-                    f"Load balancer: endpoint {url} marked unhealthy "
-                    f"(failures={node.failure_count})"
-                )
+                logger.warning(f"Load balancer: endpoint {url} marked unhealthy " f"(failures={node.failure_count})")
 
     def record_success(self, url: str, latency_ms: float = 0.0) -> None:
         """Record a successful request to an endpoint.
@@ -3756,12 +3745,14 @@ class FailoverManager:
             node.total_requests += 1
 
             # Record in history
-            self._failure_history.append({
-                "url": url,
-                "error": error,
-                "timestamp": time.time(),
-                "failure_count": node.failure_count,
-            })
+            self._failure_history.append(
+                {
+                    "url": url,
+                    "error": error,
+                    "timestamp": time.time(),
+                    "failure_count": node.failure_count,
+                }
+            )
             # Keep history bounded
             if len(self._failure_history) > 1000:
                 self._failure_history = self._failure_history[-500:]
@@ -3773,10 +3764,7 @@ class FailoverManager:
             # Check circuit breaker
             self._check_circuit_breaker(url)
 
-            logger.warning(
-                f"Failover: failure reported for {url} "
-                f"(count={node.failure_count}, error={error})"
-            )
+            logger.warning(f"Failover: failure reported for {url} " f"(count={node.failure_count}, error={error})")
 
     def _check_circuit_breaker(self, url: str) -> None:
         """Check and update circuit breaker state.
@@ -3803,10 +3791,7 @@ class FailoverManager:
                 cb.is_open = True
                 cb.opened_at = time.time()
                 self._lb.mark_unhealthy(url)
-                logger.warning(
-                    f"Failover: circuit breaker OPENED for {url} "
-                    f"(failure_rate={failure_rate:.2f})"
-                )
+                logger.warning(f"Failover: circuit breaker OPENED for {url} " f"(failure_rate={failure_rate:.2f})")
 
     def is_circuit_open(self, url: str) -> bool:
         """Check if the circuit breaker is open for an endpoint.
@@ -3887,10 +3872,7 @@ class FailoverManager:
             while True:
                 try:
                     await asyncio.sleep(self.config.recovery_check_interval)
-                    unhealthy = [
-                        url for url, node in self._lb._endpoints.items()
-                        if not node.is_healthy
-                    ]
+                    unhealthy = [url for url, node in self._lb._endpoints.items() if not node.is_healthy]
                     for url in unhealthy:
                         await self.check_recovery(url)
                 except asyncio.CancelledError:

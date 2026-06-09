@@ -71,12 +71,15 @@ all = [
 ]
 dev = ["pytest>=7.0", "pytest-asyncio", "pytest-cov", "black", "ruff"]
 
+[project.scripts]
+mcp-cn-commerce = "cli:main"
+
 [tool.setuptools.packages.find]
 include = ["shared*"]
 
 [tool.black]
 line-length = 120
-target-version = ["py311", "py312", "py313"]
+target-version = ["py311", "py312"]
 
 [tool.ruff]
 line-length = 120

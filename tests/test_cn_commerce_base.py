@@ -5,6 +5,7 @@ Tests the base classes, error handling, and utility functions.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
@@ -23,10 +24,15 @@ from cn_commerce_base import (
     CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,
-    EndpointMetrics,
-    MetricsCollector,
     RateLimiter,
     SignMethod,
+    WebhookDeliveryError,
+    WebhookDeliveryResult,
+    WebhookEvent,
+    WebhookEventType,
+    WebhookManager,
+    WebhookSignatureVerifier,
+    WebhookSubscription,
     format_error_response,
 )
 
@@ -281,180 +287,614 @@ class TestCommerceMCPBase:
         assert len(result) == 3
         assert mock_fetch.call_count == 3
 
-    def test_init_has_metrics_collector(self):
-        client = CommerceMCPBase()
-        assert isinstance(client.metrics, MetricsCollector)
+
+# ── Webhook Tests ───────────────────────────────────────────
 
 
-# ── EndpointMetrics Tests ────────────────────────────────
+class TestWebhookEventType:
+    """Tests for WebhookEventType enum."""
+
+    def test_order_update_value(self):
+        assert WebhookEventType.ORDER_UPDATE == "order_update"
+
+    def test_inventory_change_value(self):
+        assert WebhookEventType.INVENTORY_CHANGE == "inventory_change"
+
+    def test_product_update_value(self):
+        assert WebhookEventType.PRODUCT_UPDATE == "product_update"
+
+    def test_refund_request_value(self):
+        assert WebhookEventType.REFUND_REQUEST == "refund_request"
+
+    def test_payment_received_value(self):
+        assert WebhookEventType.PAYMENT_RECEIVED == "payment_received"
+
+    def test_shipping_update_value(self):
+        assert WebhookEventType.SHIPPING_UPDATE == "shipping_update"
+
+    def test_review_submitted_value(self):
+        assert WebhookEventType.REVIEW_SUBMITTED == "review_submitted"
+
+    def test_coupon_used_value(self):
+        assert WebhookEventType.COUPON_USED == "coupon_used"
+
+    def test_custom_value(self):
+        assert WebhookEventType.CUSTOM == "custom"
+
+    def test_all_event_types_count(self):
+        assert len(WebhookEventType) == 9
+
+    def test_is_string_enum(self):
+        assert isinstance(WebhookEventType.ORDER_UPDATE, str)
 
 
-class TestEndpointMetrics:
-    """Tests for EndpointMetrics dataclass."""
+class TestWebhookSubscription:
+    """Tests for WebhookSubscription dataclass."""
 
-    def test_default_values(self):
-        m = EndpointMetrics()
-        assert m.request_count == 0
-        assert m.error_count == 0
-        assert m.total_latency_ms == 0.0
-        assert m.min_latency_ms == float("inf")
-        assert m.max_latency_ms == 0.0
-
-    def test_avg_latency_no_requests(self):
-        m = EndpointMetrics()
-        assert m.avg_latency_ms == 0.0
-
-    def test_avg_latency_with_requests(self):
-        m = EndpointMetrics(request_count=3, total_latency_ms=300.0)
-        assert m.avg_latency_ms == 100.0
-
-    def test_error_rate_no_requests(self):
-        m = EndpointMetrics()
-        assert m.error_rate == 0.0
-
-    def test_error_rate_with_requests(self):
-        m = EndpointMetrics(request_count=10, error_count=3)
-        assert m.error_rate == 0.3
-
-
-# ── MetricsCollector Tests ───────────────────────────────
-
-
-class TestMetricsCollector:
-    """Tests for MetricsCollector."""
-
-    def test_record_successful_request(self):
-        collector = MetricsCollector()
-        collector.record_request("/api/test", latency_ms=50.0, success=True)
-        ep = collector.get_endpoint_metrics("/api/test")
-        assert ep.request_count == 1
-        assert ep.error_count == 0
-        assert ep.total_latency_ms == 50.0
-        assert ep.min_latency_ms == 50.0
-        assert ep.max_latency_ms == 50.0
-
-    def test_record_failed_request(self):
-        collector = MetricsCollector()
-        collector.record_request(
-            "/api/test",
-            latency_ms=100.0,
-            success=False,
-            error_code=40001,
-            error_msg="bad",
+    def test_basic_creation(self):
+        sub = WebhookSubscription(
+            subscription_id="sub-1",
+            url="https://example.com/webhook",
+            event_types=["order_update"],
+            secret="test_secret",
         )
-        ep = collector.get_endpoint_metrics("/api/test")
-        assert ep.request_count == 1
-        assert ep.error_count == 1
-        assert ep.last_error_code == 40001
-        assert ep.last_error_msg == "bad"
+        assert sub.subscription_id == "sub-1"
+        assert sub.url == "https://example.com/webhook"
+        assert sub.event_types == ["order_update"]
+        assert sub.secret == "test_secret"
+        assert sub.is_active is True
 
-    def test_record_multiple_requests(self):
-        collector = MetricsCollector()
-        collector.record_request("/api/a", latency_ms=10.0, success=True)
-        collector.record_request("/api/a", latency_ms=20.0, success=True)
-        collector.record_request("/api/b", latency_ms=5.0, success=False, error_code=500, error_msg="err")
-        ep_a = collector.get_endpoint_metrics("/api/a")
-        ep_b = collector.get_endpoint_metrics("/api/b")
-        assert ep_a.request_count == 2
-        assert ep_b.request_count == 1
-        assert ep_b.error_count == 1
+    def test_auto_generated_fields(self):
+        sub = WebhookSubscription(
+            subscription_id="",
+            url="https://example.com/webhook",
+            event_types=["order_update"],
+            secret="",
+        )
+        assert sub.subscription_id != ""
+        assert sub.created_at != ""
+        assert sub.secret != ""
 
-    def test_global_metrics(self):
-        collector = MetricsCollector()
-        collector.record_request("/api/a", latency_ms=10.0, success=True)
-        collector.record_request("/api/b", latency_ms=30.0, success=False, error_code=1, error_msg="e")
-        g = collector.get_global_metrics()
-        assert g.request_count == 2
-        assert g.error_count == 1
-        assert g.total_latency_ms == 40.0
-
-    def test_get_all_metrics(self):
-        collector = MetricsCollector()
-        collector.record_request("/api/a", latency_ms=10.0, success=True)
-        collector.record_request("/api/b", latency_ms=20.0, success=True)
-        all_m = collector.get_all_metrics()
-        assert "/api/a" in all_m
-        assert "/api/b" in all_m
-
-    def test_get_endpoint_metrics_unknown_returns_default(self):
-        collector = MetricsCollector()
-        m = collector.get_endpoint_metrics("/unknown")
-        assert m.request_count == 0
-
-    def test_min_max_latency_tracking(self):
-        collector = MetricsCollector()
-        collector.record_request("/api", latency_ms=5.0, success=True)
-        collector.record_request("/api", latency_ms=100.0, success=True)
-        collector.record_request("/api", latency_ms=50.0, success=True)
-        ep = collector.get_endpoint_metrics("/api")
-        assert ep.min_latency_ms == 5.0
-        assert ep.max_latency_ms == 100.0
-        assert ep.avg_latency_ms == pytest.approx(155.0 / 3)
-
-    def test_summary_structure(self):
-        collector = MetricsCollector()
-        collector.record_request("/api/test", latency_ms=42.0, success=True)
-        summary = collector.get_summary()
-        assert "uptime_seconds" in summary
-        assert "global" in summary
-        assert "endpoints" in summary
-        assert summary["global"]["total_requests"] == 1
-        assert "/api/test" in summary["endpoints"]
-
-    def test_summary_empty_collector(self):
-        collector = MetricsCollector()
-        summary = collector.get_summary()
-        assert summary["global"]["total_requests"] == 0
-        assert summary["global"]["total_errors"] == 0
-        assert summary["endpoints"] == {}
-
-    def test_reset(self):
-        collector = MetricsCollector()
-        collector.record_request("/api", latency_ms=10.0, success=True)
-        collector.reset()
-        g = collector.get_global_metrics()
-        assert g.request_count == 0
-        assert collector.get_all_metrics() == {}
+    def test_default_metadata(self):
+        a = WebhookSubscription(
+            subscription_id="a", url="https://a.com", event_types=["order_update"], secret="s"
+        )
+        b = WebhookSubscription(
+            subscription_id="b", url="https://b.com", event_types=["order_update"], secret="s"
+        )
+        a.metadata["key"] = "val"
+        assert "key" not in b.metadata
 
 
-# ── Health Check Tests ────────────────────────────────────
+class TestWebhookEvent:
+    """Tests for WebhookEvent dataclass."""
+
+    def test_basic_creation(self):
+        event = WebhookEvent(
+            event_type="order_update",
+            platform="TAOBAO",
+            payload={"order_id": "123"},
+        )
+        assert event.event_type == "order_update"
+        assert event.platform == "TAOBAO"
+        assert event.payload == {"order_id": "123"}
+
+    def test_auto_generated_fields(self):
+        event = WebhookEvent(event_type="order_update")
+        assert event.event_id != ""
+        assert event.timestamp != ""
+
+    def test_to_dict(self):
+        event = WebhookEvent(
+            event_id="evt-1",
+            event_type="order_update",
+            platform="TAOBAO",
+            payload={"order_id": "123"},
+            timestamp="2026-06-09T00:00:00Z",
+            source="order_123",
+            version="1.0",
+        )
+        result = event.to_dict()
+        assert result["event_id"] == "evt-1"
+        assert result["event_type"] == "order_update"
+        assert result["platform"] == "TAOBAO"
+        assert result["payload"] == {"order_id": "123"}
+        assert result["source"] == "order_123"
+
+    def test_default_version(self):
+        event = WebhookEvent(event_type="test")
+        assert event.version == "1.0"
 
 
-class TestHealthCheck:
-    """Tests for CommerceMCPBase.health_check."""
+class TestWebhookSignatureVerifier:
+    """Tests for WebhookSignatureVerifier."""
+
+    def test_sign_returns_hex(self):
+        verifier = WebhookSignatureVerifier(secret="test_secret")
+        signature = verifier.sign(b"test payload")
+        assert isinstance(signature, str)
+        assert len(signature) == 64  # SHA256 hex length
+
+    def test_sign_consistent(self):
+        verifier = WebhookSignatureVerifier(secret="test_secret")
+        sig1 = verifier.sign(b"test payload")
+        sig2 = verifier.sign(b"test payload")
+        assert sig1 == sig2
+
+    def test_sign_different_secrets(self):
+        v1 = WebhookSignatureVerifier(secret="secret1")
+        v2 = WebhookSignatureVerifier(secret="secret2")
+        sig1 = v1.sign(b"test payload")
+        sig2 = v2.sign(b"test payload")
+        assert sig1 != sig2
+
+    def test_verify_valid_signature(self):
+        verifier = WebhookSignatureVerifier(secret="test_secret")
+        payload = b"test payload"
+        signature = verifier.sign(payload)
+        assert verifier.verify(payload, signature) is True
+
+    def test_verify_invalid_signature(self):
+        verifier = WebhookSignatureVerifier(secret="test_secret")
+        assert verifier.verify(b"test payload", "invalid_signature") is False
+
+    def test_verify_empty_signature(self):
+        verifier = WebhookSignatureVerifier(secret="test_secret")
+        assert verifier.verify(b"test payload", "") is False
+
+    def test_verify_tampered_payload(self):
+        verifier = WebhookSignatureVerifier(secret="test_secret")
+        signature = verifier.sign(b"original payload")
+        assert verifier.verify(b"tampered payload", signature) is False
+
+    def test_extract_signature_with_prefix(self):
+        result = WebhookSignatureVerifier.extract_signature("sha256=abc123", prefix="sha256=")
+        assert result == "abc123"
+
+    def test_extract_signature_without_prefix(self):
+        result = WebhookSignatureVerifier.extract_signature("abc123")
+        assert result == "abc123"
+
+    def test_extract_signature_wrong_prefix(self):
+        result = WebhookSignatureVerifier.extract_signature("md5=abc123", prefix="sha256=")
+        assert result == "md5=abc123"
+
+
+class TestWebhookDeliveryError:
+    """Tests for WebhookDeliveryError."""
+
+    def test_basic_creation(self):
+        err = WebhookDeliveryError("sub-1", "https://example.com/webhook")
+        assert err.subscription_id == "sub-1"
+        assert err.url == "https://example.com/webhook"
+        assert err.status_code == 0
+        assert "https://example.com/webhook" in err.message
+
+    def test_with_status_code(self):
+        err = WebhookDeliveryError("sub-1", "https://example.com", status_code=500)
+        assert err.status_code == 500
+
+    def test_custom_message(self):
+        err = WebhookDeliveryError("sub-1", "https://example.com", message="Custom error")
+        assert err.message == "Custom error"
+
+    def test_is_exception(self):
+        err = WebhookDeliveryError("sub-1", "https://example.com")
+        assert isinstance(err, Exception)
+
+
+class TestWebhookDeliveryResult:
+    """Tests for WebhookDeliveryResult dataclass."""
+
+    def test_success_result(self):
+        result = WebhookDeliveryResult(
+            subscription_id="sub-1",
+            event_id="evt-1",
+            success=True,
+            status_code=200,
+            latency_ms=50.0,
+        )
+        assert result.success is True
+        assert result.status_code == 200
+        assert result.latency_ms == 50.0
+        assert result.error == ""
+        assert result.attempt == 1
+
+    def test_failure_result(self):
+        result = WebhookDeliveryResult(
+            subscription_id="sub-1",
+            event_id="evt-1",
+            success=False,
+            status_code=500,
+            error="Internal server error",
+            attempt=3,
+        )
+        assert result.success is False
+        assert result.error == "Internal server error"
+        assert result.attempt == 3
+
+
+class TestWebhookManager:
+    """Tests for WebhookManager."""
+
+    def test_init(self):
+        manager = WebhookManager()
+        assert manager._max_delivery_retries == 3
+        assert manager._delivery_timeout == 30.0
+        assert manager._max_consecutive_failures == 10
+
+    def test_subscribe_success(self):
+        manager = WebhookManager()
+        sub = manager.subscribe(
+            url="https://example.com/webhook",
+            event_types=["order_update"],
+        )
+        assert sub.url == "https://example.com/webhook"
+        assert sub.event_types == ["order_update"]
+        assert sub.is_active is True
+        assert sub.subscription_id != ""
+
+    def test_subscribe_empty_url_raises(self):
+        manager = WebhookManager()
+        with pytest.raises(ValueError, match="URL cannot be empty"):
+            manager.subscribe(url="", event_types=["order_update"])
+
+    def test_subscribe_empty_event_types_raises(self):
+        manager = WebhookManager()
+        with pytest.raises(ValueError, match="event type must be specified"):
+            manager.subscribe(url="https://example.com", event_types=[])
+
+    def test_subscribe_invalid_event_type_raises(self):
+        manager = WebhookManager()
+        with pytest.raises(ValueError, match="Invalid event type"):
+            manager.subscribe(url="https://example.com", event_types=["invalid_type"])
+
+    def test_subscribe_with_secret(self):
+        manager = WebhookManager()
+        sub = manager.subscribe(
+            url="https://example.com/webhook",
+            event_types=["order_update"],
+            secret="custom_secret",
+        )
+        assert sub.secret == "custom_secret"
+
+    def test_subscribe_with_platform(self):
+        manager = WebhookManager()
+        sub = manager.subscribe(
+            url="https://example.com/webhook",
+            event_types=["order_update"],
+            platform="TAOBAO",
+        )
+        assert sub.platform == "TAOBAO"
+
+    def test_unsubscribe_success(self):
+        manager = WebhookManager()
+        sub = manager.subscribe(
+            url="https://example.com/webhook",
+            event_types=["order_update"],
+        )
+        assert manager.unsubscribe(sub.subscription_id) is True
+        assert manager.get_subscription(sub.subscription_id) is None
+
+    def test_unsubscribe_not_found(self):
+        manager = WebhookManager()
+        assert manager.unsubscribe("nonexistent") is False
+
+    def test_get_subscription(self):
+        manager = WebhookManager()
+        sub = manager.subscribe(
+            url="https://example.com/webhook",
+            event_types=["order_update"],
+        )
+        retrieved = manager.get_subscription(sub.subscription_id)
+        assert retrieved is not None
+        assert retrieved.subscription_id == sub.subscription_id
+
+    def test_get_subscription_not_found(self):
+        manager = WebhookManager()
+        assert manager.get_subscription("nonexistent") is None
+
+    def test_list_subscriptions_all(self):
+        manager = WebhookManager()
+        manager.subscribe(url="https://a.com", event_types=["order_update"])
+        manager.subscribe(url="https://b.com", event_types=["inventory_change"])
+        subs = manager.list_subscriptions()
+        assert len(subs) == 2
+
+    def test_list_subscriptions_by_event_type(self):
+        manager = WebhookManager()
+        manager.subscribe(url="https://a.com", event_types=["order_update"])
+        manager.subscribe(url="https://b.com", event_types=["inventory_change"])
+        subs = manager.list_subscriptions(event_type="order_update")
+        assert len(subs) == 1
+        assert subs[0].url == "https://a.com"
+
+    def test_list_subscriptions_by_platform(self):
+        manager = WebhookManager()
+        manager.subscribe(url="https://a.com", event_types=["order_update"], platform="TAOBAO")
+        manager.subscribe(url="https://b.com", event_types=["order_update"], platform="JD")
+        subs = manager.list_subscriptions(platform="TAOBAO")
+        assert len(subs) == 1
+        assert subs[0].platform == "TAOBAO"
+
+    def test_list_subscriptions_active_only(self):
+        manager = WebhookManager()
+        sub = manager.subscribe(url="https://a.com", event_types=["order_update"])
+        manager.update_subscription(sub.subscription_id, is_active=False)
+        subs = manager.list_subscriptions(active_only=True)
+        assert len(subs) == 0
+        subs = manager.list_subscriptions(active_only=False)
+        assert len(subs) == 1
+
+    def test_update_subscription_success(self):
+        manager = WebhookManager()
+        sub = manager.subscribe(
+            url="https://a.com", event_types=["order_update"]
+        )
+        updated = manager.update_subscription(
+            sub.subscription_id,
+            url="https://b.com",
+            event_types=["inventory_change"],
+        )
+        assert updated is not None
+        assert updated.url == "https://b.com"
+        assert updated.event_types == ["inventory_change"]
+
+    def test_update_subscription_not_found(self):
+        manager = WebhookManager()
+        result = manager.update_subscription("nonexistent", url="https://b.com")
+        assert result is None
+
+    def test_update_subscription_is_active(self):
+        manager = WebhookManager()
+        sub = manager.subscribe(url="https://a.com", event_types=["order_update"])
+        manager.update_subscription(sub.subscription_id, is_active=False)
+        updated = manager.get_subscription(sub.subscription_id)
+        assert updated is not None
+        assert updated.is_active is False
+
+    def test_add_delivery_callback(self):
+        manager = WebhookManager()
+        callback = AsyncMock()
+        manager.add_delivery_callback(callback)
+        assert len(manager._delivery_callbacks) == 1
+
+    def test_prepare_delivery(self):
+        manager = WebhookManager()
+        sub = WebhookSubscription(
+            subscription_id="sub-1",
+            url="https://example.com",
+            event_types=["order_update"],
+            secret="test_secret",
+        )
+        event = WebhookEvent(event_id="evt-1", event_type="order_update", payload={"key": "val"})
+        payload_bytes, signature = manager._prepare_delivery(sub, event)
+        assert isinstance(payload_bytes, bytes)
+        assert isinstance(signature, str)
+        assert len(signature) == 64  # SHA256 hex
+
+    def test_verify_signature(self):
+        manager = WebhookManager()
+        payload = b"test payload"
+        verifier = WebhookSignatureVerifier(secret="test_secret")
+        signature = verifier.sign(payload)
+        assert manager.verify_signature(payload, signature, "test_secret") is True
+        assert manager.verify_signature(payload, "wrong", "test_secret") is False
+
+    def test_get_delivery_stats_empty(self):
+        manager = WebhookManager()
+        stats = manager.get_delivery_stats()
+        assert stats["total_deliveries"] == 0
+        assert stats["succeeded"] == 0
+        assert stats["failed"] == 0
+        assert stats["success_rate"] == 0.0
+        assert stats["active_subscriptions"] == 0
+
+    def test_clear_history(self):
+        manager = WebhookManager()
+        manager._event_history.append(WebhookEvent(event_type="test"))
+        manager._delivery_results.append(
+            WebhookDeliveryResult(subscription_id="s", event_id="e", success=True)
+        )
+        manager.clear_history()
+        assert len(manager._event_history) == 0
+        assert len(manager._delivery_results) == 0
 
     @pytest.mark.asyncio
-    async def test_health_check_no_base_url(self):
-        client = CommerceMCPBase()
-        result = await client.health_check()
-        assert result["api_reachable"] is False
-        assert result["configured"] is False
+    async def test_trigger_empty_event_type_raises(self):
+        manager = WebhookManager()
+        event = WebhookEvent(event_type="")
+        with pytest.raises(ValueError, match="Event type cannot be empty"):
+            await manager.trigger(event)
 
     @pytest.mark.asyncio
-    async def test_health_check_configured_no_token(self):
-        client = CommerceMCPBase(app_key="key", app_secret="secret")
-        result = await client.health_check()
-        assert result["configured"] is True
-        assert result["has_token"] is False
+    async def test_trigger_no_matching_subscriptions(self):
+        manager = WebhookManager()
+        manager.subscribe(url="https://a.com", event_types=["order_update"])
+        event = WebhookEvent(event_type="inventory_change")
+        results = await manager.trigger(event)
+        assert len(results) == 0
 
     @pytest.mark.asyncio
-    async def test_health_check_includes_metrics(self):
-        client = CommerceMCPBase(app_key="key", app_secret="secret")
-        result = await client.health_check()
-        assert "metrics" in result
-        assert "global" in result["metrics"]
-        assert "uptime_seconds" in result["metrics"]
+    async def test_trigger_with_callback_success(self):
+        manager = WebhookManager()
+        sub = manager.subscribe(
+            url="https://example.com",
+            event_types=["order_update"],
+        )
+
+        async def success_callback(subscription, event, payload_bytes, signature):
+            return WebhookDeliveryResult(
+                subscription_id=subscription.subscription_id,
+                event_id=event.event_id,
+                success=True,
+                status_code=200,
+                latency_ms=10.0,
+            )
+
+        manager.add_delivery_callback(success_callback)
+        event = WebhookEvent(event_type="order_update", payload={"order_id": "123"})
+        results = await manager.trigger(event)
+        assert len(results) == 1
+        assert results[0].success is True
+        assert results[0].status_code == 200
 
     @pytest.mark.asyncio
-    async def test_health_check_connection_error(self):
-        from unittest.mock import AsyncMock
-        from unittest.mock import patch as mock_patch
+    async def test_trigger_with_callback_failure(self):
+        manager = WebhookManager(max_delivery_retries=1)
+        sub = manager.subscribe(
+            url="https://example.com",
+            event_types=["order_update"],
+        )
 
-        client = CommerceMCPBase(app_key="k", app_secret="s")
-        client.BASE_URL = "http://127.0.0.1:99999"
-        mock_client = AsyncMock()
-        mock_client.head.side_effect = httpx.ConnectError("refused")
-        with mock_patch.object(client, "_get_client", return_value=mock_client):
-            result = await client.health_check()
-        assert result["api_reachable"] is False
-        assert "error" in result
+        async def failure_callback(subscription, event, payload_bytes, signature):
+            return WebhookDeliveryResult(
+                subscription_id=subscription.subscription_id,
+                event_id=event.event_id,
+                success=False,
+                status_code=500,
+                error="Server error",
+            )
+
+        manager.add_delivery_callback(failure_callback)
+        event = WebhookEvent(event_type="order_update")
+        results = await manager.trigger(event)
+        assert len(results) == 1
+        assert results[0].success is False
+
+    @pytest.mark.asyncio
+    async def test_trigger_updates_last_triggered_at(self):
+        manager = WebhookManager()
+        sub = manager.subscribe(
+            url="https://example.com",
+            event_types=["order_update"],
+        )
+
+        async def success_callback(subscription, event, payload_bytes, signature):
+            return WebhookDeliveryResult(
+                subscription_id=subscription.subscription_id,
+                event_id=event.event_id,
+                success=True,
+            )
+
+        manager.add_delivery_callback(success_callback)
+        assert sub.last_triggered_at == ""
+        await manager.trigger(WebhookEvent(event_type="order_update"))
+        assert sub.last_triggered_at != ""
+
+    @pytest.mark.asyncio
+    async def test_trigger_records_event_history(self):
+        manager = WebhookManager()
+        manager.subscribe(url="https://example.com", event_types=["order_update"])
+
+        async def success_callback(subscription, event, payload_bytes, signature):
+            return WebhookDeliveryResult(
+                subscription_id=subscription.subscription_id,
+                event_id=event.event_id,
+                success=True,
+            )
+
+        manager.add_delivery_callback(success_callback)
+        await manager.trigger(WebhookEvent(event_type="order_update"))
+        assert len(manager._event_history) == 1
+
+    @pytest.mark.asyncio
+    async def test_trigger_multiple_subscriptions(self):
+        manager = WebhookManager()
+        manager.subscribe(url="https://a.com", event_types=["order_update"])
+        manager.subscribe(url="https://b.com", event_types=["order_update"])
+
+        async def success_callback(subscription, event, payload_bytes, signature):
+            return WebhookDeliveryResult(
+                subscription_id=subscription.subscription_id,
+                event_id=event.event_id,
+                success=True,
+            )
+
+        manager.add_delivery_callback(success_callback)
+        results = await manager.trigger(WebhookEvent(event_type="order_update"))
+        assert len(results) == 2
+
+    @pytest.mark.asyncio
+    async def test_trigger_increments_failure_count(self):
+        manager = WebhookManager(max_delivery_retries=1)
+        sub = manager.subscribe(
+            url="https://example.com",
+            event_types=["order_update"],
+        )
+
+        async def failure_callback(subscription, event, payload_bytes, signature):
+            return WebhookDeliveryResult(
+                subscription_id=subscription.subscription_id,
+                event_id=event.event_id,
+                success=False,
+                error="Failed",
+            )
+
+        manager.add_delivery_callback(failure_callback)
+        await manager.trigger(WebhookEvent(event_type="order_update"))
+        updated_sub = manager.get_subscription(sub.subscription_id)
+        assert updated_sub is not None
+        assert updated_sub.failure_count == 1
+
+    @pytest.mark.asyncio
+    async def test_trigger_auto_disables_after_max_failures(self):
+        manager = WebhookManager(max_delivery_retries=1, max_consecutive_failures=2)
+        sub = manager.subscribe(
+            url="https://example.com",
+            event_types=["order_update"],
+        )
+
+        async def failure_callback(subscription, event, payload_bytes, signature):
+            return WebhookDeliveryResult(
+                subscription_id=subscription.subscription_id,
+                event_id=event.event_id,
+                success=False,
+                error="Failed",
+            )
+
+        manager.add_delivery_callback(failure_callback)
+        # Trigger twice to exceed max_consecutive_failures
+        await manager.trigger(WebhookEvent(event_type="order_update"))
+        await manager.trigger(WebhookEvent(event_type="order_update"))
+        updated_sub = manager.get_subscription(sub.subscription_id)
+        assert updated_sub is not None
+        assert updated_sub.is_active is False
+
+    @pytest.mark.asyncio
+    async def test_trigger_resets_failure_count_on_success(self):
+        manager = WebhookManager(max_delivery_retries=1)
+        sub = manager.subscribe(
+            url="https://example.com",
+            event_types=["order_update"],
+        )
+
+        call_count = 0
+
+        async def alternating_callback(subscription, event, payload_bytes, signature):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return WebhookDeliveryResult(
+                    subscription_id=subscription.subscription_id,
+                    event_id=event.event_id,
+                    success=False,
+                    error="Failed",
+                )
+            return WebhookDeliveryResult(
+                subscription_id=subscription.subscription_id,
+                event_id=event.event_id,
+                success=True,
+            )
+
+        manager.add_delivery_callback(alternating_callback)
+        # First trigger fails
+        await manager.trigger(WebhookEvent(event_type="order_update"))
+        updated_sub = manager.get_subscription(sub.subscription_id)
+        assert updated_sub is not None
+        assert updated_sub.failure_count == 1
+        # Second trigger succeeds
+        await manager.trigger(WebhookEvent(event_type="order_update"))
+        updated_sub = manager.get_subscription(sub.subscription_id)
+        assert updated_sub is not None
+        assert updated_sub.failure_count == 0

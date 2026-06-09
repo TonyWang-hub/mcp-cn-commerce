@@ -154,6 +154,7 @@ ignore-paths = [
 
 [tool.pylint.messages_control]
 disable = [
+    "C0103",  # invalid-name
     "C0114",  # missing-module-docstring
     "C0115",  # missing-class-docstring
     "C0116",  # missing-function-docstring
@@ -171,6 +172,7 @@ disable = [
     "W0108",  # unnecessary-lambda
     "W0404",  # reimported
     "W0511",  # fixme
+    "W0603",  # global-statement
     "W0613",  # unused-argument
     "W0621",  # redefined-outer-name
     "W0622",  # redefined-builtin

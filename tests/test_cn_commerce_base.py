@@ -25,8 +25,6 @@ if str(_shared_dir) not in sys.path:
 from cn_commerce_base import (
     DEFAULT_RETRY,
     RATE_LIMIT_RETRY,
-    AuditEntry,
-    AuditLog,
     BatchRequestItem,
     BatchResultItem,
     BatchSummary,
@@ -37,9 +35,10 @@ from cn_commerce_base import (
     CompressionMethod,
     ConfigurableRateLimiter,
     ConfigValidationError,
-    DecompressionStats,
-    EncryptionConfig,
-    EncryptionMethod,
+    DebugBreakpoint,
+    DebugBreakpointManager,
+    DebugLogger,
+    DebugLogLevel,
     EndpointMetrics,
     EndpointRateLimit,
     MetricsCollector,
@@ -51,17 +50,18 @@ from cn_commerce_base import (
     RateLimitConfig,
     RateLimiter,
     RateLimitStats,
-    RequestCacheConfig,
-    RequestCacheStats,
+    ReplayConfig,
     RequestCompressor,
-    RequestEncryptor,
     RequestPriority,
-    RequestResultCache,
-    ResponseDecompressor,
+    RequestRecord,
+    RequestRecorder,
+    RequestReplayer,
+    RequestTracer,
     RetryableError,
     RetryConfig,
     SensitiveDataFilter,
     SignMethod,
+    TraceSpan,
     WarmupResult,
     WarmupTask,
     format_error_response,
@@ -3693,1533 +3693,354 @@ class TestCommerceMCPBasePriority:
         assert stats["stats"]["by_priority"]["high"] == 1
 
 
-# ── RequestCacheConfig Tests ───────────────────────────────
+# ── RequestRecord Tests ─────────────────────────────────────
 
 
-class TestRequestCacheConfig:
-    """Tests for RequestCacheConfig dataclass."""
-
+class TestRequestRecord:
     def test_default_values(self):
-        cfg = RequestCacheConfig()
-        assert cfg.enabled is True
-        assert cfg.max_size == 512
-        assert cfg.default_ttl_seconds == 300.0
-        assert cfg.cacheable_methods == ("GET",)
-        assert cfg.key_include_headers is False
-        assert cfg.exclude_error_responses is True
+        rec = RequestRecord()
+        assert rec.record_id != ""
+        assert rec.method == ""
+        assert rec.path == ""
+        assert rec.params == {}
+        assert rec.timestamp > 0
 
     def test_custom_values(self):
-        cfg = RequestCacheConfig(
-            enabled=False,
-            max_size=128,
-            default_ttl_seconds=60.0,
-            cacheable_methods=("GET", "POST"),
-        )
-        assert cfg.enabled is False
-        assert cfg.max_size == 128
-        assert cfg.default_ttl_seconds == 60.0
-        assert cfg.cacheable_methods == ("GET", "POST")
+        rec = RequestRecord(method="GET", path="/api/orders", params={"page": 1}, platform="TAOBAO", tags=["orders"])
+        assert rec.method == "GET"
+        assert rec.platform == "TAOBAO"
 
     def test_to_dict(self):
-        cfg = RequestCacheConfig(max_size=256)
-        d = cfg.to_dict()
-        assert d["max_size"] == 256
-        assert d["cacheable_methods"] == ["GET"]
+        rec = RequestRecord(method="GET", path="/api/test")
+        d = rec.to_dict()
+        assert d["method"] == "GET"
+        assert "record_id" in d
 
     def test_from_dict(self):
-        data = {
-            "enabled": False,
-            "max_size": 64,
-            "default_ttl_seconds": 120.0,
-            "cacheable_methods": ["GET", "POST"],
-        }
-        cfg = RequestCacheConfig.from_dict(data)
-        assert cfg.enabled is False
-        assert cfg.max_size == 64
-        assert cfg.cacheable_methods == ("GET", "POST")
+        data = {"record_id": "test-id", "method": "POST", "path": "/api/orders", "platform": "OCEANENGINE"}
+        rec = RequestRecord.from_dict(data)
+        assert rec.record_id == "test-id"
+        assert rec.method == "POST"
 
     def test_roundtrip(self):
-        original = RequestCacheConfig(max_size=100, default_ttl_seconds=60.0)
-        d = original.to_dict()
-        restored = RequestCacheConfig.from_dict(d)
-        assert restored.max_size == original.max_size
-        assert restored.default_ttl_seconds == original.default_ttl_seconds
+        original = RequestRecord(method="GET", path="/api/test", params={"page": 1}, status_code=200)
+        restored = RequestRecord.from_dict(original.to_dict())
+        assert restored.method == original.method
+        assert restored.path == original.path
+
+    def test_params_default_factory(self):
+        a = RequestRecord()
+        b = RequestRecord()
+        a.params["key"] = "val"
+        assert "key" not in b.params
 
 
-# ── RequestCacheStats Tests ────────────────────────────────
-
-
-class TestRequestCacheStats:
-    """Tests for RequestCacheStats dataclass."""
-
+class TestReplayConfig:
     def test_default_values(self):
-        stats = RequestCacheStats()
-        assert stats.total_requests == 0
-        assert stats.cache_hits == 0
-        assert stats.cache_misses == 0
-        assert stats.total_stored == 0
-        assert stats.total_evicted == 0
+        cfg = ReplayConfig()
+        assert cfg.max_records == 1000
+        assert cfg.record_responses is True
+        assert cfg.match_strategy == "exact"
 
-    def test_hit_rate_no_requests(self):
-        stats = RequestCacheStats()
-        assert stats.hit_rate == 0.0
-
-    def test_hit_rate_with_requests(self):
-        stats = RequestCacheStats()
-        stats.total_requests = 10
-        stats.cache_hits = 7
-        assert stats.hit_rate == pytest.approx(0.7)
-
-    def test_to_dict(self):
-        stats = RequestCacheStats(total_requests=5, cache_hits=3)
-        d = stats.to_dict()
-        assert d["total_requests"] == 5
-        assert d["cache_hits"] == 3
-        assert d["hit_rate"] == pytest.approx(0.6)
-
-    def test_reset(self):
-        stats = RequestCacheStats(total_requests=10, cache_hits=5)
-        stats.reset()
-        assert stats.total_requests == 0
-        assert stats.cache_hits == 0
+    def test_roundtrip(self):
+        original = ReplayConfig(max_records=100, replay_delay_ms=25.0)
+        restored = ReplayConfig.from_dict(original.to_dict())
+        assert restored.max_records == 100
 
 
-# ── RequestResultCache Tests ───────────────────────────────
+class TestRequestRecorder:
+    def test_basic_record(self):
+        rec = RequestRecorder()
+        r = rec.record(method="GET", path="/api/test")
+        assert r.method == "GET"
+        assert len(rec.get_records()) == 1
 
+    def test_record_without_responses(self):
+        rec = RequestRecorder(ReplayConfig(record_responses=False))
+        r = rec.record(method="GET", path="/api/test", response={"x": 1})
+        assert r.response is None
 
-class TestRequestResultCache:
-    """Tests for RequestResultCache."""
+    def test_max_records_eviction(self):
+        rec = RequestRecorder(ReplayConfig(max_records=3))
+        for i in range(5):
+            rec.record(method="GET", path=f"/api/{i}")
+        assert len(rec.get_records()) == 3
 
-    def test_make_key_deterministic(self):
-        key1 = RequestResultCache.make_key("GET", "/api/test", {"page": "1"})
-        key2 = RequestResultCache.make_key("GET", "/api/test", {"page": "1"})
-        assert key1 == key2
+    def test_get_record_by_id(self):
+        rec = RequestRecorder()
+        r = rec.record(method="GET", path="/api/test")
+        assert rec.get_record(r.record_id) is not None
+        assert rec.get_record("nope") is None
 
-    def test_make_key_different_params(self):
-        key1 = RequestResultCache.make_key("GET", "/api/test", {"page": "1"})
-        key2 = RequestResultCache.make_key("GET", "/api/test", {"page": "2"})
-        assert key1 != key2
+    def test_filter_by_method(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/a")
+        rec.record(method="POST", path="/b")
+        assert len(rec.filter(method="GET")) == 1
 
-    def test_make_key_different_methods(self):
-        key1 = RequestResultCache.make_key("GET", "/api/test")
-        key2 = RequestResultCache.make_key("POST", "/api/test")
-        assert key1 != key2
+    def test_filter_by_path(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/api/orders")
+        rec.record(method="GET", path="/api/products")
+        assert len(rec.filter(path="/api/orders")) == 1
 
-    def test_set_and_get(self):
-        cache = RequestResultCache()
-        key = RequestResultCache.make_key("GET", "/api/test")
-        cache.set(key, {"result": "ok"})
-        assert cache.get(key) == {"result": "ok"}
+    def test_filter_by_platform(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/a", platform="TAOBAO")
+        rec.record(method="GET", path="/b", platform="OCEANENGINE")
+        assert len(rec.filter(platform="TAOBAO")) == 1
 
-    def test_get_miss(self):
-        cache = RequestResultCache()
-        assert cache.get("nonexistent") is None
-
-    def test_ttl_expiry(self):
-        config = RequestCacheConfig(default_ttl_seconds=0.0)
-        cache = RequestResultCache(config)
-        key = RequestResultCache.make_key("GET", "/api/test")
-        cache.set(key, {"result": "ok"})
-        import time as _time
-
-        _time.sleep(0.01)
-        assert cache.get(key) is None
-
-    def test_ttl_override(self):
-        cache = RequestResultCache()
-        key = RequestResultCache.make_key("GET", "/api/test")
-        cache.set(key, {"result": "ok"}, ttl_seconds=60.0)
-        assert cache.get(key) == {"result": "ok"}
-
-    def test_lru_eviction(self):
-        config = RequestCacheConfig(max_size=2)
-        cache = RequestResultCache(config)
-        k1 = RequestResultCache.make_key("GET", "/a")
-        k2 = RequestResultCache.make_key("GET", "/b")
-        k3 = RequestResultCache.make_key("GET", "/c")
-
-        cache.set(k1, {"id": 1})
-        cache.set(k2, {"id": 2})
-        cache.set(k3, {"id": 3})  # Should evict k1
-
-        assert cache.get(k1) is None
-        assert cache.get(k2) == {"id": 2}
-        assert cache.get(k3) == {"id": 3}
-
-    def test_lru_access_moves_to_end(self):
-        config = RequestCacheConfig(max_size=2)
-        cache = RequestResultCache(config)
-        k1 = RequestResultCache.make_key("GET", "/a")
-        k2 = RequestResultCache.make_key("GET", "/b")
-
-        cache.set(k1, {"id": 1})
-        cache.set(k2, {"id": 2})
-        cache.get(k1)  # Move k1 to end
-        cache.set(RequestResultCache.make_key("GET", "/c"), {"id": 3})  # Evicts k2
-
-        assert cache.get(k1) == {"id": 1}
-        assert cache.get(k2) is None
-
-    def test_update_existing_key(self):
-        cache = RequestResultCache()
-        key = RequestResultCache.make_key("GET", "/api/test")
-        cache.set(key, {"v": 1})
-        cache.set(key, {"v": 2})
-        assert cache.get(key) == {"v": 2}
-        assert cache.size == 1
-
-    def test_invalidate_single(self):
-        cache = RequestResultCache()
-        key = RequestResultCache.make_key("GET", "/api/test")
-        cache.set(key, {"result": "ok"})
-        assert cache.invalidate(key) == 1
-        assert cache.get(key) is None
-
-    def test_invalidate_nonexistent(self):
-        cache = RequestResultCache()
-        assert cache.invalidate("missing") == 0
-
-    def test_invalidate_all(self):
-        cache = RequestResultCache()
-        cache.set("k1", {"a": 1})
-        cache.set("k2", {"b": 2})
-        count = cache.invalidate()
-        assert count == 2
-        assert cache.size == 0
-
-    def test_cleanup_expired(self):
-        config = RequestCacheConfig(default_ttl_seconds=0.0)
-        cache = RequestResultCache(config)
-        cache.set("k1", {"a": 1})
-        cache.set("k2", {"b": 2})
-        import time as _time
-
-        _time.sleep(0.01)
-        removed = cache.cleanup_expired()
-        assert removed == 2
-        assert cache.size == 0
-
-    def test_size(self):
-        cache = RequestResultCache()
-        assert cache.size == 0
-        cache.set("k1", {"a": 1})
-        assert cache.size == 1
-
-    def test_get_stats(self):
-        cache = RequestResultCache()
-        key = RequestResultCache.make_key("GET", "/api/test")
-        cache.set(key, {"result": "ok"})
-        cache.get(key)
-        cache.get("missing")
-        stats = cache.get_stats()
-        assert stats["total_requests"] == 2
-        assert stats["cache_hits"] == 1
-        assert stats["cache_misses"] == 1
-        assert stats["hit_rate"] == pytest.approx(0.5)
-        assert stats["current_size"] == 1
-        assert stats["max_size"] == 512
-
-    def test_reset_stats(self):
-        cache = RequestResultCache()
-        cache.set("k1", {"a": 1})
-        cache.get("k1")
-        cache.reset_stats()
-        stats = cache.get_stats()
-        assert stats["total_requests"] == 0
+    def test_filter_by_tags(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/a", tags=["orders"])
+        rec.record(method="GET", path="/b", tags=["products"])
+        assert len(rec.filter(tags=["orders"])) == 1
 
     def test_clear(self):
-        cache = RequestResultCache()
-        cache.set("k1", {"a": 1})
-        cache.set("k2", {"b": 2})
-        cache.clear()
-        assert cache.size == 0
-        stats = cache.get_stats()
-        assert stats["total_requests"] == 0
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/a")
+        assert rec.clear() == 1
+        assert len(rec.get_records()) == 0
 
-    def test_disabled_cache(self):
-        config = RequestCacheConfig(enabled=False)
-        RequestResultCache(config)
-        assert config.enabled is False
+    def test_export_import_json(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/api/test")
+        json_str = rec.export_json()
+        new_rec = RequestRecorder()
+        assert new_rec.import_json(json_str) == 1
 
+    def test_export_import_file(self, tmp_path):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/api/test")
+        fp = str(tmp_path / "records.json")
+        rec.export_to_file(fp)
+        new_rec = RequestRecorder()
+        assert new_rec.import_from_file(fp) == 1
 
-class TestRequestResultCacheConcurrency:
-    """Thread-safety tests for RequestResultCache."""
-
-    def test_concurrent_set_and_get(self):
-        import threading
-
-        cache = RequestResultCache()
-        errors = []
-
-        def writer():
-            try:
-                for i in range(100):
-                    cache.set(f"key_{i}", {"val": i})
-            except Exception as e:
-                errors.append(e)
-
-        def reader():
-            try:
-                for i in range(100):
-                    cache.get(f"key_{i}")
-            except Exception as e:
-                errors.append(e)
-
-        threads = [threading.Thread(target=writer), threading.Thread(target=reader)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-        assert errors == []
-
-    def test_concurrent_invalidate(self):
-        import threading
-
-        cache = RequestResultCache()
-
-        def writer():
-            for i in range(50):
-                cache.set(f"k{i}", {"v": i})
-
-        def invalidator():
-            for _ in range(50):
-                cache.invalidate()
-
-        threads = [threading.Thread(target=writer), threading.Thread(target=invalidator)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+    def test_stats(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/a")
+        stats = rec.get_stats()
+        assert stats["record_count"] == 1
+        assert stats["total_recorded"] == 1
 
 
-# ── DecompressionStats Tests ───────────────────────────────
+class TestRequestReplayer:
+    @pytest.mark.asyncio
+    async def test_replay_single(self):
+        rec = RequestRecorder()
+        r = rec.record(method="GET", path="/api/test", params={"page": 1}, response={"original": True})
+        replayer = RequestReplayer(rec)
+
+        async def exec_fn(method, path, params, data):
+            return {"new": True}
+
+        result = await replayer.replay(r, exec_fn)
+        assert result["success"] is True
+        assert result["new_response"] == {"new": True}
+
+    @pytest.mark.asyncio
+    async def test_replay_error(self):
+        rec = RequestRecorder()
+        r = rec.record(method="GET", path="/api/test")
+        replayer = RequestReplayer(rec)
+
+        async def fail(**kw):
+            raise ValueError("fail")
+
+        result = await replayer.replay(r, fail)
+        assert result["success"] is False
+        assert "fail" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_replay_all(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/a")
+        rec.record(method="GET", path="/b")
+        replayer = RequestReplayer(rec)
+
+        async def exec_fn(**kw):
+            return {"ok": True}
+
+        results = await replayer.replay_all(exec_fn)
+        assert len(results) == 2
+
+    @pytest.mark.asyncio
+    async def test_validate_replay_match(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/api/test", response={"result": "ok"})
+        replayer = RequestReplayer(rec)
+
+        async def exec_fn(**kw):
+            return {"result": "different"}
+
+        v = await replayer.validate_replay(exec_fn)
+        assert v["matched"] == 1
+
+    @pytest.mark.asyncio
+    async def test_validate_replay_mismatch(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/api/test", response={"a": 1, "b": 2})
+        replayer = RequestReplayer(rec)
+
+        async def exec_fn(**kw):
+            return {"a": 1}
+
+        v = await replayer.validate_replay(exec_fn)
+        assert v["mismatched"] == 1
+
+    def test_responses_match(self):
+        assert RequestReplayer._responses_match({"a": 1}, {"a": 2}) is True
+        assert RequestReplayer._responses_match({"a": 1}, {"b": 2}) is False
 
 
-class TestDecompressionStats:
-    """Tests for DecompressionStats dataclass."""
-
+class TestTraceSpan:
     def test_default_values(self):
-        stats = DecompressionStats()
-        assert stats.total_responses == 0
-        assert stats.decompressed_responses == 0
-        assert stats.total_compressed_bytes == 0
-        assert stats.total_decompressed_bytes == 0
-        assert stats.decompression_errors == 0
-
-    def test_decompression_rate_no_responses(self):
-        stats = DecompressionStats()
-        assert stats.decompression_rate == 0.0
-
-    def test_decompression_rate_with_responses(self):
-        stats = DecompressionStats()
-        stats.total_responses = 10
-        stats.decompressed_responses = 4
-        assert stats.decompression_rate == pytest.approx(0.4)
-
-    def test_avg_compression_ratio(self):
-        stats = DecompressionStats()
-        stats.total_compressed_bytes = 100
-        stats.total_decompressed_bytes = 200
-        assert stats.avg_compression_ratio == pytest.approx(2.0)
-
-    def test_avg_compression_ratio_no_data(self):
-        stats = DecompressionStats()
-        assert stats.avg_compression_ratio == 0.0
-
-    def test_to_dict(self):
-        stats = DecompressionStats(total_responses=5, decompressed_responses=3)
-        d = stats.to_dict()
-        assert d["total_responses"] == 5
-        assert d["decompressed_responses"] == 3
-        assert "decompression_rate" in d
-        assert "bytes_saved" in d
-
-    def test_reset(self):
-        stats = DecompressionStats(total_responses=10, decompressed_responses=5)
-        stats.reset()
-        assert stats.total_responses == 0
-        assert stats.decompressed_responses == 0
-
-
-# ── ResponseDecompressor Tests ─────────────────────────────
-
-
-class TestResponseDecompressor:
-    """Tests for ResponseDecompressor."""
-
-    def test_no_encoding(self):
-        decompressor = ResponseDecompressor()
-        body = b'{"result": "ok"}'
-        result = decompressor.decompress(body, content_encoding="")
-        assert result == body
-
-    def test_identity_encoding(self):
-        decompressor = ResponseDecompressor()
-        body = b'{"result": "ok"}'
-        result = decompressor.decompress(body, content_encoding="identity")
-        assert result == body
-
-    def test_gzip_decompression(self):
-        import gzip as gzip_mod
-
-        decompressor = ResponseDecompressor()
-        original = b'{"data": "test_value"}'
-        compressed = gzip_mod.compress(original)
-        result = decompressor.decompress(compressed, content_encoding="gzip")
-        assert result == original
-
-    def test_deflate_decompression(self):
-        decompressor = ResponseDecompressor()
-        original = b'{"data": "test_value"}'
-        compressed = zlib.compress(original)
-        result = decompressor.decompress(compressed, content_encoding="deflate")
-        assert result == original
-
-    def test_x_gzip_decompression(self):
-        import gzip as gzip_mod
-
-        decompressor = ResponseDecompressor()
-        original = b'{"data": "test_value"}'
-        compressed = gzip_mod.compress(original)
-        result = decompressor.decompress(compressed, content_encoding="x-gzip")
-        assert result == original
-
-    def test_unsupported_encoding_returns_original(self):
-        decompressor = ResponseDecompressor()
-        body = b"some data"
-        result = decompressor.decompress(body, content_encoding="br")
-        # brotli likely not installed, should return original
-        assert isinstance(result, bytes)
-
-    def test_corrupt_gzip_returns_original(self):
-        decompressor = ResponseDecompressor()
-        body = b"not gzip data"
-        result = decompressor.decompress(body, content_encoding="gzip")
-        assert result == body  # Falls back to original on error
-
-    def test_stats_tracking(self):
-        import gzip as gzip_mod
-
-        decompressor = ResponseDecompressor()
-        original = b"x" * 1000
-        compressed = gzip_mod.compress(original)
-        decompressor.decompress(compressed, content_encoding="gzip")
-        decompressor.decompress(b"plain", content_encoding="identity")
-
-        stats = decompressor.get_stats()
-        assert stats["total_responses"] == 2
-        assert stats["decompressed_responses"] == 1
-        assert stats["total_compressed_bytes"] > 0
-
-    def test_stats_decompression_rate(self):
-        decompressor = ResponseDecompressor()
-        decompressor.decompress(b"a", content_encoding="gzip")  # Corrupt, error
-        decompressor.decompress(b"b", content_encoding="identity")  # No decompression
-        stats = decompressor.get_stats()
-        assert stats["total_responses"] == 2
-
-    def test_reset_stats(self):
-        decompressor = ResponseDecompressor()
-        decompressor.decompress(b"test", content_encoding="identity")
-        decompressor.reset_stats()
-        stats = decompressor.get_stats()
-        assert stats["total_responses"] == 0
-
-    def test_multiple_gzip_responses(self):
-        import gzip as gzip_mod
-
-        decompressor = ResponseDecompressor()
-        for i in range(5):
-            original = f'{{"id": {i}}}'.encode()
-            compressed = gzip_mod.compress(original)
-            result = decompressor.decompress(compressed, content_encoding="gzip")
-            assert result == original
-
-        stats = decompressor.get_stats()
-        assert stats["total_responses"] == 5
-        assert stats["decompressed_responses"] == 5
-
-
-class TestResponseDecompressorConcurrency:
-    """Thread-safety tests for ResponseDecompressor."""
-
-    def test_concurrent_decompress(self):
-        import gzip as gzip_mod
-        import threading
-
-        decompressor = ResponseDecompressor()
-        original = b"x" * 500
-        compressed = gzip_mod.compress(original)
-        errors = []
-
-        def decompress_batch():
-            try:
-                for _ in range(50):
-                    result = decompressor.decompress(compressed, content_encoding="gzip")
-                    assert result == original
-            except Exception as e:
-                errors.append(e)
-
-        threads = [threading.Thread(target=decompress_batch) for _ in range(4)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-        assert errors == []
-        stats = decompressor.get_stats()
-        assert stats["total_responses"] == 200
-        assert stats["decompressed_responses"] == 200
-
-
-# ── CommerceMCPBase Result Cache Integration ───────────────
-
-
-class TestCommerceMCPBaseResultCache:
-    """Tests for CommerceMCPBase result cache integration."""
-
-    def test_has_result_cache(self):
-        client = CommerceMCPBase()
-        assert isinstance(client._result_cache, RequestResultCache)
-
-    def test_custom_cache_config(self):
-        config = RequestCacheConfig(max_size=64, default_ttl_seconds=60.0)
-        client = CommerceMCPBase(cache_config=config)
-        assert client._result_cache.config.max_size == 64
-        assert client._result_cache.config.default_ttl_seconds == 60.0
-
-    def test_get_result_cache_stats(self):
-        client = CommerceMCPBase()
-        stats = client.get_result_cache_stats()
-        assert "total_requests" in stats
-        assert "cache_hits" in stats
-        assert "hit_rate" in stats
-        assert "current_size" in stats
-
-    def test_invalidate_result_cache(self):
-        client = CommerceMCPBase()
-        client._result_cache.set("k1", {"a": 1})
-        count = client.invalidate_result_cache()
-        assert count == 1
-
-    def test_invalidate_result_cache_specific_key(self):
-        client = CommerceMCPBase()
-        client._result_cache.set("k1", {"a": 1})
-        client._result_cache.set("k2", {"b": 2})
-        count = client.invalidate_result_cache("k1")
-        assert count == 1
-        assert client._result_cache.size == 1
-
-    @pytest.mark.asyncio
-    async def test_get_request_cached(self):
-        """Second identical GET request should be served from cache."""
-        config = RequestCacheConfig(default_ttl_seconds=60.0)
-        client = CommerceMCPBase(app_key="k", app_secret="s", cache_config=config)
-
-        call_count = 0
-        mock_response = MagicMock()
-
-        def make_response(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            mock_response.json.return_value = {"result": {"id": call_count}}
-            mock_response.status_code = 200
-            mock_response.headers = {}
-            return mock_response
-
-        mock_client = AsyncMock()
-        mock_client.get.side_effect = make_response
-        mock_client.is_closed = False
-
-        with patch.object(client, "_ensure_client", return_value=mock_client):
-            r1 = await client._request("GET", "/api/test", params={"page": "1"})
-            r2 = await client._request("GET", "/api/test", params={"page": "1"})
-
-        assert r1 == {"result": {"id": 1}}
-        assert r2 == {"result": {"id": 1}}  # Cached
-        assert call_count == 1  # Only one actual HTTP call
-
-    @pytest.mark.asyncio
-    async def test_different_params_not_cached(self):
-        """Different params should result in different cache entries."""
-        config = RequestCacheConfig(default_ttl_seconds=60.0)
-        client = CommerceMCPBase(app_key="k", app_secret="s", cache_config=config)
-
-        call_count = 0
-        mock_response = MagicMock()
-
-        def make_response(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            mock_response.json.return_value = {"result": {"id": call_count}}
-            mock_response.status_code = 200
-            mock_response.headers = {}
-            return mock_response
-
-        mock_client = AsyncMock()
-        mock_client.get.side_effect = make_response
-        mock_client.is_closed = False
-
-        with patch.object(client, "_ensure_client", return_value=mock_client):
-            r1 = await client._request("GET", "/api/test", params={"page": "1"})
-            r2 = await client._request("GET", "/api/test", params={"page": "2"})
-
-        assert r1 != r2
-        assert call_count == 2
-
-    @pytest.mark.asyncio
-    async def test_cache_disabled(self):
-        """When cache is disabled, all requests should go through."""
-        config = RequestCacheConfig(enabled=False)
-        client = CommerceMCPBase(app_key="k", app_secret="s", cache_config=config)
-
-        call_count = 0
-        mock_response = MagicMock()
-
-        def make_response(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            mock_response.json.return_value = {"result": {"id": call_count}}
-            mock_response.status_code = 200
-            mock_response.headers = {}
-            return mock_response
-
-        mock_client = AsyncMock()
-        mock_client.get.side_effect = make_response
-        mock_client.is_closed = False
-
-        with patch.object(client, "_ensure_client", return_value=mock_client):
-            await client._request("GET", "/api/test")
-            await client._request("GET", "/api/test")
-
-        assert call_count == 2
-
-    @pytest.mark.asyncio
-    async def test_use_cache_false_bypasses(self):
-        """use_cache=False should skip caching for that request."""
-        config = RequestCacheConfig(default_ttl_seconds=60.0)
-        client = CommerceMCPBase(app_key="k", app_secret="s", cache_config=config)
-
-        call_count = 0
-        mock_response = MagicMock()
-
-        def make_response(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            mock_response.json.return_value = {"result": {"id": call_count}}
-            mock_response.status_code = 200
-            mock_response.headers = {}
-            return mock_response
-
-        mock_client = AsyncMock()
-        mock_client.get.side_effect = make_response
-        mock_client.is_closed = False
-
-        with patch.object(client, "_ensure_client", return_value=mock_client):
-            await client._request("GET", "/api/test", use_cache=False)
-            await client._request("GET", "/api/test", use_cache=False)
-
-        assert call_count == 2
-
-    @pytest.mark.asyncio
-    async def test_error_response_not_cached(self):
-        """Error responses should not be cached."""
-        config = RequestCacheConfig(default_ttl_seconds=60.0)
-        client = CommerceMCPBase(app_key="k", app_secret="s", cache_config=config)
-
-        call_count = 0
-        mock_response = MagicMock()
-
-        def make_response(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                mock_response.json.return_value = {"error_response": {"code": 40001, "msg": "bad"}}
-            else:
-                mock_response.json.return_value = {"result": "ok"}
-            mock_response.status_code = 200
-            mock_response.headers = {}
-            return mock_response
-
-        mock_client = AsyncMock()
-        mock_client.get.side_effect = make_response
-        mock_client.is_closed = False
-
-        with patch.object(client, "_ensure_client", return_value=mock_client):
-            with pytest.raises(CommerceAPIError):
-                await client._request("GET", "/api/test")
-
-            # Second request should not be served from cache
-            result = await client._request("GET", "/api/test")
-            assert result == {"result": "ok"}
-            assert call_count == 2
-
-
-# ── CommerceMCPBase Decompression Integration ──────────────
-
-
-class TestCommerceMCPBaseDecompression:
-    """Tests for CommerceMCPBase response decompression integration."""
-
-    def test_has_decompressor(self):
-        client = CommerceMCPBase()
-        assert isinstance(client._decompressor, ResponseDecompressor)
-
-    def test_get_decompression_stats(self):
-        client = CommerceMCPBase()
-        stats = client.get_decompression_stats()
-        assert "total_responses" in stats
-        assert "decompressed_responses" in stats
-        assert "decompression_rate" in stats
-
-    @pytest.mark.asyncio
-    async def test_gzip_response_decompressed(self):
-        """Compressed responses should be transparently decompressed."""
-        import gzip as gzip_mod
-
-        client = CommerceMCPBase(app_key="k", app_secret="s")
-        original_data = {"result": {"products": list(range(100))}}
-        compressed_body = gzip_mod.compress(json.dumps(original_data, ensure_ascii=False).encode())
-
-        mock_response = MagicMock()
-        mock_response.content = compressed_body
-        mock_response.status_code = 200
-        mock_response.headers = {"content-encoding": "gzip"}
-        # json() should not be called when decompression succeeds
-        mock_response.json.return_value = original_data
-
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-        mock_client.is_closed = False
-
-        with patch.object(client, "_ensure_client", return_value=mock_client):
-            result = await client._request("GET", "/api/test")
-
-        assert result == original_data
-        stats = client.get_decompression_stats()
-        assert stats["decompressed_responses"] >= 1
-
-    @pytest.mark.asyncio
-    async def test_no_compression_header_uses_json(self):
-        """Responses without Content-Encoding should use resp.json()."""
-        client = CommerceMCPBase(app_key="k", app_secret="s")
-
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"result": "ok"}
-        mock_response.status_code = 200
-        mock_response.headers = {}
-
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-        mock_client.is_closed = False
-
-        with patch.object(client, "_ensure_client", return_value=mock_client):
-            result = await client._request("GET", "/api/test")
-
-        assert result == {"result": "ok"}
-
-
-# ── CommerceMCPBase Cache + Compression Combined ───────────
-
-
-class TestCommerceMCPBaseCacheAndCompression:
-    """Tests for combined cache and compression features."""
-
-    def test_all_new_features_initialized(self):
-        """Client should have result cache, decompressor, and compressor."""
-        client = CommerceMCPBase()
-        assert isinstance(client._result_cache, RequestResultCache)
-        assert isinstance(client._decompressor, ResponseDecompressor)
-        assert isinstance(client._compressor, RequestCompressor)
-
-    def test_custom_configs_combined(self):
-        """All custom configs should be accepted together."""
-        cache_cfg = RequestCacheConfig(max_size=32)
-        comp_cfg = CompressionConfig(method=CompressionMethod.GZIP)
-        rate_cfg = RateLimitConfig(default_requests_per_second=5.0)
-        client = CommerceMCPBase(
-            compression_config=comp_cfg,
-            rate_limit_config=rate_cfg,
-            cache_config=cache_cfg,
-        )
-        assert client._result_cache.config.max_size == 32
-        assert client._compressor.config.method == CompressionMethod.GZIP
-        assert client._configurable_limiter.config.default_requests_per_second == 5.0
-
-
-# ── EncryptionMethod Tests ─────────────────────────────────
-
-
-class TestEncryptionMethod:
-    """Tests for EncryptionMethod enum values."""
-
-    def test_none_value(self):
-        assert EncryptionMethod.NONE == "none"
-
-    def test_aes_256_cbc_value(self):
-        assert EncryptionMethod.AES_256_CBC == "aes_256_cbc"
-
-    def test_xor_cipher_value(self):
-        assert EncryptionMethod.XOR_CIPHER == "xor_cipher"
-
-    def test_all_methods(self):
-        methods = list(EncryptionMethod)
-        assert len(methods) == 3
-
-
-# ── EncryptionConfig Tests ─────────────────────────────────
-
-
-class TestEncryptionConfig:
-    """Tests for EncryptionConfig dataclass."""
-
-    def test_default_config(self):
-        cfg = EncryptionConfig()
-        assert cfg.method == EncryptionMethod.NONE
-        assert cfg.encryption_key == ""
-        assert cfg.include_encrypted_header is True
-        assert cfg.header_name == "X-Encrypted"
-
-    def test_to_dict_masks_key(self):
-        cfg = EncryptionConfig(
-            method=EncryptionMethod.AES_256_CBC,
-            encryption_key="0123456789abcdef" * 4,
-        )
-        d = cfg.to_dict()
-        assert d["method"] == "aes_256_cbc"
-        assert "****" in d["encryption_key"]
-        assert d["encryption_key"] != "0123456789abcdef" * 4
-
-    def test_to_dict_empty_key(self):
-        cfg = EncryptionConfig(encryption_key="")
-        d = cfg.to_dict()
-        assert d["encryption_key"] == ""
-
-    def test_from_dict(self):
-        data = {
-            "method": "xor_cipher",
-            "encryption_key": "abcdef",
-            "include_encrypted_header": False,
-            "header_name": "X-Custom",
-        }
-        cfg = EncryptionConfig.from_dict(data)
-        assert cfg.method == EncryptionMethod.XOR_CIPHER
-        assert cfg.encryption_key == "abcdef"
-        assert cfg.include_encrypted_header is False
-        assert cfg.header_name == "X-Custom"
-
-    def test_from_dict_defaults(self):
-        cfg = EncryptionConfig.from_dict({})
-        assert cfg.method == EncryptionMethod.NONE
-        assert cfg.encryption_key == ""
-
-
-# ── RequestEncryptor Tests ─────────────────────────────────
-
-
-class TestRequestEncryptor:
-    """Tests for RequestEncryptor encrypt/decrypt."""
-
-    def test_none_encryption_passthrough(self):
-        enc = RequestEncryptor(EncryptionConfig(method=EncryptionMethod.NONE))
-        body = b'{"test": true}'
-        result, headers = enc.encrypt(body)
-        assert result == body
-        assert headers == {}
-
-    def test_none_decryption_passthrough(self):
-        enc = RequestEncryptor(EncryptionConfig(method=EncryptionMethod.NONE))
-        data = b'{"test": true}'
-        result = enc.decrypt(data)
-        assert result == data
-
-    def test_xor_encrypt_decrypt_roundtrip(self):
-        key = "deadbeef"
-        enc = RequestEncryptor(
-            EncryptionConfig(
-                method=EncryptionMethod.XOR_CIPHER,
-                encryption_key=key,
-            )
-        )
-        plaintext = b'{"order_id": "12345", "amount": 100}'
-        encrypted, headers = enc.encrypt(plaintext)
-
-        assert encrypted != plaintext
-        assert headers["X-Encrypted"] == "xor_cipher"
-
-        decrypted = enc.decrypt(encrypted)
-        assert decrypted == plaintext
-
-    def test_xor_empty_body(self):
-        enc = RequestEncryptor(
-            EncryptionConfig(
-                method=EncryptionMethod.XOR_CIPHER,
-                encryption_key="ff",
-            )
-        )
-        encrypted, _ = enc.encrypt(b"")
-        assert encrypted == b""
-        assert enc.decrypt(encrypted) == b""
-
-    def test_xor_custom_header_name(self):
-        enc = RequestEncryptor(
-            EncryptionConfig(
-                method=EncryptionMethod.XOR_CIPHER,
-                encryption_key="aa",
-                header_name="X-Custom-Encrypt",
-            )
-        )
-        _, headers = enc.encrypt(b"data")
-        assert "X-Custom-Encrypt" in headers
-        assert "X-Encrypted" not in headers
-
-    def test_xor_no_header_when_disabled(self):
-        enc = RequestEncryptor(
-            EncryptionConfig(
-                method=EncryptionMethod.XOR_CIPHER,
-                encryption_key="aa",
-                include_encrypted_header=False,
-            )
-        )
-        _, headers = enc.encrypt(b"data")
-        assert headers == {}
-
-    def test_missing_key_raises(self):
-        enc = RequestEncryptor(
-            EncryptionConfig(
-                method=EncryptionMethod.XOR_CIPHER,
-                encryption_key="",
-            )
-        )
-        with pytest.raises(ValueError, match="Encryption key is required"):
-            enc.encrypt(b"data")
-
-    def test_missing_key_decrypt_raises(self):
-        enc = RequestEncryptor(
-            EncryptionConfig(
-                method=EncryptionMethod.XOR_CIPHER,
-                encryption_key="",
-            )
-        )
-        with pytest.raises(ValueError, match="Encryption key is required"):
-            enc.decrypt(b"data")
-
-    def test_xor_key_cannot_be_empty(self):
-        enc = RequestEncryptor(
-            EncryptionConfig(
-                method=EncryptionMethod.XOR_CIPHER,
-                encryption_key="",
-            )
-        )
-        with pytest.raises(ValueError):
-            enc._xor_encrypt(b"test", b"")
-
-    def test_xor_large_body(self):
-        key = "1234567890abcdef"
-        enc = RequestEncryptor(
-            EncryptionConfig(
-                method=EncryptionMethod.XOR_CIPHER,
-                encryption_key=key,
-            )
-        )
-        body = os.urandom(10000)
-        encrypted, _ = enc.encrypt(body)
-        assert len(encrypted) == len(body)
-        assert enc.decrypt(encrypted) == body
-
-    def test_pkcs7_pad_unpad(self):
-        data = b"hello"
-        padded = RequestEncryptor._pkcs7_pad(data, 16)
-        assert len(padded) % 16 == 0
-        assert RequestEncryptor._pkcs7_unpad(padded) == data
-
-    def test_pkcs7_pad_full_block(self):
-        data = b"0123456789abcdef"  # exactly 16 bytes
-        padded = RequestEncryptor._pkcs7_pad(data, 16)
-        assert len(padded) == 32  # adds a full padding block
-        assert RequestEncryptor._pkcs7_unpad(padded) == data
-
-    def test_pkcs7_unpad_invalid(self):
-        with pytest.raises(ValueError, match="Cannot unpad empty data"):
-            RequestEncryptor._pkcs7_unpad(b"")
-
-    def test_pkcs7_unpad_bad_length(self):
-        with pytest.raises(ValueError, match="Invalid PKCS7 padding length"):
-            RequestEncryptor._pkcs7_unpad(b"\x00" + b"\x11" * 15)
-
-    def test_aes_wrong_key_length(self):
-        # 8 bytes hex = 4 bytes key (not 32)
-        enc = RequestEncryptor(
-            EncryptionConfig(
-                method=EncryptionMethod.AES_256_CBC,
-                encryption_key="aabbccdd",
-            )
-        )
-        with pytest.raises(ValueError, match="32-byte key"):
-            enc.encrypt(b"data")
-
-    def test_aes_decrypt_short_data(self):
-        enc = RequestEncryptor(
-            EncryptionConfig(
-                method=EncryptionMethod.AES_256_CBC,
-                encryption_key="00" * 32,
-            )
-        )
-        with pytest.raises(ValueError, match="too short"):
-            enc.decrypt(b"short")
-
-    def test_aes_encrypt_decrypt_roundtrip(self):
-        """Test AES-256-CBC encrypt/decrypt roundtrip (requires pyaes)."""
-        pytest.importorskip("pyaes")
-        key = "0123456789abcdef" * 4  # 32 bytes
-        enc = RequestEncryptor(
-            EncryptionConfig(
-                method=EncryptionMethod.AES_256_CBC,
-                encryption_key=key,
-            )
-        )
-        plaintext = b'{"product_id": "SKU-001", "price": 99.99}'
-        encrypted, headers = enc.encrypt(plaintext)
-
-        assert encrypted != plaintext
-        assert len(encrypted) > len(plaintext)  # IV + padding
-        assert headers["X-Encrypted"] == "aes_256_cbc"
-
-        decrypted = enc.decrypt(encrypted)
-        assert decrypted == plaintext
-
-    def test_aes_different_iv_each_time(self):
-        """Each AES encryption should produce different ciphertext (random IV)."""
-        pytest.importorskip("pyaes")
-        key = "aabbccdd" * 8
-        enc = RequestEncryptor(
-            EncryptionConfig(
-                method=EncryptionMethod.AES_256_CBC,
-                encryption_key=key,
-            )
-        )
-        body = b"same plaintext"
-        r1, _ = enc.encrypt(body)
-        r2, _ = enc.encrypt(body)
-        # IVs are different, so ciphertexts differ
-        assert r1 != r2
-        # But both decrypt to the same plaintext
-        assert enc.decrypt(r1) == body
-        assert enc.decrypt(r2) == body
-
-    def test_encryption_stats(self):
-        enc = RequestEncryptor(
-            EncryptionConfig(
-                method=EncryptionMethod.XOR_CIPHER,
-                encryption_key="ab",
-            )
-        )
-        enc.encrypt(b"hello")
-        enc.encrypt(b"world")
-        enc.decrypt(b"data")
-
-        stats = enc.get_stats()
-        assert stats["total_encrypted"] == 2
-        assert stats["total_decrypted"] == 1
-        assert stats["total_bytes_encrypted"] == 10
-        assert stats["total_bytes_decrypted"] == 4
-
-    def test_encryption_stats_reset(self):
-        enc = RequestEncryptor(
-            EncryptionConfig(
-                method=EncryptionMethod.XOR_CIPHER,
-                encryption_key="ab",
-            )
-        )
-        enc.encrypt(b"hello")
-        enc.reset_stats()
-        stats = enc.get_stats()
-        assert stats["total_encrypted"] == 0
-
-    def test_unsupported_method_raises(self):
-        enc = RequestEncryptor(
-            EncryptionConfig(
-                method=EncryptionMethod.NONE,
-                encryption_key="ab",
-            )
-        )
-        # Force an invalid method for testing
-        enc.config.method = "invalid"
-        with pytest.raises(ValueError, match="Unsupported encryption method"):
-            enc.encrypt(b"data")
-
-
-# ── AuditEntry Tests ───────────────────────────────────────
-
-
-class TestAuditEntry:
-    """Tests for AuditEntry dataclass."""
-
-    def test_defaults(self):
-        entry = AuditEntry()
-        assert entry.audit_id  # auto-generated UUID
-        assert entry.timestamp  # auto-generated ISO 8601
-        assert entry.method == ""
-        assert entry.status_code == 0
-        assert entry.encrypted is False
-
-    def test_custom_values(self):
-        entry = AuditEntry(
-            method="GET",
-            path="/api/order",
-            platform="TAOBAO",
-            status_code=200,
-            latency_ms=45.2,
-            encrypted=True,
-        )
-        d = entry.to_dict()
-        assert d["method"] == "GET"
-        assert d["path"] == "/api/order"
-        assert d["platform"] == "TAOBAO"
-        assert d["status_code"] == 200
-        assert d["latency_ms"] == 45.2
-        assert d["encrypted"] is True
-
-    def test_to_dict_structure(self):
-        entry = AuditEntry(
-            method="POST",
-            path="/api/test",
-            error="timeout",
-        )
-        d = entry.to_dict()
-        assert "audit_id" in d
-        assert "request_id" in d
-        assert "timestamp" in d
-        assert d["error"] == "timeout"
-
-    def test_metadata(self):
-        entry = AuditEntry(metadata={"user_id": "U001", "ip": "10.0.0.1"})
-        d = entry.to_dict()
-        assert d["metadata"]["user_id"] == "U001"
-
-
-# ── AuditLog Tests ─────────────────────────────────────────
-
-
-class TestAuditLog:
-    """Tests for AuditLog class."""
-
-    def test_empty_log(self):
-        log = AuditLog()
-        assert log.entry_count == 0
-        assert log.query() == []
-
-    def test_log_single_entry(self):
-        log = AuditLog()
-        entry = AuditEntry(method="GET", path="/api/test", platform="TAOBAO")
-        log.log(entry)
-        assert log.entry_count == 1
-
-    def test_query_all(self):
-        log = AuditLog()
-        for i in range(5):
-            log.log(AuditEntry(method="GET", path=f"/api/item/{i}"))
-        results = log.query(limit=10)
-        assert len(results) == 5
-
-    def test_query_by_platform(self):
-        log = AuditLog()
-        log.log(AuditEntry(method="GET", path="/a", platform="TAOBAO"))
-        log.log(AuditEntry(method="GET", path="/b", platform="DOUDIAN"))
-        log.log(AuditEntry(method="GET", path="/c", platform="TAOBAO"))
-
-        results = log.query(platform="TAOBAO")
-        assert len(results) == 2
-
-    def test_query_by_method(self):
-        log = AuditLog()
-        log.log(AuditEntry(method="GET", path="/a"))
-        log.log(AuditEntry(method="POST", path="/b"))
-        log.log(AuditEntry(method="GET", path="/c"))
-
-        results = log.query(method="POST")
-        assert len(results) == 1
-
-    def test_query_by_path(self):
-        log = AuditLog()
-        log.log(AuditEntry(method="GET", path="/api/order/1"))
-        log.log(AuditEntry(method="GET", path="/api/product/2"))
-        log.log(AuditEntry(method="GET", path="/api/order/3"))
-
-        results = log.query(path="/api/order")
-        assert len(results) == 2
-
-    def test_query_by_status_code(self):
-        log = AuditLog()
-        log.log(AuditEntry(method="GET", path="/a", status_code=200))
-        log.log(AuditEntry(method="GET", path="/b", status_code=500))
-        log.log(AuditEntry(method="GET", path="/c", status_code=200))
-
-        results = log.query(status_code=500)
-        assert len(results) == 1
-
-    def test_query_errors_only(self):
-        log = AuditLog()
-        log.log(AuditEntry(method="GET", path="/a"))
-        log.log(AuditEntry(method="GET", path="/b", error="timeout"))
-        log.log(AuditEntry(method="GET", path="/c"))
-
-        results = log.query(errors_only=True)
-        assert len(results) == 1
-
-    def test_query_encrypted_only(self):
-        log = AuditLog()
-        log.log(AuditEntry(method="POST", path="/a", encrypted=True))
-        log.log(AuditEntry(method="POST", path="/b", encrypted=False))
-        log.log(AuditEntry(method="POST", path="/c", encrypted=True))
-
-        results = log.query(encrypted_only=True)
-        assert len(results) == 2
-
-    def test_query_latency_filter(self):
-        log = AuditLog()
-        log.log(AuditEntry(method="GET", path="/a", latency_ms=10.0))
-        log.log(AuditEntry(method="GET", path="/b", latency_ms=100.0))
-        log.log(AuditEntry(method="GET", path="/c", latency_ms=500.0))
-
-        results = log.query(min_latency_ms=50.0)
-        assert len(results) == 2
-
-        results = log.query(max_latency_ms=100.0)
-        assert len(results) == 2
-
-    def test_query_pagination(self):
-        log = AuditLog()
-        for i in range(20):
-            log.log(AuditEntry(method="GET", path=f"/api/{i}"))
-
-        page1 = log.query(limit=5, offset=0)
-        page2 = log.query(limit=5, offset=5)
-        assert len(page1) == 5
-        assert len(page2) == 5
-        # Results are most-recent-first, so different pages have different entries
-        assert page1[0]["audit_id"] != page2[0]["audit_id"]
-
-    def test_max_entries_eviction(self):
-        log = AuditLog(max_entries=5)
-        for i in range(10):
-            log.log(AuditEntry(method="GET", path=f"/api/{i}"))
-        assert log.entry_count == 5
-
-    def test_combined_filters(self):
-        log = AuditLog()
-        log.log(AuditEntry(method="POST", path="/api/order", platform="TAOBAO", status_code=200))
-        log.log(AuditEntry(method="POST", path="/api/order", platform="DOUDIAN", status_code=200))
-        log.log(AuditEntry(method="GET", path="/api/order", platform="TAOBAO", status_code=200))
-
-        results = log.query(platform="TAOBAO", method="POST")
-        assert len(results) == 1
-
-    def test_stats_empty(self):
-        log = AuditLog()
-        stats = log.get_stats()
-        assert stats["total_entries"] == 0
-        assert stats["error_count"] == 0
-
-    def test_stats_with_entries(self):
-        log = AuditLog()
-        log.log(AuditEntry(method="GET", path="/a", platform="TAOBAO", encrypted=True))
-        log.log(AuditEntry(method="POST", path="/b", platform="TAOBAO", error="fail"))
-        log.log(AuditEntry(method="GET", path="/c", platform="DOUDIAN"))
-
-        stats = log.get_stats()
-        assert stats["total_entries"] == 3
-        assert stats["error_count"] == 1
-        assert stats["encrypted_count"] == 1
-        assert stats["platforms"]["TAOBAO"] == 2
-        assert stats["platforms"]["DOUDIAN"] == 1
-        assert stats["methods"]["GET"] == 2
-        assert stats["methods"]["POST"] == 1
-
-    def test_export_json(self):
-        log = AuditLog()
-        log.log(AuditEntry(method="GET", path="/api/test"))
+        span = TraceSpan()
+        assert span.span_id != ""
+        assert span.is_active is True
+
+    def test_finish(self):
+        span = TraceSpan()
+        span.finish("ok")
+        assert span.is_active is False
+        assert span.status == "ok"
+        assert span.duration_ms >= 0
+
+    def test_set_attribute(self):
+        span = TraceSpan()
+        span.set_attribute("key", "val")
+        assert span.attributes["key"] == "val"
+
+    def test_add_event(self):
+        span = TraceSpan()
+        span.add_event("test_event")
+        assert len(span.events) == 1
+
+
+class TestRequestTracer:
+    def test_init(self):
+        tracer = RequestTracer(service_name="test")
+        assert tracer.service_name == "test"
+
+    def test_start_finish_span(self):
+        tracer = RequestTracer()
+        span = tracer.start_span("test")
+        assert len(tracer.get_active_spans()) == 1
+        tracer.finish_span(span)
+        assert len(tracer.get_active_spans()) == 0
+
+    def test_parent_child(self):
+        tracer = RequestTracer()
+        parent = tracer.start_span("parent")
+        child = tracer.start_span("child", parent=parent)
+        assert child.parent_id == parent.span_id
+        assert child.trace_id == parent.trace_id
+
+    def test_trace_summary(self):
+        tracer = RequestTracer(service_name="test")
+        span = tracer.start_span("root")
+        tracer.finish_span(span)
+        s = tracer.get_trace_summary()
+        assert s["span_count"] == 1
+        assert s["status"] == "ok"
+
+    def test_clear(self):
+        tracer = RequestTracer()
+        tracer.start_span("test")
+        tracer.clear()
+        assert len(tracer.get_spans()) == 0
+
+
+class TestDebugLogLevel:
+    def test_values(self):
+        assert DebugLogLevel.TRACE == "trace"
+        assert DebugLogLevel.ERROR == "error"
+
+
+class TestDebugLogger:
+    def test_log_and_get(self):
+        log = DebugLogger()
+        entry = log.log(DebugLogLevel.INFO, "test", {"k": "v"})
+        assert entry is not None
+        assert entry.message == "test"
+
+    def test_level_filtering(self):
+        log = DebugLogger(level=DebugLogLevel.WARN)
+        assert log.log(DebugLogLevel.DEBUG, "skip") is None
+        assert log.log(DebugLogLevel.ERROR, "keep") is not None
+
+    def test_get_entries(self):
+        log = DebugLogger()
+        log.log(DebugLogLevel.INFO, "a")
+        log.log(DebugLogLevel.ERROR, "b")
+        assert len(log.get_entries()) == 2
+        assert len(log.get_entries(level=DebugLogLevel.ERROR)) == 1
+
+    def test_export_clear(self):
+        log = DebugLogger()
+        log.log(DebugLogLevel.INFO, "test")
         json_str = log.export_json()
-        data = json.loads(json_str)
-        assert isinstance(data, list)
-        assert len(data) == 1
-        assert data[0]["method"] == "GET"
+        assert len(json.loads(json_str)) == 1
+        assert log.clear() == 1
 
-    def test_export_json_with_limit(self):
-        log = AuditLog()
-        for i in range(10):
-            log.log(AuditEntry(method="GET", path=f"/api/{i}"))
-        json_str = log.export_json(limit=3)
-        data = json.loads(json_str)
-        assert len(data) == 3
+    def test_stats(self):
+        log = DebugLogger(level=DebugLogLevel.WARN)
+        log.log(DebugLogLevel.INFO, "filtered")
+        log.log(DebugLogLevel.ERROR, "kept")
+        stats = log.get_stats()
+        assert stats["total_logged"] == 1
+        assert stats["total_filtered"] == 1
 
-    def test_export_csv(self):
-        log = AuditLog()
-        log.log(AuditEntry(method="GET", path="/api/test", platform="TAOBAO"))
-        csv_str = log.export_csv()
-        assert "method" in csv_str
-        assert "GET" in csv_str
 
-    def test_export_csv_empty(self):
-        log = AuditLog()
-        assert log.export_csv() == ""
+class TestDebugBreakpoint:
+    def test_evaluate_no_condition(self):
+        bp = DebugBreakpoint(enabled=True)
+        assert bp.evaluate() is True
 
-    def test_export_to_file_json(self, tmp_path):
-        log = AuditLog()
-        log.log(AuditEntry(method="GET", path="/api/test"))
-        file_path = str(tmp_path / "audit.json")
-        result = log.export_to_file(file_path, format="json")
-        assert result == file_path
-        with open(file_path) as f:
-            data = json.loads(f.read())
-        assert len(data) == 1
+    def test_evaluate_disabled(self):
+        bp = DebugBreakpoint(enabled=False)
+        assert bp.evaluate() is False
 
-    def test_export_to_file_csv(self, tmp_path):
-        log = AuditLog()
-        log.log(AuditEntry(method="GET", path="/api/test"))
-        file_path = str(tmp_path / "audit.csv")
-        result = log.export_to_file(file_path, format="csv")
-        assert result == file_path
-        with open(file_path) as f:
-            content = f.read()
-        assert "GET" in content
+    def test_evaluate_condition(self):
+        bp = DebugBreakpoint(condition=lambda status_code, **kw: status_code >= 400)
+        assert bp.evaluate(status_code=500) is True
+        assert bp.evaluate(status_code=200) is False
 
-    def test_export_to_file_invalid_format(self, tmp_path):
-        log = AuditLog()
-        with pytest.raises(ValueError, match="Unsupported export format"):
-            log.export_to_file(str(tmp_path / "out.xml"), format="xml")
+
+class TestDebugBreakpointManager:
+    def test_add_remove(self):
+        mgr = DebugBreakpointManager()
+        bp = mgr.add_breakpoint(name="test")
+        assert len(mgr.list_breakpoints()) == 1
+        assert mgr.remove_breakpoint(bp.breakpoint_id) is True
+        assert len(mgr.list_breakpoints()) == 0
+
+    def test_should_break(self):
+        mgr = DebugBreakpointManager()
+        mgr.add_breakpoint(name="errors", condition=lambda status_code, **kw: status_code >= 400)
+        assert mgr.should_break(status_code=500) is not None
+        assert mgr.should_break(status_code=200) is None
+
+    def test_hit_count_and_history(self):
+        mgr = DebugBreakpointManager()
+        mgr.add_breakpoint(name="test")
+        mgr.should_break(method="GET")
+        mgr.should_break(method="POST")
+        assert mgr.list_breakpoints()[0].hit_count == 2
+        assert len(mgr.get_hit_history()) == 2
 
     def test_clear(self):
-        log = AuditLog()
-        log.log(AuditEntry(method="GET", path="/a"))
-        log.log(AuditEntry(method="GET", path="/b"))
-        count = log.clear()
-        assert count == 2
-        assert log.entry_count == 0
+        mgr = DebugBreakpointManager()
+        mgr.add_breakpoint(name="test")
+        mgr.should_break()
+        mgr.clear()
+        assert len(mgr.list_breakpoints()) == 0
 
-
-# ── CommerceMCPBase Encryption Integration ──────────────────
-
-
-class TestCommerceMCPBaseEncryption:
-    """Integration tests for encryption in CommerceMCPBase."""
-
-    def test_default_no_encryption(self):
-        client = CommerceMCPBase(app_key="k", app_secret="s")
-        assert client._encryptor.config.method == EncryptionMethod.NONE
-
-    def test_custom_encryption_config(self):
-        cfg = EncryptionConfig(
-            method=EncryptionMethod.XOR_CIPHER,
-            encryption_key="aabb",
-        )
-        client = CommerceMCPBase(app_key="k", app_secret="s", encryption_config=cfg)
-        assert client._encryptor.config.method == EncryptionMethod.XOR_CIPHER
-
-    def test_get_encryption_stats(self):
-        client = CommerceMCPBase(app_key="k", app_secret="s")
-        stats = client.get_encryption_stats()
-        assert "method" in stats
-        assert stats["method"] == "none"
-
-    def test_get_encryption_config(self):
-        client = CommerceMCPBase(app_key="k", app_secret="s")
-        cfg = client.get_encryption_config()
-        assert cfg["method"] == "none"
-
-    @pytest.mark.asyncio
-    async def test_xor_encrypted_post_request(self):
-        """POST request with XOR encryption should encrypt body and add header."""
-        cfg = EncryptionConfig(
-            method=EncryptionMethod.XOR_CIPHER,
-            encryption_key="abcdef01",
-        )
-        client = CommerceMCPBase(app_key="k", app_secret="s", encryption_config=cfg)
-
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"result": "ok"}
-        mock_response.status_code = 200
-        mock_response.headers = {}
-
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.is_closed = False
-
-        with patch.object(client, "_ensure_client", return_value=mock_client):
-            result = await client._request("POST", "/api/test", data={"key": "value"})
-
-        assert result == {"result": "ok"}
-        # Verify post was called (encryption happened)
-        mock_client.post.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_encrypted_request_logged_in_audit(self):
-        """Encrypted requests should be logged with encrypted=True."""
-        cfg = EncryptionConfig(
-            method=EncryptionMethod.XOR_CIPHER,
-            encryption_key="ab",
-        )
-        client = CommerceMCPBase(app_key="k", app_secret="s", encryption_config=cfg)
-
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"ok": True}
-        mock_response.status_code = 200
-        mock_response.headers = {}
-
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.is_closed = False
-
-        with patch.object(client, "_ensure_client", return_value=mock_client):
-            await client._request("POST", "/api/test", data={"a": 1})
-
-        entries = client.query_audit(limit=10)
-        assert len(entries) == 1
-        assert entries[0]["encrypted"] is True
-
-
-# ── CommerceMCPBase Audit Integration ───────────────────────
-
-
-class TestCommerceMCPBaseAudit:
-    """Integration tests for audit logging in CommerceMCPBase."""
-
-    def test_default_audit_log(self):
-        client = CommerceMCPBase(app_key="k", app_secret="s")
-        assert isinstance(client._audit_log, AuditLog)
-
-    def test_custom_audit_max_entries(self):
-        client = CommerceMCPBase(app_key="k", app_secret="s", audit_max_entries=1000)
-        assert client._audit_log._max_entries == 1000
-
-    @pytest.mark.asyncio
-    async def test_request_logged_in_audit(self):
-        """Successful requests should be logged."""
-        client = CommerceMCPBase(app_key="k", app_secret="s")
-
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"result": "ok"}
-        mock_response.status_code = 200
-        mock_response.headers = {}
-
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-        mock_client.is_closed = False
-
-        with patch.object(client, "_ensure_client", return_value=mock_client):
-            await client._request("GET", "/api/products")
-
-        stats = client.get_audit_stats()
-        assert stats["total_entries"] == 1
-
-    @pytest.mark.asyncio
-    async def test_failed_request_logged_with_error(self):
-        """Failed requests should include error message."""
-        client = CommerceMCPBase(app_key="k", app_secret="s")
-
-        mock_client = AsyncMock()
-        mock_client.get.side_effect = httpx.ConnectError("Connection refused")
-        mock_client.is_closed = False
-
-        with patch.object(client, "_ensure_client", return_value=mock_client):
-            with pytest.raises(httpx.ConnectError):
-                await client._request("GET", "/api/test")
-
-        entries = client.query_audit(errors_only=True)
-        assert len(entries) == 1
-        assert "Connection refused" in entries[0]["error"]
-
-    @pytest.mark.asyncio
-    async def test_audit_records_platform(self):
-        """Audit entries should include the platform name."""
-        client = CommerceMCPBase(app_key="k", app_secret="s")
-
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"ok": 1}
-        mock_response.status_code = 200
-        mock_response.headers = {}
-
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-        mock_client.is_closed = False
-
-        with patch.object(client, "_ensure_client", return_value=mock_client):
-            await client._request("GET", "/api/test")
-
-        entries = client.query_audit()
-        assert entries[0]["platform"] == "COMMERCEMCPBASE"
-
-    def test_query_audit_convenience(self):
-        client = CommerceMCPBase(app_key="k", app_secret="s")
-        # Should not raise
-        results = client.query_audit(limit=10)
-        assert isinstance(results, list)
-
-    def test_export_audit_json(self):
-        client = CommerceMCPBase(app_key="k", app_secret="s")
-        json_str = client.export_audit_json()
-        assert json.loads(json_str) == []
-
-    def test_export_audit_csv(self):
-        client = CommerceMCPBase(app_key="k", app_secret="s")
-        csv_str = client.export_audit_csv()
-        assert csv_str == ""
-
-    def test_get_audit_log(self):
-        client = CommerceMCPBase(app_key="k", app_secret="s")
-        log = client.get_audit_log()
-        assert isinstance(log, AuditLog)
-
-
-# ── CommerceMCPBase Encryption + Audit Combined ─────────────
-
-
-class TestCommerceMCPBaseEncryptionAuditCombined:
-    """Tests for combined encryption and audit features."""
-
-    def test_all_new_features_initialized(self):
-        """Client should have encryptor and audit log."""
-        client = CommerceMCPBase()
-        assert isinstance(client._encryptor, RequestEncryptor)
-        assert isinstance(client._audit_log, AuditLog)
-
-    def test_custom_configs_combined(self):
-        """All custom configs should be accepted together."""
-        enc_cfg = EncryptionConfig(
-            method=EncryptionMethod.XOR_CIPHER,
-            encryption_key="aabb",
-        )
-        client = CommerceMCPBase(
-            app_key="k",
-            app_secret="s",
-            encryption_config=enc_cfg,
-            audit_max_entries=5000,
-        )
-        assert client._encryptor.config.method == EncryptionMethod.XOR_CIPHER
-        assert client._audit_log._max_entries == 5000
-
-    @pytest.mark.asyncio
-    async def test_encrypted_request_appears_in_audit_export(self):
-        """Encrypted request should appear in JSON export."""
-        cfg = EncryptionConfig(
-            method=EncryptionMethod.XOR_CIPHER,
-            encryption_key="abcd",
-        )
-        client = CommerceMCPBase(app_key="k", app_secret="s", encryption_config=cfg)
-
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"ok": 1}
-        mock_response.status_code = 200
-        mock_response.headers = {}
-
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.is_closed = False
-
-        with patch.object(client, "_ensure_client", return_value=mock_client):
-            await client._request("POST", "/api/order", data={"item": "test"})
-
-        json_str = client.export_audit_json()
-        entries = json.loads(json_str)
-        assert len(entries) == 1
-        assert entries[0]["encrypted"] is True
-        assert entries[0]["method"] == "POST"
+    def test_stats(self):
+        mgr = DebugBreakpointManager()
+        mgr.add_breakpoint(name="test")
+        mgr.should_break()
+        stats = mgr.get_stats()
+        assert stats["total_checks"] == 1
+        assert stats["total_hits"] == 1

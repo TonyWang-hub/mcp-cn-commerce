@@ -9,12 +9,10 @@ from __future__ import annotations
 import json
 import threading
 import time
-from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
-
 
 # ── Cache Statistics ───────────────────────────────────────
 
@@ -441,10 +439,7 @@ class MonitoringDashboard:
         # Response time distribution
         distribution = self.response_times.get_distribution()
         snapshot["response_times"] = {
-            "distribution": [
-                {"label": b.label, "count": b.count}
-                for b in distribution
-            ],
+            "distribution": [{"label": b.label, "count": b.count} for b in distribution],
             "total_samples": sum(b.count for b in distribution),
         }
 

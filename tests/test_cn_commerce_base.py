@@ -2384,10 +2384,13 @@ class TestVersionedEndpoint:
 
     def test_add_version(self):
         ep = VersionedEndpoint(path="/orders")
+
         def handler_v1():
             return "v1"
+
         def handler_v2():
             return "v2"
+
         ep.add_version(APIVersion(1), handler_v1)
         ep.add_version(APIVersion(2), handler_v2)
         assert len(ep.handlers) == 2
@@ -2395,18 +2398,23 @@ class TestVersionedEndpoint:
 
     def test_get_handler(self):
         ep = VersionedEndpoint(path="/orders")
+
         def handler():
             return "v1"
+
         ep.add_version(APIVersion(1), handler)
         assert ep.get_handler(APIVersion(1)) is handler
         assert ep.get_handler(APIVersion(2)) is None
 
     def test_get_best_match_exact(self):
         ep = VersionedEndpoint(path="/orders")
+
         def h1():
             return "v1"
+
         def h2():
             return "v2"
+
         ep.add_version(APIVersion(1), h1)
         ep.add_version(APIVersion(2), h2)
         result = ep.get_best_match(APIVersion(2))
@@ -2416,8 +2424,10 @@ class TestVersionedEndpoint:
 
     def test_get_best_match_downgrade(self):
         ep = VersionedEndpoint(path="/orders")
+
         def h1():
             return "v1"
+
         ep.add_version(APIVersion(1), h1)
         # Request v1.5 but only v1.0 exists => should downgrade to v1.0
         result = ep.get_best_match(APIVersion(1, 5))
@@ -2426,8 +2436,10 @@ class TestVersionedEndpoint:
 
     def test_get_best_match_incompatible(self):
         ep = VersionedEndpoint(path="/orders")
+
         def h1():
             return "v1"
+
         ep.add_version(APIVersion(1), h1)
         # Request v3 (different major) => no match
         result = ep.get_best_match(APIVersion(3))

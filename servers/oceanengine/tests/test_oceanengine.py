@@ -81,27 +81,27 @@ class TestSafeIntList:
     """Tests for the _safe_int_list helper."""
 
     def test_normal_comma_separated(self):
-        from mcp_oceanengine.server import _safe_int_list
+        from servers.oceanengine.server import _safe_int_list
 
         assert _safe_int_list("123,456,789") == [123, 456, 789]
 
     def test_single_value(self):
-        from mcp_oceanengine.server import _safe_int_list
+        from servers.oceanengine.server import _safe_int_list
 
         assert _safe_int_list("42") == [42]
 
     def test_empty_string(self):
-        from mcp_oceanengine.server import _safe_int_list
+        from servers.oceanengine.server import _safe_int_list
 
         assert _safe_int_list("") == []
 
     def test_with_spaces(self):
-        from mcp_oceanengine.server import _safe_int_list
+        from servers.oceanengine.server import _safe_int_list
 
         assert _safe_int_list(" 123 , 456 ") == [123, 456]
 
     def test_trailing_comma(self):
-        from mcp_oceanengine.server import _safe_int_list
+        from servers.oceanengine.server import _safe_int_list
 
         assert _safe_int_list("123,") == [123]
 
@@ -152,7 +152,7 @@ class TestGetAdvertiserInfo:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_advertiser_info
+            from servers.oceanengine.server import get_advertiser_info
 
             result = await get_advertiser_info(advertiser_ids="123456,789012")
 
@@ -169,7 +169,7 @@ class TestGetAdvertiserInfo:
         mock_request.side_effect = CommerceAPIError(40001, "advertiser_ids is required")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_advertiser_info
+            from servers.oceanengine.server import get_advertiser_info
 
             result = await get_advertiser_info(advertiser_ids="")
 
@@ -184,7 +184,7 @@ class TestGetAdvertiserInfo:
         mock_request.side_effect = CommerceAPIError(50001, "Internal server error")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_advertiser_info
+            from servers.oceanengine.server import get_advertiser_info
 
             result = await get_advertiser_info(advertiser_ids="123")
 
@@ -219,7 +219,7 @@ class TestGetCampaignReport:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_campaign_report
+            from servers.oceanengine.server import get_campaign_report
 
             result = await get_campaign_report(
                 advertiser_id="123456",
@@ -244,7 +244,7 @@ class TestGetCampaignReport:
         mock_request.return_value = {"code": 0, "data": {"list": []}}
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_campaign_report
+            from servers.oceanengine.server import get_campaign_report
 
             await get_campaign_report(
                 advertiser_id="123",
@@ -263,7 +263,7 @@ class TestGetCampaignReport:
         mock_request.side_effect = CommerceAPIError(40100, "Advertiser not found")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_campaign_report
+            from servers.oceanengine.server import get_campaign_report
 
             result = await get_campaign_report(
                 advertiser_id="999",
@@ -309,7 +309,7 @@ class TestGetAdDetailReport:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_ad_detail_report
+            from servers.oceanengine.server import get_ad_detail_report
 
             result = await get_ad_detail_report(
                 advertiser_id="123456",
@@ -328,7 +328,7 @@ class TestGetAdDetailReport:
         mock_request.return_value = {"code": 0, "data": {"list": []}}
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_ad_detail_report
+            from servers.oceanengine.server import get_ad_detail_report
 
             await get_ad_detail_report(
                 advertiser_id="123",
@@ -346,7 +346,7 @@ class TestGetAdDetailReport:
         mock_request.side_effect = CommerceAPIError(40100, "Date range too wide")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_ad_detail_report
+            from servers.oceanengine.server import get_ad_detail_report
 
             result = await get_ad_detail_report(
                 advertiser_id="123",
@@ -386,7 +386,7 @@ class TestListCampaigns:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_campaigns
+            from servers.oceanengine.server import list_campaigns
 
             result = await list_campaigns(advertiser_id="123")
 
@@ -415,7 +415,7 @@ class TestListCampaigns:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_campaigns
+            from servers.oceanengine.server import list_campaigns
 
             filtering = '{"status": "CAMPAIGN_STATUS_ENABLE"}'
             await list_campaigns(advertiser_id="123", filtering=filtering)
@@ -430,7 +430,7 @@ class TestListCampaigns:
         """Malformed filtering JSON is caught (JSONDecodeError) and returned
         as a structured error string — no exception propagates."""
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_campaigns
+            from servers.oceanengine.server import list_campaigns
 
             result = await list_campaigns(advertiser_id="123", filtering='{"status": BROKEN')
 
@@ -447,7 +447,7 @@ class TestListCampaigns:
         mock_request.return_value = {"code": 0, "data": {"list": []}}
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_campaigns
+            from servers.oceanengine.server import list_campaigns
 
             await list_campaigns(advertiser_id="123", page_size=999)
 
@@ -460,7 +460,7 @@ class TestListCampaigns:
         mock_request.return_value = {"code": 0, "data": {"list": []}}
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_campaigns
+            from servers.oceanengine.server import list_campaigns
 
             await list_campaigns(advertiser_id="123", filtering="")
 
@@ -473,7 +473,7 @@ class TestListCampaigns:
         mock_request.side_effect = CommerceAPIError(40001, "Invalid advertiser_id")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_campaigns
+            from servers.oceanengine.server import list_campaigns
 
             result = await list_campaigns(advertiser_id="0")
 
@@ -501,7 +501,7 @@ class TestGetAccountBalance:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_account_balance
+            from servers.oceanengine.server import get_account_balance
 
             result = await get_account_balance(advertiser_id="123")
 
@@ -518,7 +518,7 @@ class TestGetAccountBalance:
         mock_request.side_effect = CommerceAPIError(40100, "Account not found")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_account_balance
+            from servers.oceanengine.server import get_account_balance
 
             result = await get_account_balance(advertiser_id="999999")
 
@@ -557,7 +557,7 @@ class TestGetQianchuanReport:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_qianchuan_report
+            from servers.oceanengine.server import get_qianchuan_report
 
             result = await get_qianchuan_report(
                 advertiser_id="123",
@@ -578,7 +578,7 @@ class TestGetQianchuanReport:
         mock_request.return_value = {"code": 0, "data": {"list": []}}
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_qianchuan_report
+            from servers.oceanengine.server import get_qianchuan_report
 
             await get_qianchuan_report(
                 advertiser_id="123",
@@ -596,7 +596,7 @@ class TestGetQianchuanReport:
         mock_request.side_effect = CommerceAPIError(40100, "Qianchuan report not available")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_qianchuan_report
+            from servers.oceanengine.server import get_qianchuan_report
 
             result = await get_qianchuan_report(
                 advertiser_id="123",
@@ -638,7 +638,7 @@ class TestGetQianchuanCampaignList:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_qianchuan_campaign_list
+            from servers.oceanengine.server import get_qianchuan_campaign_list
 
             result = await get_qianchuan_campaign_list(advertiser_id="123")
 
@@ -653,7 +653,7 @@ class TestGetQianchuanCampaignList:
         mock_request.return_value = {"code": 0, "data": {"list": []}}
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_qianchuan_campaign_list
+            from servers.oceanengine.server import get_qianchuan_campaign_list
 
             await get_qianchuan_campaign_list(advertiser_id="123", page_size=999)
 
@@ -666,7 +666,7 @@ class TestGetQianchuanCampaignList:
         mock_request.side_effect = CommerceAPIError(40100, "Advertiser not authorized for Qianchuan")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_qianchuan_campaign_list
+            from servers.oceanengine.server import get_qianchuan_campaign_list
 
             result = await get_qianchuan_campaign_list(advertiser_id="999")
 
@@ -704,7 +704,7 @@ class TestGetStarReport:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_star_report
+            from servers.oceanengine.server import get_star_report
 
             result = await get_star_report(
                 advertiser_id="123",
@@ -725,7 +725,7 @@ class TestGetStarReport:
         mock_request.return_value = {"code": 0, "data": {"list": []}}
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_star_report
+            from servers.oceanengine.server import get_star_report
 
             await get_star_report(
                 advertiser_id="123",
@@ -743,7 +743,7 @@ class TestGetStarReport:
         mock_request.side_effect = CommerceAPIError(40100, "Star report unavailable")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_star_report
+            from servers.oceanengine.server import get_star_report
 
             result = await get_star_report(
                 advertiser_id="123",
@@ -787,7 +787,7 @@ class TestListStarTasks:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_star_tasks
+            from servers.oceanengine.server import list_star_tasks
 
             result = await list_star_tasks(advertiser_id="123")
 
@@ -813,7 +813,7 @@ class TestListStarTasks:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_star_tasks
+            from servers.oceanengine.server import list_star_tasks
 
             await list_star_tasks(advertiser_id="123", status="COMPLETED")
 
@@ -826,7 +826,7 @@ class TestListStarTasks:
         mock_request.return_value = {"code": 0, "data": {"list": []}}
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_star_tasks
+            from servers.oceanengine.server import list_star_tasks
 
             await list_star_tasks(advertiser_id="123", status="")
 
@@ -839,7 +839,7 @@ class TestListStarTasks:
         mock_request.return_value = {"code": 0, "data": {"list": []}}
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_star_tasks
+            from servers.oceanengine.server import list_star_tasks
 
             await list_star_tasks(advertiser_id="123", page_size=999)
 
@@ -852,7 +852,7 @@ class TestListStarTasks:
         mock_request.side_effect = CommerceAPIError(40100, "Star tasks not found")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_star_tasks
+            from servers.oceanengine.server import list_star_tasks
 
             result = await list_star_tasks(advertiser_id="999")
 
@@ -888,7 +888,7 @@ class TestGetCampaignDetail:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_campaign_detail
+            from servers.oceanengine.server import get_campaign_detail
 
             result = await get_campaign_detail(advertiser_id="123", campaign_id="1001")
 
@@ -904,7 +904,7 @@ class TestGetCampaignDetail:
         mock_request.side_effect = CommerceAPIError(40100, "Campaign not found")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_campaign_detail
+            from servers.oceanengine.server import get_campaign_detail
 
             result = await get_campaign_detail(advertiser_id="123", campaign_id="99999")
 
@@ -942,7 +942,7 @@ class TestListAds:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_ads
+            from servers.oceanengine.server import list_ads
 
             result = await list_ads(advertiser_id="123")
 
@@ -969,7 +969,7 @@ class TestListAds:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_ads
+            from servers.oceanengine.server import list_ads
 
             await list_ads(advertiser_id="123", campaign_id="2001")
 
@@ -982,7 +982,7 @@ class TestListAds:
         mock_request.return_value = {"code": 0, "data": {"list": []}}
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_ads
+            from servers.oceanengine.server import list_ads
 
             await list_ads(advertiser_id="123", campaign_id="")
 
@@ -995,7 +995,7 @@ class TestListAds:
         mock_request.return_value = {"code": 0, "data": {"list": []}}
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_ads
+            from servers.oceanengine.server import list_ads
 
             await list_ads(advertiser_id="123", page_size=500)
 
@@ -1008,7 +1008,7 @@ class TestListAds:
         mock_request.side_effect = CommerceAPIError(40100, "Ads not found")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_ads
+            from servers.oceanengine.server import list_ads
 
             result = await list_ads(advertiser_id="999")
 
@@ -1045,7 +1045,7 @@ class TestGetAdDetail:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_ad_detail
+            from servers.oceanengine.server import get_ad_detail
 
             result = await get_ad_detail(advertiser_id="123", ad_id="50001")
 
@@ -1062,7 +1062,7 @@ class TestGetAdDetail:
         mock_request.side_effect = CommerceAPIError(40100, "Ad not found")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_ad_detail
+            from servers.oceanengine.server import get_ad_detail
 
             result = await get_ad_detail(advertiser_id="123", ad_id="99999")
 
@@ -1100,7 +1100,7 @@ class TestGetCreativeReport:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_creative_report
+            from servers.oceanengine.server import get_creative_report
 
             result = await get_creative_report(
                 advertiser_id="123",
@@ -1121,7 +1121,7 @@ class TestGetCreativeReport:
         mock_request.return_value = {"code": 0, "data": {"list": []}}
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_creative_report
+            from servers.oceanengine.server import get_creative_report
 
             await get_creative_report(
                 advertiser_id="123",
@@ -1139,7 +1139,7 @@ class TestGetCreativeReport:
         mock_request.side_effect = CommerceAPIError(40100, "Creative report unavailable")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_creative_report
+            from servers.oceanengine.server import get_creative_report
 
             result = await get_creative_report(
                 advertiser_id="123",
@@ -1184,7 +1184,7 @@ class TestListMaterials:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_materials
+            from servers.oceanengine.server import list_materials
 
             result = await list_materials(advertiser_id="123")
 
@@ -1210,7 +1210,7 @@ class TestListMaterials:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_materials
+            from servers.oceanengine.server import list_materials
 
             await list_materials(advertiser_id="123", material_type="VIDEO")
 
@@ -1223,7 +1223,7 @@ class TestListMaterials:
         mock_request.return_value = {"code": 0, "data": {"list": []}}
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_materials
+            from servers.oceanengine.server import list_materials
 
             await list_materials(advertiser_id="123", material_type="")
 
@@ -1236,7 +1236,7 @@ class TestListMaterials:
         mock_request.return_value = {"code": 0, "data": {"list": []}}
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_materials
+            from servers.oceanengine.server import list_materials
 
             await list_materials(advertiser_id="123", page_size=500)
 
@@ -1249,7 +1249,7 @@ class TestListMaterials:
         mock_request.side_effect = CommerceAPIError(40100, "Material library access denied")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_materials
+            from servers.oceanengine.server import list_materials
 
             result = await list_materials(advertiser_id="999")
 
@@ -1292,7 +1292,7 @@ class TestListAudiencePackages:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_audience_packages
+            from servers.oceanengine.server import list_audience_packages
 
             result = await list_audience_packages(advertiser_id="123")
 
@@ -1308,7 +1308,7 @@ class TestListAudiencePackages:
         mock_request.return_value = {"code": 0, "data": {"list": []}}
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_audience_packages
+            from servers.oceanengine.server import list_audience_packages
 
             await list_audience_packages(advertiser_id="123", page_size=999)
 
@@ -1321,7 +1321,7 @@ class TestListAudiencePackages:
         mock_request.side_effect = CommerceAPIError(40100, "DMP access not authorized")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import list_audience_packages
+            from servers.oceanengine.server import list_audience_packages
 
             result = await list_audience_packages(advertiser_id="999")
 
@@ -1361,7 +1361,7 @@ class TestGetAudienceReport:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_audience_report
+            from servers.oceanengine.server import get_audience_report
 
             result = await get_audience_report(
                 advertiser_id="123",
@@ -1382,7 +1382,7 @@ class TestGetAudienceReport:
         mock_request.return_value = {"code": 0, "data": {"list": []}}
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_audience_report
+            from servers.oceanengine.server import get_audience_report
 
             await get_audience_report(
                 advertiser_id="123",
@@ -1400,7 +1400,7 @@ class TestGetAudienceReport:
         mock_request.side_effect = CommerceAPIError(40100, "Audience report not available")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_audience_report
+            from servers.oceanengine.server import get_audience_report
 
             result = await get_audience_report(
                 advertiser_id="123",
@@ -1437,7 +1437,7 @@ class TestGetBidSuggestion:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_bid_suggestion
+            from servers.oceanengine.server import get_bid_suggestion
 
             result = await get_bid_suggestion(advertiser_id="123", campaign_id="1001")
 
@@ -1455,7 +1455,7 @@ class TestGetBidSuggestion:
         mock_request.side_effect = CommerceAPIError(40100, "Campaign has no delivery data for bid suggestion")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_bid_suggestion
+            from servers.oceanengine.server import get_bid_suggestion
 
             result = await get_bid_suggestion(advertiser_id="123", campaign_id="99999")
 
@@ -1495,7 +1495,7 @@ class TestGetDiagnosis:
         }
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_diagnosis
+            from servers.oceanengine.server import get_diagnosis
 
             result = await get_diagnosis(advertiser_id="123", campaign_id="1001")
 
@@ -1512,7 +1512,7 @@ class TestGetDiagnosis:
         mock_request.side_effect = CommerceAPIError(40100, "Diagnosis not available for this campaign")
 
         with _patch_get_client(mock_client):
-            from mcp_oceanengine.server import get_diagnosis
+            from servers.oceanengine.server import get_diagnosis
 
             result = await get_diagnosis(advertiser_id="123", campaign_id="99999")
 

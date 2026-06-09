@@ -50,7 +50,7 @@ class TestServerRegistry:
     """Tests for the server registry."""
 
     def test_all_eight_platforms_registered(self):
-        expected = {"oceanengine", "doudian", "jd", "taobao", "pinduoduo", "kuaishou", "xiaohongshu", "weixin-store"}
+        expected = {"oceanengine", "doudian", "jd", "taobao", "pinduoduo", "kuaishou", "xiaohongshu", "weixin_store"}
         assert set(SERVER_REGISTRY.keys()) == expected
 
     def test_each_entry_has_required_keys(self):
@@ -61,7 +61,7 @@ class TestServerRegistry:
 
     def test_modules_follow_naming_convention(self):
         for name, info in SERVER_REGISTRY.items():
-            assert info["module"].startswith("mcp_"), f"{name} module should start with 'mcp_'"
+            assert info["module"].startswith("servers."), f"{name} module should start with 'servers.'"
             assert info["module"].endswith(".server"), f"{name} module should end with '.server'"
 
 
@@ -76,10 +76,10 @@ class TestGetSrcPath:
         assert p.name == "src"
         assert "oceanengine" in str(p)
 
-    def test_all_platforms_have_src_dir(self):
+    def test_all_platforms_have_server_file(self):
         for platform in SERVER_REGISTRY:
-            p = get_src_path(platform)
-            assert p.is_dir(), f"src dir not found for {platform}: {p}"
+            p = get_src_path(platform).parent / "server.py"
+            assert p.is_file(), f"server.py not found for {platform}: {p}"
 
 
 class TestBuildPythonpath:
@@ -89,14 +89,13 @@ class TestBuildPythonpath:
         pp = build_pythonpath(["oceanengine"])
         assert "shared" in pp
 
-    def test_includes_platform_src(self):
+    def test_includes_shared_dir(self):
         pp = build_pythonpath(["oceanengine"])
-        assert "oceanengine" in pp
+        assert "shared" in pp
 
     def test_multiple_platforms(self):
         pp = build_pythonpath(["oceanengine", "jd"])
-        assert "oceanengine" in pp
-        assert "jd" in pp
+        assert "shared" in pp
 
     def test_empty_platforms_still_includes_shared(self):
         pp = build_pythonpath([])

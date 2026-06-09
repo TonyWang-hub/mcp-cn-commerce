@@ -73,7 +73,7 @@ class TestOceanEngineFullRequestFlow:
     @pytest.fixture
     def oe_client(self):
         """Create a real OceanEngine instance (no env vars needed, all mocked)."""
-        from mcp_oceanengine.server import OceanEngine
+        from servers.oceanengine.server import OceanEngine
 
         return OceanEngine(app_key="test_key", app_secret="test_secret", access_token="tok")
 
@@ -91,9 +91,9 @@ class TestOceanEngineFullRequestFlow:
         mock_http.get.return_value = mock_response
         mock_http.is_closed = False
 
-        from mcp_oceanengine.server import get_advertiser_info
+        from servers.oceanengine.server import get_advertiser_info
 
-        with patch("mcp_oceanengine.server._get_client", return_value=oe_client):
+        with patch("servers.oceanengine.server._get_client", return_value=oe_client):
             with patch.object(oe_client, "_ensure_client", return_value=mock_http):
                 result = await get_advertiser_info(advertiser_ids="123")
 
@@ -112,9 +112,9 @@ class TestOceanEngineFullRequestFlow:
         mock_http.get.return_value = mock_response
         mock_http.is_closed = False
 
-        from mcp_oceanengine.server import get_campaign_report
+        from servers.oceanengine.server import get_campaign_report
 
-        with patch("mcp_oceanengine.server._get_client", return_value=oe_client):
+        with patch("servers.oceanengine.server._get_client", return_value=oe_client):
             with patch.object(oe_client, "_ensure_client", return_value=mock_http):
                 await get_campaign_report(
                     advertiser_id="456",
@@ -142,9 +142,9 @@ class TestOceanEngineFullRequestFlow:
         mock_http.get.return_value = mock_response
         mock_http.is_closed = False
 
-        from mcp_oceanengine.server import get_advertiser_info
+        from servers.oceanengine.server import get_advertiser_info
 
-        with patch("mcp_oceanengine.server._get_client", return_value=oe_client):
+        with patch("servers.oceanengine.server._get_client", return_value=oe_client):
             with patch.object(oe_client, "_ensure_client", return_value=mock_http):
                 result = await get_advertiser_info(advertiser_ids="999")
 
@@ -158,7 +158,7 @@ class TestJDFlow:
 
     @pytest.fixture
     def jd_client(self):
-        from mcp_jd.server import JDMCP
+        from servers.jd.server import JDMCP
 
         return JDMCP(app_key="jd_key", app_secret="jd_secret", access_token="jd_tok")
 
@@ -180,9 +180,9 @@ class TestJDFlow:
         mock_http.post.return_value = mock_response
         mock_http.is_closed = False
 
-        with patch("mcp_jd.server.jd", jd_client):
+        with patch("servers.jd.server.jd", jd_client):
             with patch.object(jd_client, "_ensure_client", return_value=mock_http):
-                from mcp_jd.server import get_order_list
+                from servers.jd.server import get_order_list
 
                 result = await get_order_list(
                     start_time="2024-01-01 00:00:00",
@@ -206,7 +206,7 @@ class TestTaobaoFlow:
 
     @pytest.fixture
     def taobao_client(self):
-        from mcp_taobao.server import TaobaoMCP
+        from servers.taobao.server import TaobaoMCP
 
         return TaobaoMCP(app_key="tb_key", app_secret="tb_secret", access_token="tb_tok")
 
@@ -221,9 +221,9 @@ class TestTaobaoFlow:
         mock_http.post.return_value = mock_response
         mock_http.is_closed = False
 
-        with patch("mcp_taobao.server.taobao", taobao_client):
+        with patch("servers.taobao.server.taobao", taobao_client):
             with patch.object(taobao_client, "_ensure_client", return_value=mock_http):
-                from mcp_taobao.server import get_order_list
+                from servers.taobao.server import get_order_list
 
                 result = await get_order_list(
                     start_time="2024-01-01 00:00:00",
@@ -675,11 +675,11 @@ class TestConfigLoadingIntegration:
         result = load_config(None)
         assert isinstance(result, dict)
 
-    def test_all_platforms_have_src_dir(self):
-        """Every registered platform has a corresponding src/ directory."""
+    def test_all_platforms_have_server_file(self):
+        """Every registered platform has a corresponding server.py file."""
         for platform in SERVER_REGISTRY:
-            src_path = _REPO_ROOT / "servers" / platform / "src"
-            assert src_path.is_dir(), f"Missing src dir for {platform}: {src_path}"
+            server_path = _REPO_ROOT / "servers" / platform / "server.py"
+            assert server_path.is_file(), f"Missing server.py for {platform}: {server_path}"
 
     def test_all_platforms_have_tests_dir(self):
         """Every registered platform has a corresponding tests/ directory."""
@@ -692,16 +692,15 @@ class TestConfigLoadingIntegration:
         pp = build_pythonpath(["oceanengine", "jd"])
         assert "shared" in pp
 
-    def test_build_pythonpath_includes_all_platform_srcs(self):
-        """build_pythonpath includes src dirs for all requested platforms."""
+    def test_build_pythonpath_includes_shared_and_repo(self):
+        """build_pythonpath includes shared dir and repo root."""
         pp = build_pythonpath(["oceanengine", "jd", "taobao"])
-        assert "oceanengine" in pp
-        assert "jd" in pp
-        assert "taobao" in pp
+        assert "shared" in pp
+        assert "mcp-cn-commerce" in pp
 
     def test_server_registry_has_all_eight_platforms(self):
         """SERVER_REGISTRY contains exactly the 8 expected platforms."""
-        expected = {"oceanengine", "doudian", "jd", "taobao", "pinduoduo", "kuaishou", "xiaohongshu", "weixin-store"}
+        expected = {"oceanengine", "doudian", "jd", "taobao", "pinduoduo", "kuaishou", "xiaohongshu", "weixin_store"}
         assert set(SERVER_REGISTRY.keys()) == expected
 
     def test_server_registry_env_prefix_consistency(self):
@@ -749,9 +748,9 @@ class TestCrossPlatformConsistency:
             assert info.get("description"), f"{name} missing description"
 
     def test_all_platforms_module_naming(self):
-        """Every platform module follows the mcp_*.server convention."""
+        """Every platform module follows the servers.*.server convention."""
         for name, info in SERVER_REGISTRY.items():
-            assert info["module"].startswith("mcp_"), f"{name} module should start with mcp_"
+            assert info["module"].startswith("servers."), f"{name} module should start with servers."
             assert info["module"].endswith(".server"), f"{name} module should end with .server"
 
 
@@ -815,7 +814,7 @@ class TestSigningIntegration:
 
     def test_jd_hmac_md5_sign_integration(self):
         """JD's HMAC-MD5 signing produces 32-char uppercase hex."""
-        from mcp_jd.server import JDMCP
+        from servers.jd.server import JDMCP
 
         client = JDMCP(app_key="jd_key", app_secret="jd_secret")
         sig = client._sign({"app_key": "jd_key", "method": "test"})
@@ -824,7 +823,7 @@ class TestSigningIntegration:
 
     def test_kuaishou_sign_uses_sign_secret(self):
         """Kuaishou signing uses sign_secret (not app_secret)."""
-        from mcp_kuaishou.server import KuaishouMCP
+        from servers.kuaishou.server import KuaishouMCP
 
         client = KuaishouMCP(
             app_key="ks_key",
@@ -1005,7 +1004,7 @@ class TestEndToEndScenarios:
     @pytest.mark.asyncio
     async def test_full_advertiser_report_workflow(self):
         """Simulate: get advertiser info → get campaign report → format results."""
-        from mcp_oceanengine.server import OceanEngine, get_advertiser_info, get_campaign_report
+        from servers.oceanengine.server import OceanEngine, get_advertiser_info, get_campaign_report
 
         client = OceanEngine(app_key="key", app_secret="secret", access_token="tok")
 
@@ -1038,7 +1037,7 @@ class TestEndToEndScenarios:
 
         mock_http.get = mock_get
 
-        with patch("mcp_oceanengine.server._get_client", return_value=client):
+        with patch("servers.oceanengine.server._get_client", return_value=client):
             with patch.object(client, "_ensure_client", return_value=mock_http):
                 # Step 1: Get advertiser info
                 info_result = await get_advertiser_info(advertiser_ids="123")
@@ -1174,7 +1173,7 @@ class TestWeixinStoreTokenCache:
         """WeixinStoreMCP caches the access_token and reuses it."""
         import importlib
 
-        import mcp_weixin_store.server as wx_mod
+        import servers.weixin_store.server as wx_mod
 
         importlib.reload(wx_mod)
         weixin_store_cls = wx_mod.WeixinStoreMCP
@@ -1212,7 +1211,7 @@ class TestWeixinStoreTokenCache:
         """When WX_ACCESS_TOKEN is set directly, no token fetch occurs."""
         import importlib
 
-        import mcp_weixin_store.server as wx_mod
+        import servers.weixin_store.server as wx_mod
 
         importlib.reload(wx_mod)
         weixin_store_cls = wx_mod.WeixinStoreMCP
@@ -1232,7 +1231,7 @@ class TestDouDianSigningIntegration:
 
     def test_doudian_sign_deterministic(self):
         """DouDian signing is deterministic for the same input."""
-        from mcp_doudian.server import DouDianClient
+        from servers.doudian.server import DouDianClient
 
         client = DouDianClient(app_key="dd_key", app_secret="dd_secret", access_token="tok")
         params = {"order_id": "12345", "page": "0"}
@@ -1243,7 +1242,7 @@ class TestDouDianSigningIntegration:
 
     def test_doudian_sign_excludes_none_and_empty(self):
         """DouDian signing excludes None and empty values."""
-        from mcp_doudian.server import DouDianClient
+        from servers.doudian.server import DouDianClient
 
         client = DouDianClient(app_key="dd_key", app_secret="dd_secret", access_token="tok")
         sig_with = client._sign({"order_id": "12345", "empty": "", "none_val": None})
@@ -1262,7 +1261,7 @@ class TestDoudianFullRequestFlow:
     @pytest.mark.asyncio
     async def test_get_order_list_end_to_end(self):
         """DouDian get_order_list → request → POST → mock HTTP response."""
-        from mcp_doudian.server import DouDianClient
+        from servers.doudian.server import DouDianClient
 
         client = DouDianClient(app_key="dd_key", app_secret="dd_secret", access_token="tok")
 
@@ -1282,9 +1281,9 @@ class TestDoudianFullRequestFlow:
         mock_http.post.return_value = mock_response
         mock_http.is_closed = False
 
-        with patch("mcp_doudian.server._get_client", return_value=client):
+        with patch("servers.doudian.server._get_client", return_value=client):
             with patch.object(client, "_ensure_client", return_value=mock_http):
-                from mcp_doudian.server import get_order_list
+                from servers.doudian.server import get_order_list
 
                 result = await get_order_list(start_time="2024-01-01", end_time="2024-01-31")
 
@@ -1312,11 +1311,11 @@ class TestPinduoduoFullRequestFlow:
         with patch.dict(os.environ, env, clear=False):
             import importlib
 
-            if "mcp_pinduoduo.server" in sys.modules:
-                importlib.reload(sys.modules["mcp_pinduoduo.server"])
+            if "servers.pinduoduo.server" in sys.modules:
+                importlib.reload(sys.modules["servers.pinduoduo.server"])
             else:
-                import mcp_pinduoduo.server  # noqa: F401
-            pdd_mod = sys.modules["mcp_pinduoduo.server"]
+                servers.pinduoduo.server  # noqa: F401
+            pdd_mod = sys.modules["servers.pinduoduo.server"]
             pinduoduo_cls = pdd_mod.PinduoduoMCP
 
         client = pinduoduo_cls(app_key="pdd_key", app_secret="pdd_secret", access_token="pdd_tok")

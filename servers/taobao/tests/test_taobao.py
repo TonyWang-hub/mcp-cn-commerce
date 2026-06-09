@@ -14,7 +14,7 @@ os.environ.setdefault("TAOBAO_APP_KEY", "test_key")
 os.environ.setdefault("TAOBAO_APP_SECRET", "test_secret")
 os.environ.setdefault("TAOBAO_ACCESS_TOKEN", "test_token")
 
-from mcp_taobao.server import (
+from servers.taobao.server import (
     get_increment_orders,
     get_logistics_tracking,
     get_order_detail,

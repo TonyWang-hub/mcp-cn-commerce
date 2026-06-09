@@ -42,7 +42,7 @@ _ALL_PLATFORMS = [
     "pinduoduo",
     "kuaishou",
     "xiaohongshu",
-    "weixin-store",
+    "weixin_store",
 ]
 
 for _p in _ALL_PLATFORMS:
@@ -83,14 +83,14 @@ from cn_commerce_base import (  # noqa: E402
 # ── Platform metadata for automation ────────────────────────────
 
 _PLATFORM_MODULE_MAP = {
-    "oceanengine": "mcp_oceanengine.server",
-    "doudian": "mcp_doudian.server",
-    "jd": "mcp_jd.server",
-    "taobao": "mcp_taobao.server",
-    "pinduoduo": "mcp_pinduoduo.server",
-    "kuaishou": "mcp_kuaishou.server",
-    "xiaohongshu": "mcp_xiaohongshu.server",
-    "weixin-store": "mcp_weixin_store.server",
+    "oceanengine": "servers.oceanengine.server",
+    "doudian": "servers.doudian.server",
+    "jd": "servers.jd.server",
+    "taobao": "servers.taobao.server",
+    "pinduoduo": "servers.pinduoduo.server",
+    "kuaishou": "servers.kuaishou.server",
+    "xiaohongshu": "servers.xiaohongshu.server",
+    "weixin_store": "servers.weixin_store.server",
 }
 
 # Tool functions that every platform must expose
@@ -99,7 +99,7 @@ _EXPECTED_TOOL_FUNCTIONS = [
 ]
 
 # Platforms that fail at import time without env vars (module-level instantiation)
-_ENV_REQUIRED_PLATFORMS = {"pinduoduo", "xiaohongshu", "weixin-store"}
+_ENV_REQUIRED_PLATFORMS = {"pinduoduo", "xiaohongshu", "weixin_store"}
 
 # Env vars needed for each platform that requires them
 _PLATFORM_ENV_VARS = {
@@ -113,7 +113,7 @@ _PLATFORM_ENV_VARS = {
         "XHS_CLIENT_SECRET": "xhs_secret",
         "XHS_ACCESS_TOKEN": "xhs_tok",
     },
-    "weixin-store": {
+    "weixin_store": {
         "WX_APP_ID": "wx_appid",
         "WX_APP_SECRET": "wx_secret",
     },
@@ -200,10 +200,10 @@ class TestModuleImportability:
         assert has_server, f"{module_name} missing 'server' or 'mcp' attribute"
 
     @pytest.mark.parametrize("platform", _ALL_PLATFORMS)
-    def test_platform_src_directory_exists(self, platform):
-        """Each platform must have a src/ directory under servers/."""
-        src_path = _REPO_ROOT / "servers" / platform / "src"
-        assert src_path.is_dir(), f"Missing src dir for {platform}: {src_path}"
+    def test_platform_server_file_exists(self, platform):
+        """Each platform must have a server.py file under servers/."""
+        server_path = _REPO_ROOT / "servers" / platform / "server.py"
+        assert server_path.is_file(), f"Missing server.py for {platform}: {server_path}"
 
     @pytest.mark.parametrize("platform", _ALL_PLATFORMS)
     def test_platform_tests_directory_exists(self, platform):
@@ -227,9 +227,9 @@ class TestModuleImportability:
 
     @pytest.mark.parametrize("platform", _ALL_PLATFORMS)
     def test_registry_module_follows_naming_convention(self, platform):
-        """Registry module names must follow mcp_*.server convention."""
+        """Registry module names must follow servers.*.server convention."""
         info = SERVER_REGISTRY[platform]
-        assert info["module"].startswith("mcp_"), f"{platform} module should start with 'mcp_'"
+        assert info["module"].startswith("servers."), f"{platform} module should start with 'servers.'"
         assert info["module"].endswith(".server"), f"{platform} module should end with '.server'"
 
 
@@ -314,7 +314,7 @@ class TestFullRequestFlowAutomation:
     @pytest.mark.asyncio
     async def test_oceanengine_full_flow(self, mock_http_response):
         """OceanEngine: tool -> _request -> mock HTTP -> JSON response."""
-        from mcp_oceanengine.server import OceanEngine, get_advertiser_info
+        from servers.oceanengine.server import OceanEngine, get_advertiser_info
 
         client = OceanEngine(app_key="test_key", app_secret="test_secret", access_token="tok")
 
@@ -322,7 +322,7 @@ class TestFullRequestFlowAutomation:
         mock_http.get.return_value = mock_http_response
         mock_http.is_closed = False
 
-        with patch("mcp_oceanengine.server._get_client", return_value=client):
+        with patch("servers.oceanengine.server._get_client", return_value=client):
             with patch.object(client, "_ensure_client", return_value=mock_http):
                 result = await get_advertiser_info(advertiser_ids="123")
 
@@ -333,7 +333,7 @@ class TestFullRequestFlowAutomation:
     @pytest.mark.asyncio
     async def test_jd_full_flow(self, mock_http_response):
         """JD: tool -> _call -> _request -> mock HTTP -> JSON response."""
-        from mcp_jd.server import JDMCP
+        from servers.jd.server import JDMCP
 
         client = JDMCP(app_key="jd_key", app_secret="jd_secret", access_token="jd_tok")
 
@@ -349,9 +349,9 @@ class TestFullRequestFlowAutomation:
         mock_http.post.return_value = mock_http_response
         mock_http.is_closed = False
 
-        with patch("mcp_jd.server.jd", client):
+        with patch("servers.jd.server.jd", client):
             with patch.object(client, "_ensure_client", return_value=mock_http):
-                from mcp_jd.server import get_order_list
+                from servers.jd.server import get_order_list
 
                 result = await get_order_list(
                     start_time="2024-01-01 00:00:00",
@@ -364,7 +364,7 @@ class TestFullRequestFlowAutomation:
     @pytest.mark.asyncio
     async def test_taobao_full_flow(self, mock_http_response):
         """Taobao: tool -> _call -> _request -> mock HTTP -> JSON response."""
-        from mcp_taobao.server import TaobaoMCP
+        from servers.taobao.server import TaobaoMCP
 
         client = TaobaoMCP(app_key="tb_key", app_secret="tb_secret", access_token="tb_tok")
 
@@ -375,9 +375,9 @@ class TestFullRequestFlowAutomation:
         mock_http.post.return_value = mock_http_response
         mock_http.is_closed = False
 
-        with patch("mcp_taobao.server.taobao", client):
+        with patch("servers.taobao.server.taobao", client):
             with patch.object(client, "_ensure_client", return_value=mock_http):
-                from mcp_taobao.server import get_order_list
+                from servers.taobao.server import get_order_list
 
                 result = await get_order_list(
                     start_time="2024-01-01 00:00:00",
@@ -390,7 +390,7 @@ class TestFullRequestFlowAutomation:
     @pytest.mark.asyncio
     async def test_doudian_full_flow(self, mock_http_response):
         """DouDian: tool -> request -> mock HTTP -> parsed response."""
-        from mcp_doudian.server import DouDianClient
+        from servers.doudian.server import DouDianClient
 
         client = DouDianClient(app_key="dd_key", app_secret="dd_secret", access_token="tok")
 
@@ -402,8 +402,8 @@ class TestFullRequestFlowAutomation:
         mock_http.post.return_value = mock_http_response
 
         with patch.object(client, "_ensure_client", return_value=mock_http):
-            with patch("mcp_doudian.server._get_client", return_value=client):
-                from mcp_doudian.server import get_order_list
+            with patch("servers.doudian.server._get_client", return_value=client):
+                from servers.doudian.server import get_order_list
 
                 result = await get_order_list(start_time="2024-01-01", end_time="2024-01-31")
 
@@ -413,7 +413,7 @@ class TestFullRequestFlowAutomation:
     @pytest.mark.asyncio
     async def test_kuaishou_full_flow(self, mock_http_response):
         """Kuaishou: tool -> _call -> mock HTTP -> JSON response."""
-        from mcp_kuaishou.server import get_order_list, ks
+        from servers.kuaishou.server import get_order_list, ks
 
         mock_http_response.json.return_value = {
             "result": 1,

@@ -113,7 +113,7 @@ class TestBackwardCompatibilityOldResponseFormats:
 
     def test_oceanengine_v1_response_without_page_info(self):
         """OceanEngine: old API responses without page_info field should parse."""
-        from mcp_oceanengine.server import OceanEngine
+        from servers.oceanengine.server import OceanEngine
 
         OceanEngine(app_key="k", app_secret="s", access_token="t")
 
@@ -220,7 +220,7 @@ class TestBackwardCompatibilityOldResponseFormats:
         _compat_results.add(
             "backward_compat",
             "wechat_legacy_token_format",
-            "weixin-store",
+            "weixin_store",
             True,
         )
 
@@ -459,7 +459,7 @@ class TestVersionNegotiationCompatibility:
 
     def test_taobao_api_version_parameter(self):
         """Taobao uses v=2.0 in API calls."""
-        from mcp_taobao.server import TaobaoMCP
+        from servers.taobao.server import TaobaoMCP
 
         client = TaobaoMCP(app_key="k", app_secret="s", access_token="t")
         # The _call method should include version parameter
@@ -473,7 +473,7 @@ class TestVersionNegotiationCompatibility:
 
     def test_jd_api_version_parameter(self):
         """JD uses v=2.0 in API calls."""
-        from mcp_jd.server import JDMCP
+        from servers.jd.server import JDMCP
 
         client = JDMCP(app_key="k", app_secret="s", access_token="t")
         assert client.BASE_URL == "https://api.jd.com/routerjson"
@@ -486,7 +486,7 @@ class TestVersionNegotiationCompatibility:
 
     def test_oceanengine_api_version_in_path(self):
         """OceanEngine uses version prefix in API path (e.g. '2/advertiser/info/')."""
-        from mcp_oceanengine.server import OceanEngine
+        from servers.oceanengine.server import OceanEngine
 
         client = OceanEngine(app_key="k", app_secret="s", access_token="t")
         # API paths start with version number
@@ -500,7 +500,7 @@ class TestVersionNegotiationCompatibility:
 
     def test_doudian_api_base_url(self):
         """Doudian uses a specific API gateway URL."""
-        from mcp_doudian.server import DouDianClient
+        from servers.doudian.server import DouDianClient
 
         DouDianClient(app_key="k", app_secret="s", access_token="t")
         assert "jinritemai.com" in "https://openapi-fxg.jinritemai.com/"
@@ -513,7 +513,7 @@ class TestVersionNegotiationCompatibility:
 
     def test_kuaishou_api_base_url(self):
         """Kuaishou uses kwaixiaodian gateway."""
-        from mcp_kuaishou.server import KuaishouMCP
+        from servers.kuaishou.server import KuaishouMCP
 
         client = KuaishouMCP(app_key="k", app_secret="s", access_token="t")
         assert "kwaixiaodian.com" in client.BASE_URL
@@ -534,11 +534,11 @@ class TestVersionNegotiationCompatibility:
         with patch.dict(os.environ, env, clear=False):
             import importlib
 
-            if "mcp_xiaohongshu.server" in sys.modules:
-                importlib.reload(sys.modules["mcp_xiaohongshu.server"])
+            if "servers.xiaohongshu.server" in sys.modules:
+                importlib.reload(sys.modules["servers.xiaohongshu.server"])
             else:
-                import mcp_xiaohongshu.server  # noqa: F401
-            xhs_mod = sys.modules["mcp_xiaohongshu.server"]
+                servers.xiaohongshu.server  # noqa: F401
+            xhs_mod = sys.modules["servers.xiaohongshu.server"]
             client = xhs_mod.XiaohongshuMCP(app_key="k", app_secret="s", access_token="t")
             assert "xiaohongshu.com" in client.BASE_URL
         _compat_results.add(
@@ -554,17 +554,17 @@ class TestVersionNegotiationCompatibility:
         with patch.dict(os.environ, env, clear=False):
             import importlib
 
-            if "mcp_weixin_store.server" in sys.modules:
-                importlib.reload(sys.modules["mcp_weixin_store.server"])
+            if "servers.weixin_store.server" in sys.modules:
+                importlib.reload(sys.modules["servers.weixin_store.server"])
             else:
-                import mcp_weixin_store.server  # noqa: F401
-            wx_mod = sys.modules["mcp_weixin_store.server"]
+                servers.weixin_store.server  # noqa: F401
+            wx_mod = sys.modules["servers.weixin_store.server"]
             client = wx_mod.WeixinStoreMCP(app_key="k", app_secret="s", access_token="t")
             assert "weixin.qq.com" in client.BASE_URL
         _compat_results.add(
             "version_negotiation",
             "wechat_api_base_url",
-            "weixin-store",
+            "weixin_store",
             True,
         )
 
@@ -578,11 +578,11 @@ class TestVersionNegotiationCompatibility:
         with patch.dict(os.environ, env, clear=False):
             import importlib
 
-            if "mcp_pinduoduo.server" in sys.modules:
-                importlib.reload(sys.modules["mcp_pinduoduo.server"])
+            if "servers.pinduoduo.server" in sys.modules:
+                importlib.reload(sys.modules["servers.pinduoduo.server"])
             else:
-                import mcp_pinduoduo.server  # noqa: F401
-            pdd_mod = sys.modules["mcp_pinduoduo.server"]
+                servers.pinduoduo.server  # noqa: F401
+            pdd_mod = sys.modules["servers.pinduoduo.server"]
             client = pdd_mod.PinduoduoMCP(app_key="k", app_secret="s", access_token="t")
             assert "pinduoduo.com" in client.BASE_URL
         _compat_results.add(
@@ -638,7 +638,7 @@ class TestSigningMethodCompatibility:
 
     def test_jd_hmac_md5_sign_format(self):
         """JD HMAC-MD5 produces 32-char uppercase hex."""
-        from mcp_jd.server import JDMCP
+        from servers.jd.server import JDMCP
 
         client = JDMCP(app_key="k", app_secret="s")
         sig = client._sign({"app_key": "k", "method": "test"})
@@ -649,7 +649,7 @@ class TestSigningMethodCompatibility:
 
     def test_doudian_md5_sign_format(self):
         """Doudian MD5 produces 32-char hex (lowercase)."""
-        from mcp_doudian.server import DouDianClient
+        from servers.doudian.server import DouDianClient
 
         client = DouDianClient(app_key="k", app_secret="s", access_token="t")
         sig = client._sign({"order_id": "123"})
@@ -659,7 +659,7 @@ class TestSigningMethodCompatibility:
 
     def test_kuaishou_sign_uses_sign_secret(self):
         """Kuaishou signing uses sign_secret, not app_secret."""
-        from mcp_kuaishou.server import KuaishouMCP
+        from servers.kuaishou.server import KuaishouMCP
 
         client = KuaishouMCP(app_key="k", app_secret="s", sign_secret="ss", access_token="t")
         sig = client._sign({"app_key": "k", "timestamp": "123"})
@@ -822,7 +822,7 @@ class TestErrorFormatCompatibility:
 
     def test_doudian_error_code_compatibility(self):
         """Doudian error codes are normalized through DouDianAPIError."""
-        from mcp_doudian.server import DouDianAPIError
+        from servers.doudian.server import DouDianAPIError
 
         err = DouDianAPIError(40001, "bad request")
         assert err.code == 40001
@@ -846,10 +846,10 @@ class TestCrossPlatformInterfaceConsistency:
 
     def test_all_platforms_extend_commerce_mcp_base(self):
         """All platform clients extend CommerceMCPBase (checked via MRO names)."""
-        from mcp_jd.server import JDMCP
-        from mcp_kuaishou.server import KuaishouMCP
-        from mcp_oceanengine.server import OceanEngine
-        from mcp_taobao.server import TaobaoMCP
+        from servers.jd.server import JDMCP
+        from servers.kuaishou.server import KuaishouMCP
+        from servers.oceanengine.server import OceanEngine
+        from servers.taobao.server import TaobaoMCP
 
         # Use MRO class names to avoid cross-module import path issues
         for cls in [OceanEngine, JDMCP, TaobaoMCP, KuaishouMCP]:
@@ -861,11 +861,11 @@ class TestCrossPlatformInterfaceConsistency:
         with patch.dict(os.environ, env, clear=False):
             import importlib
 
-            if "mcp_weixin_store.server" in sys.modules:
-                importlib.reload(sys.modules["mcp_weixin_store.server"])
+            if "servers.weixin_store.server" in sys.modules:
+                importlib.reload(sys.modules["servers.weixin_store.server"])
             else:
-                import mcp_weixin_store.server  # noqa: F401
-            wx_mod = sys.modules["mcp_weixin_store.server"]
+                servers.weixin_store.server  # noqa: F401
+            wx_mod = sys.modules["servers.weixin_store.server"]
             base_names = [c.__name__ for c in wx_mod.WeixinStoreMCP.__mro__]
             assert "CommerceMCPBase" in base_names
 
@@ -878,10 +878,10 @@ class TestCrossPlatformInterfaceConsistency:
 
     def test_all_platform_clients_have_base_url(self):
         """All platform clients define a BASE_URL."""
-        from mcp_jd.server import JDMCP
-        from mcp_kuaishou.server import KuaishouMCP
-        from mcp_oceanengine.server import OceanEngine
-        from mcp_taobao.server import TaobaoMCP
+        from servers.jd.server import JDMCP
+        from servers.kuaishou.server import KuaishouMCP
+        from servers.oceanengine.server import OceanEngine
+        from servers.taobao.server import TaobaoMCP
 
         clients = [
             OceanEngine(app_key="k", app_secret="s"),
@@ -902,10 +902,10 @@ class TestCrossPlatformInterfaceConsistency:
 
     def test_all_base_clients_have_request_method(self):
         """All platform clients have _request method from base class."""
-        from mcp_jd.server import JDMCP
-        from mcp_kuaishou.server import KuaishouMCP
-        from mcp_oceanengine.server import OceanEngine
-        from mcp_taobao.server import TaobaoMCP
+        from servers.jd.server import JDMCP
+        from servers.kuaishou.server import KuaishouMCP
+        from servers.oceanengine.server import OceanEngine
+        from servers.taobao.server import TaobaoMCP
 
         for cls in [OceanEngine, JDMCP, TaobaoMCP, KuaishouMCP]:
             assert hasattr(cls, "_request"), f"{cls.__name__} missing _request"
@@ -921,9 +921,9 @@ class TestCrossPlatformInterfaceConsistency:
 
     def test_all_platforms_have_health_check(self):
         """All CommerceMCPBase subclasses have health_check."""
-        from mcp_jd.server import JDMCP
-        from mcp_oceanengine.server import OceanEngine
-        from mcp_taobao.server import TaobaoMCP
+        from servers.jd.server import JDMCP
+        from servers.oceanengine.server import OceanEngine
+        from servers.taobao.server import TaobaoMCP
 
         for cls in [OceanEngine, JDMCP, TaobaoMCP]:
             assert hasattr(cls, "health_check"), f"{cls.__name__} missing health_check"
@@ -937,9 +937,9 @@ class TestCrossPlatformInterfaceConsistency:
 
     def test_all_platforms_have_metrics(self):
         """All CommerceMCPBase subclasses have metrics collector."""
-        from mcp_jd.server import JDMCP
-        from mcp_oceanengine.server import OceanEngine
-        from mcp_taobao.server import TaobaoMCP
+        from servers.jd.server import JDMCP
+        from servers.oceanengine.server import OceanEngine
+        from servers.taobao.server import TaobaoMCP
 
         for cls in [OceanEngine, JDMCP, TaobaoMCP]:
             client = cls(app_key="k", app_secret="s")
@@ -956,9 +956,9 @@ class TestCrossPlatformInterfaceConsistency:
 
     def test_all_platforms_have_rate_limiter(self):
         """All CommerceMCPBase subclasses have rate_limiter."""
-        from mcp_jd.server import JDMCP
-        from mcp_oceanengine.server import OceanEngine
-        from mcp_taobao.server import TaobaoMCP
+        from servers.jd.server import JDMCP
+        from servers.oceanengine.server import OceanEngine
+        from servers.taobao.server import TaobaoMCP
 
         for cls in [OceanEngine, JDMCP, TaobaoMCP]:
             client = cls(app_key="k", app_secret="s")
@@ -975,9 +975,9 @@ class TestCrossPlatformInterfaceConsistency:
 
     def test_all_platforms_support_close(self):
         """All CommerceMCPBase subclasses support close()."""
-        from mcp_jd.server import JDMCP
-        from mcp_oceanengine.server import OceanEngine
-        from mcp_taobao.server import TaobaoMCP
+        from servers.jd.server import JDMCP
+        from servers.oceanengine.server import OceanEngine
+        from servers.taobao.server import TaobaoMCP
 
         for cls in [OceanEngine, JDMCP, TaobaoMCP]:
             client = cls(app_key="k", app_secret="s")

@@ -14,7 +14,7 @@ os.environ.setdefault("XHS_CLIENT_ID", "test_client_id")
 os.environ.setdefault("XHS_CLIENT_SECRET", "test_client_secret")
 os.environ.setdefault("XHS_ACCESS_TOKEN", "test_access_token")
 
-from mcp_xiaohongshu.server import (
+from servers.xiaohongshu.server import (
     get_bill_list,
     get_inventory,
     get_logistics_tracking,

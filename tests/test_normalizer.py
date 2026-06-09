@@ -12,9 +12,6 @@ from shared.normalizer import (
     Normalizer,
     UnifiedOrder,
     UnifiedProduct,
-    UnifiedRefund,
-    UnifiedReview,
-    UnifiedShop,
     normalize_order_status,
     normalize_price,
     normalize_refund_status,
@@ -22,7 +19,6 @@ from shared.normalizer import (
     normalize_time,
     safe_get,
 )
-
 
 # ── Helper Fixtures ─────────────────────────────────────────
 
@@ -318,7 +314,7 @@ class TestNormalizeProduct:
 # ── Integration: Refund Normalization ───────────────────────
 
 
-class TestNormalizeRefund:
+class TestNormalizeRefundIntegration:
     def test_doudian_refund(self, normalizer: Normalizer):
         raw = {
             "refund_id": "RF001",

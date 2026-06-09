@@ -2690,6 +2690,7 @@ class CommerceMCPBase:
         self._compressor = RequestCompressor(compression_config)
         self._configurable_limiter = ConfigurableRateLimiter(rate_limit_config)
         self._priority_scheduler = PriorityScheduler(rate_limiter=self._configurable_limiter)
+        self._alert_manager = AlertManager()
 
     def _get_client(self) -> httpx.AsyncClient:
         """Get or create an HTTP client with connection pooling.
@@ -3174,6 +3175,57 @@ class CommerceMCPBase:
     def auto_adjust_rate_limits(self, **kwargs: Any) -> dict[str, Any]:
         """Auto-adjust rate limits based on throttle statistics."""
         return self._configurable_limiter.auto_adjust_from_stats(**kwargs)
+
+    # ── Alerting Convenience ───────────────────────────────
+
+    @property
+    def alert_manager(self) -> AlertManager:
+        """Access the alert manager."""
+        return self._alert_manager
+
+    def evaluate_alerts(
+        self,
+        platform: str = "",
+        endpoint: str = "",
+    ) -> list[Alert]:
+        """Evaluate current metrics against alert rules.
+
+        Args:
+            platform: Current platform context.
+            endpoint: Current endpoint context.
+
+        Returns:
+            List of triggered Alert instances.
+        """
+        summary = self.metrics.get_summary()
+        return self._alert_manager.evaluate_metrics(summary, platform=platform, endpoint=endpoint)
+
+    async def check_and_fire_alerts(
+        self,
+        platform: str = "",
+        endpoint: str = "",
+    ) -> list[dict[str, Any]]:
+        """Evaluate metrics and fire any triggered alerts.
+
+        Combines evaluate_alerts and fire_alert in a single call.
+
+        Args:
+            platform: Current platform context.
+            endpoint: Current endpoint context.
+
+        Returns:
+            List of notification results for fired alerts.
+        """
+        alerts = self.evaluate_alerts(platform=platform, endpoint=endpoint)
+        results: list[dict[str, Any]] = []
+        for alert in alerts:
+            result = await self._alert_manager.fire_alert(alert)
+            results.append(result)
+        return results
+
+    def get_alert_stats(self) -> dict[str, Any]:
+        """Get alert manager statistics."""
+        return self._alert_manager.get_stats()
 
     # ── Batch Operations ──────────────────────────────────
 
@@ -6119,3 +6171,669 @@ class DebugBreakpointManager:
         """Reset collected statistics."""
         self._stats = {"total_checks": 0, "total_hits": 0}
         self._hit_history.clear()
+
+
+# ── Alerting ────────────────────────────────────────────────
+
+
+class AlertSeverity(StrEnum):
+    """Severity levels for monitoring alerts.
+
+    Attributes:
+        CRITICAL: Immediate action required. Service down or data loss.
+        HIGH: Urgent attention needed. Significant degradation.
+        MEDIUM: Warning condition. May escalate if unaddressed.
+        LOW: Informational. Track but no immediate action.
+    """
+
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+_ALERT_SEVERITY_ORDER: dict[str, int] = {
+    AlertSeverity.LOW: 0,
+    AlertSeverity.MEDIUM: 1,
+    AlertSeverity.HIGH: 2,
+    AlertSeverity.CRITICAL: 3,
+}
+
+
+@dataclass
+class AlertRule:
+    """Defines a monitoring alert rule.
+
+    Attributes:
+        rule_id: Unique identifier for the rule.
+        name: Human-readable rule name.
+        description: What condition triggers this alert.
+        metric_path: Dot-separated path to the metric value
+            (e.g., "global.error_rate", "global.avg_latency_ms").
+        threshold: Numeric threshold that triggers the alert.
+        comparison: Comparison operator ("gt", "gte", "lt", "lte", "eq").
+        severity: Alert severity level.
+        cooldown_seconds: Minimum seconds between consecutive alerts for this rule.
+        enabled: Whether the rule is active.
+        tags: User-defined tags for filtering and grouping.
+        platform: Platform filter (empty = all platforms).
+        endpoint: Endpoint filter (empty = all endpoints).
+    """
+
+    rule_id: str = ""
+    name: str = ""
+    description: str = ""
+    metric_path: str = ""
+    threshold: float = 0.0
+    comparison: str = "gt"
+    severity: str = AlertSeverity.MEDIUM
+    cooldown_seconds: float = 300.0
+    enabled: bool = True
+    tags: list[str] = field(default_factory=list)
+    platform: str = ""
+    endpoint: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.rule_id:
+            self.rule_id = uuid.uuid4().hex[:12]
+        if not self.name:
+            self.name = f"rule_{self.rule_id}"
+
+    def evaluate(self, value: float) -> bool:
+        """Evaluate if the metric value triggers this rule.
+
+        Args:
+            value: The current metric value.
+
+        Returns:
+            True if the alert should fire.
+        """
+        if self.comparison == "gt":
+            return value > self.threshold
+        elif self.comparison == "gte":
+            return value >= self.threshold
+        elif self.comparison == "lt":
+            return value < self.threshold
+        elif self.comparison == "lte":
+            return value <= self.threshold
+        elif self.comparison == "eq":
+            return value == self.threshold
+        return False
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        return {
+            "rule_id": self.rule_id,
+            "name": self.name,
+            "description": self.description,
+            "metric_path": self.metric_path,
+            "threshold": self.threshold,
+            "comparison": self.comparison,
+            "severity": self.severity,
+            "cooldown_seconds": self.cooldown_seconds,
+            "enabled": self.enabled,
+            "tags": self.tags,
+            "platform": self.platform,
+            "endpoint": self.endpoint,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AlertRule:
+        """Deserialize from a dictionary."""
+        return cls(
+            rule_id=data.get("rule_id", ""),
+            name=data.get("name", ""),
+            description=data.get("description", ""),
+            metric_path=data.get("metric_path", ""),
+            threshold=data.get("threshold", 0.0),
+            comparison=data.get("comparison", "gt"),
+            severity=data.get("severity", AlertSeverity.MEDIUM),
+            cooldown_seconds=data.get("cooldown_seconds", 300.0),
+            enabled=data.get("enabled", True),
+            tags=data.get("tags", []),
+            platform=data.get("platform", ""),
+            endpoint=data.get("endpoint", ""),
+        )
+
+
+@dataclass
+class Alert:
+    """Represents a fired alert instance.
+
+    Attributes:
+        alert_id: Unique identifier for this alert instance.
+        rule_id: ID of the rule that triggered this alert.
+        rule_name: Name of the rule for quick reference.
+        severity: Alert severity level.
+        message: Human-readable alert message.
+        metric_value: The metric value that triggered the alert.
+        threshold: The threshold that was exceeded.
+        metric_path: The metric path that was evaluated.
+        platform: Platform where the alert was triggered (if applicable).
+        endpoint: Endpoint where the alert was triggered (if applicable).
+        fired_at: ISO 8601 timestamp of when the alert fired.
+        resolved_at: ISO 8601 timestamp of when the alert was resolved.
+        status: Alert status ("firing", "resolved", "silenced").
+    """
+
+    alert_id: str = ""
+    rule_id: str = ""
+    rule_name: str = ""
+    severity: str = AlertSeverity.MEDIUM
+    message: str = ""
+    metric_value: float = 0.0
+    threshold: float = 0.0
+    metric_path: str = ""
+    platform: str = ""
+    endpoint: str = ""
+    fired_at: str = ""
+    resolved_at: str = ""
+    status: str = "firing"
+
+    def __post_init__(self) -> None:
+        if not self.alert_id:
+            self.alert_id = uuid.uuid4().hex[:16]
+        if not self.fired_at:
+            self.fired_at = datetime.now(UTC).isoformat()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert alert to a dictionary."""
+        return {
+            "alert_id": self.alert_id,
+            "rule_id": self.rule_id,
+            "rule_name": self.rule_name,
+            "severity": self.severity,
+            "message": self.message,
+            "metric_value": round(self.metric_value, 4),
+            "threshold": self.threshold,
+            "metric_path": self.metric_path,
+            "platform": self.platform,
+            "endpoint": self.endpoint,
+            "fired_at": self.fired_at,
+            "resolved_at": self.resolved_at,
+            "status": self.status,
+        }
+
+
+class AlertNotifier:
+    """Base class for alert notification delivery.
+
+    Supports registering multiple notification channels (callbacks).
+    Each callback receives an Alert and returns None.
+
+    Usage::
+
+        notifier = AlertNotifier()
+        notifier.add_callback(lambda alert: print(f"ALERT: {alert.message}"))
+        await notifier.notify(alert)
+    """
+
+    def __init__(self) -> None:
+        self._callbacks: list[Callable[..., Any]] = []
+        self._lock = threading.Lock()
+        self._stats = {
+            "total_notifications": 0,
+            "total_success": 0,
+            "total_failed": 0,
+        }
+
+    def add_callback(self, callback: Callable[..., Any]) -> None:
+        """Register a notification callback.
+
+        Args:
+            callback: Function that receives an Alert instance.
+                      Can be sync or async.
+        """
+        with self._lock:
+            self._callbacks.append(callback)
+
+    def remove_callback(self, callback: Callable[..., Any]) -> bool:
+        """Remove a registered callback.
+
+        Args:
+            callback: The callback to remove.
+
+        Returns:
+            True if found and removed.
+        """
+        with self._lock:
+            if callback in self._callbacks:
+                self._callbacks.remove(callback)
+                return True
+        return False
+
+    async def notify(self, alert: Alert) -> dict[str, Any]:
+        """Send alert to all registered notification callbacks.
+
+        Args:
+            alert: The Alert to deliver.
+
+        Returns:
+            Dict with notification results.
+        """
+        with self._lock:
+            callbacks = list(self._callbacks)
+
+        results: list[dict[str, Any]] = []
+        for callback in callbacks:
+            try:
+                result = callback(alert)
+                if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+                    await result
+                self._stats["total_success"] += 1
+                results.append({"callback": callback.__name__, "success": True})
+            except Exception as exc:
+                self._stats["total_failed"] += 1
+                results.append({"callback": callback.__name__, "success": False, "error": str(exc)})
+                logger.warning(f"Alert notification failed: {exc}")
+
+        self._stats["total_notifications"] += 1
+        return {
+            "alert_id": alert.alert_id,
+            "channels_notified": len(callbacks),
+            "results": results,
+        }
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get notifier statistics."""
+        with self._lock:
+            return {
+                "registered_callbacks": len(self._callbacks),
+                **self._stats,
+            }
+
+    def reset_stats(self) -> None:
+        """Reset notification statistics."""
+        self._stats = {
+            "total_notifications": 0,
+            "total_success": 0,
+            "total_failed": 0,
+        }
+
+
+# Default alert rules for common e-commerce monitoring scenarios
+DEFAULT_ALERT_RULES: list[AlertRule] = [
+    AlertRule(
+        name="high_error_rate",
+        description="Global error rate exceeds 10%",
+        metric_path="global.error_rate",
+        threshold=0.1,
+        comparison="gt",
+        severity=AlertSeverity.HIGH,
+        cooldown_seconds=300.0,
+    ),
+    AlertRule(
+        name="critical_error_rate",
+        description="Global error rate exceeds 50%",
+        metric_path="global.error_rate",
+        threshold=0.5,
+        comparison="gt",
+        severity=AlertSeverity.CRITICAL,
+        cooldown_seconds=60.0,
+    ),
+    AlertRule(
+        name="high_latency",
+        description="Average latency exceeds 5000ms",
+        metric_path="global.avg_latency_ms",
+        threshold=5000.0,
+        comparison="gt",
+        severity=AlertSeverity.MEDIUM,
+        cooldown_seconds=600.0,
+    ),
+    AlertRule(
+        name="critical_latency",
+        description="Average latency exceeds 30000ms",
+        metric_path="global.avg_latency_ms",
+        threshold=30000.0,
+        comparison="gt",
+        severity=AlertSeverity.HIGH,
+        cooldown_seconds=120.0,
+    ),
+]
+
+
+class AlertManager:
+    """Manages alert rules, evaluates metrics, and fires alerts.
+
+    Integrates with MetricsCollector to periodically evaluate metrics
+    against configured rules and trigger notifications via AlertNotifier.
+
+    Usage::
+
+        manager = AlertManager()
+        manager.add_rule(AlertRule(
+            name="high_error_rate",
+            metric_path="global.error_rate",
+            threshold=0.1,
+            comparison="gt",
+            severity="high",
+        ))
+        alerts = manager.evaluate_metrics(metrics_summary)
+        for alert in alerts:
+            await manager.fire_alert(alert)
+    """
+
+    def __init__(
+        self,
+        notifier: AlertNotifier | None = None,
+        include_default_rules: bool = True,
+    ) -> None:
+        """Initialize the alert manager.
+
+        Args:
+            notifier: AlertNotifier for delivering alerts. Creates one if None.
+            include_default_rules: Whether to include built-in default rules.
+        """
+        self._notifier = notifier or AlertNotifier()
+        self._rules: dict[str, AlertRule] = {}
+        self._firing_alerts: dict[str, Alert] = {}
+        self._alert_history: list[Alert] = []
+        self._cooldown_tracker: dict[str, float] = {}
+        self._lock = threading.Lock()
+        self._stats = {
+            "total_evaluations": 0,
+            "total_alerts_fired": 0,
+            "total_alerts_resolved": 0,
+        }
+
+        if include_default_rules:
+            for rule in DEFAULT_ALERT_RULES:
+                self.add_rule(rule)
+
+    @property
+    def notifier(self) -> AlertNotifier:
+        """Access the alert notifier."""
+        return self._notifier
+
+    def add_rule(self, rule: AlertRule) -> None:
+        """Add an alert rule.
+
+        Args:
+            rule: The AlertRule to add.
+        """
+        with self._lock:
+            self._rules[rule.rule_id] = rule
+        logger.debug(f"Alert rule added: {rule.name} [{rule.rule_id}]")
+
+    def remove_rule(self, rule_id: str) -> bool:
+        """Remove an alert rule by ID.
+
+        Args:
+            rule_id: The rule ID to remove.
+
+        Returns:
+            True if found and removed.
+        """
+        with self._lock:
+            if rule_id in self._rules:
+                del self._rules[rule_id]
+                return True
+        return False
+
+    def get_rule(self, rule_id: str) -> AlertRule | None:
+        """Get a rule by ID."""
+        with self._lock:
+            return self._rules.get(rule_id)
+
+    def list_rules(
+        self,
+        enabled_only: bool = False,
+        severity: str | None = None,
+        tags: list[str] | None = None,
+    ) -> list[AlertRule]:
+        """List rules with optional filtering.
+
+        Args:
+            enabled_only: Only return enabled rules.
+            severity: Filter by severity level.
+            tags: Filter by tags (any match).
+
+        Returns:
+            List of matching rules.
+        """
+        with self._lock:
+            rules = list(self._rules.values())
+
+        if enabled_only:
+            rules = [r for r in rules if r.enabled]
+        if severity:
+            rules = [r for r in rules if r.severity == severity]
+        if tags:
+            tag_set = set(tags)
+            rules = [r for r in rules if tag_set & set(r.tags)]
+        return rules
+
+    @staticmethod
+    def _resolve_metric_path(metrics_summary: dict[str, Any], path: str) -> float | None:
+        """Resolve a dot-separated metric path to a numeric value.
+
+        Args:
+            metrics_summary: The metrics summary dict.
+            path: Dot-separated path (e.g., "global.error_rate").
+
+        Returns:
+            The numeric value, or None if path is invalid.
+        """
+        parts = path.split(".")
+        current: Any = metrics_summary
+        for part in parts:
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                return None
+        if isinstance(current, (int, float)):
+            return float(current)
+        return None
+
+    def evaluate_metrics(
+        self,
+        metrics_summary: dict[str, Any],
+        platform: str = "",
+        endpoint: str = "",
+    ) -> list[Alert]:
+        """Evaluate all rules against the given metrics summary.
+
+        Args:
+            metrics_summary: Output of MetricsCollector.get_summary().
+            platform: Current platform context for platform-specific rules.
+            endpoint: Current endpoint context for endpoint-specific rules.
+
+        Returns:
+            List of Alert instances that should be fired.
+        """
+        now = time.time()
+        alerts: list[Alert] = []
+
+        with self._lock:
+            rules = [r for r in self._rules.values() if r.enabled]
+            self._stats["total_evaluations"] += 1
+
+        for rule in rules:
+            # Platform/endpoint filter
+            if rule.platform and platform and rule.platform != platform:
+                continue
+            if rule.endpoint and endpoint and rule.endpoint != endpoint:
+                continue
+
+            # Resolve metric value
+            value = self._resolve_metric_path(metrics_summary, rule.metric_path)
+            if value is None:
+                continue
+
+            # Evaluate the rule
+            if not rule.evaluate(value):
+                continue
+
+            # Check cooldown
+            with self._lock:
+                last_fired = self._cooldown_tracker.get(rule.rule_id, 0.0)
+                if (now - last_fired) < rule.cooldown_seconds:
+                    continue
+                self._cooldown_tracker[rule.rule_id] = now
+
+            # Create alert
+            alert = Alert(
+                rule_id=rule.rule_id,
+                rule_name=rule.name,
+                severity=rule.severity,
+                message=(
+                    f"[{rule.severity.upper()}] {rule.description}: "
+                    f"{rule.metric_path}={value:.4f} (threshold={rule.threshold})"
+                ),
+                metric_value=value,
+                threshold=rule.threshold,
+                metric_path=rule.metric_path,
+                platform=platform,
+                endpoint=endpoint,
+            )
+            alerts.append(alert)
+
+        return alerts
+
+    async def fire_alert(self, alert: Alert) -> dict[str, Any]:
+        """Fire an alert and deliver notifications.
+
+        Args:
+            alert: The Alert to fire.
+
+        Returns:
+            Notification delivery result.
+        """
+        with self._lock:
+            self._firing_alerts[alert.alert_id] = alert
+            self._alert_history.append(alert)
+            # Keep history bounded
+            if len(self._alert_history) > 1000:
+                self._alert_history = self._alert_history[-500:]
+            self._stats["total_alerts_fired"] += 1
+
+        logger.warning(f"Alert fired: {alert.message}")
+        return await self._notifier.notify(alert)
+
+    def resolve_alert(self, alert_id: str) -> bool:
+        """Mark a firing alert as resolved.
+
+        Args:
+            alert_id: ID of the alert to resolve.
+
+        Returns:
+            True if found and resolved.
+        """
+        with self._lock:
+            alert = self._firing_alerts.pop(alert_id, None)
+            if alert:
+                alert.status = "resolved"
+                alert.resolved_at = datetime.now(UTC).isoformat()
+                self._stats["total_alerts_resolved"] += 1
+                logger.info(f"Alert resolved: {alert.rule_name} [{alert.alert_id}]")
+                return True
+        return False
+
+    def silence_rule(self, rule_id: str, duration_seconds: float = 3600.0) -> bool:
+        """Silence a rule by setting its cooldown to a long duration.
+
+        Args:
+            rule_id: ID of the rule to silence.
+            duration_seconds: How long to silence (updates cooldown_seconds).
+
+        Returns:
+            True if found and silenced.
+        """
+        with self._lock:
+            rule = self._rules.get(rule_id)
+            if rule:
+                rule.cooldown_seconds = duration_seconds
+                logger.info(f"Alert rule silenced: {rule.name} for {duration_seconds}s")
+                return True
+        return False
+
+    def get_firing_alerts(self, severity: str | None = None) -> list[Alert]:
+        """Get currently firing alerts.
+
+        Args:
+            severity: Filter by severity level.
+
+        Returns:
+            List of firing Alert instances.
+        """
+        with self._lock:
+            alerts = list(self._firing_alerts.values())
+        if severity:
+            alerts = [a for a in alerts if a.severity == severity]
+        return alerts
+
+    def get_alert_history(
+        self,
+        severity: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Get alert history.
+
+        Args:
+            severity: Filter by severity level.
+            limit: Maximum entries to return.
+
+        Returns:
+            List of alert dicts.
+        """
+        with self._lock:
+            history = list(self._alert_history)
+        if severity:
+            history = [a for a in history if a.severity == severity]
+        return [a.to_dict() for a in history[-limit:]]
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get alert manager statistics.
+
+        Returns:
+            Dict with rule counts, firing alerts, and evaluation stats.
+        """
+        with self._lock:
+            return {
+                "rule_count": len(self._rules),
+                "enabled_rules": sum(1 for r in self._rules.values() if r.enabled),
+                "firing_alerts": len(self._firing_alerts),
+                "alert_history_count": len(self._alert_history),
+                "notifier_stats": self._notifier.get_stats(),
+                **self._stats,
+            }
+
+    def export_rules(self) -> list[dict[str, Any]]:
+        """Export all rules as a list of dictionaries.
+
+        Returns:
+            List of rule dicts suitable for JSON serialization.
+        """
+        with self._lock:
+            return [r.to_dict() for r in self._rules.values()]
+
+    def import_rules(self, rules_data: list[dict[str, Any]]) -> int:
+        """Import rules from a list of dictionaries.
+
+        Args:
+            rules_data: List of rule dicts (from export_rules or JSON).
+
+        Returns:
+            Number of rules imported.
+        """
+        count = 0
+        for data in rules_data:
+            rule = AlertRule.from_dict(data)
+            self.add_rule(rule)
+            count += 1
+        logger.info(f"Imported {count} alert rules")
+        return count
+
+    def reset(self) -> None:
+        """Reset all alert manager state."""
+        with self._lock:
+            self._firing_alerts.clear()
+            self._alert_history.clear()
+            self._cooldown_tracker.clear()
+            self._stats = {
+                "total_evaluations": 0,
+                "total_alerts_fired": 0,
+                "total_alerts_resolved": 0,
+            }
+            self._notifier.reset_stats()
+        logger.info("Alert manager reset")

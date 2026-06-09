@@ -4237,8 +4237,10 @@ class TestAlertNotifier:
 
     def test_remove_callback(self):
         notifier = AlertNotifier()
+
         def cb(alert):
             return None
+
         notifier.add_callback(cb)
         assert notifier.remove_callback(cb) is True
         assert len(notifier._callbacks) == 0

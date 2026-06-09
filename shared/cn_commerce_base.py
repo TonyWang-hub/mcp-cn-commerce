@@ -737,6 +737,322 @@ class ConfigurableRateLimiter:
         """Reset collected rate limit statistics."""
         self.stats.reset()
 
+    def set_platform_rps(self, platform: str, requests_per_second: float) -> None:
+        """Dynamically adjust the RPS for a platform at runtime.
+
+        Creates the platform config if it does not exist.
+
+        Args:
+            platform: Platform identifier.
+            requests_per_second: New RPS value.
+        """
+        if platform not in self.config.platforms:
+            self.config.platforms[platform] = PlatformRateLimitConfig(platform=platform)
+        self.config.platforms[platform].default_requests_per_second = requests_per_second
+        logger.debug(f"Rate limit: {platform} RPS set to {requests_per_second}")
+
+    def set_endpoint_rps(self, platform: str, endpoint: str, requests_per_second: float) -> None:
+        """Dynamically adjust the RPS for a specific endpoint at runtime.
+
+        Args:
+            platform: Platform identifier.
+            endpoint: API endpoint path.
+            requests_per_second: New RPS value.
+        """
+        self.update_endpoint_limit(platform, endpoint, requests_per_second=requests_per_second)
+        logger.debug(f"Rate limit: {platform}:{endpoint} RPS set to {requests_per_second}")
+
+    def enable_platform(self, platform: str) -> None:
+        """Enable rate limiting for a platform."""
+        if platform in self.config.platforms:
+            self.config.platforms[platform].enabled = True
+
+    def disable_platform(self, platform: str) -> None:
+        """Disable rate limiting for a platform (requests pass through without delay)."""
+        if platform in self.config.platforms:
+            self.config.platforms[platform].enabled = False
+
+    def auto_adjust_from_stats(
+        self,
+        throttle_threshold: float = 0.3,
+        scale_down_factor: float = 0.8,
+        scale_up_factor: float = 1.1,
+        min_rps: float = 0.5,
+        max_rps: float = 100.0,
+    ) -> dict[str, Any]:
+        """Auto-adjust rate limits based on collected throttle statistics.
+
+        Args:
+            throttle_threshold: Throttle rate above which RPS is reduced.
+            scale_down_factor: Multiplier to reduce RPS when throttled.
+            scale_up_factor: Multiplier to increase RPS when under-utilised.
+            min_rps: Minimum RPS floor.
+            max_rps: Maximum RPS ceiling.
+
+        Returns:
+            Dict describing what adjustments were made.
+        """
+        adjustments: dict[str, Any] = {"platforms": {}, "endpoints": {}}
+
+        for key, ep_stats in self.stats.endpoint_stats.items():
+            total = ep_stats.get("requests", 0)
+            throttled = ep_stats.get("throttled", 0)
+            if total < 5:
+                continue
+
+            rate = throttled / total
+            platform, endpoint = key.split(":", 1) if ":" in key else (key, "")
+
+            if rate > throttle_threshold:
+                p_cfg = self.config.get_platform_config(platform)
+                ep_limit = p_cfg.get_endpoint_limit(endpoint)
+                new_rps = max(min_rps, ep_limit.requests_per_second * scale_down_factor)
+                self.set_endpoint_rps(platform, endpoint, new_rps)
+                adjustments["endpoints"][key] = {
+                    "action": "scale_down",
+                    "old_rps": ep_limit.requests_per_second,
+                    "new_rps": round(new_rps, 2),
+                    "throttle_rate": round(rate, 4),
+                }
+            elif rate < throttle_threshold * 0.3 and total > 20:
+                p_cfg = self.config.get_platform_config(platform)
+                ep_limit = p_cfg.get_endpoint_limit(endpoint)
+                new_rps = min(max_rps, ep_limit.requests_per_second * scale_up_factor)
+                if new_rps != ep_limit.requests_per_second:
+                    self.set_endpoint_rps(platform, endpoint, new_rps)
+                    adjustments["endpoints"][key] = {
+                        "action": "scale_up",
+                        "old_rps": ep_limit.requests_per_second,
+                        "new_rps": round(new_rps, 2),
+                        "throttle_rate": round(rate, 4),
+                    }
+
+        return adjustments
+
+
+# ── Request Priority ──────────────────────────────────────
+
+
+class RequestPriority(StrEnum):
+    """Priority levels for API requests.
+
+    Attributes:
+        CRITICAL: Must be served immediately (e.g. payment callbacks).
+        HIGH: Time-sensitive business operations (e.g. order creation).
+        NORMAL: Standard read/write requests (default).
+        LOW: Background or bulk operations (e.g. report generation).
+    """
+
+    CRITICAL = "critical"
+    HIGH = "high"
+    NORMAL = "normal"
+    LOW = "low"
+
+
+_PRIORITY_WEIGHTS: dict[str, int] = {
+    RequestPriority.CRITICAL: 0,
+    RequestPriority.HIGH: 1,
+    RequestPriority.NORMAL: 2,
+    RequestPriority.LOW: 3,
+}
+
+
+@dataclass
+class PrioritizedRequest:
+    """A request wrapper that carries priority metadata."""
+
+    priority: RequestPriority = RequestPriority.NORMAL
+    method: str = ""
+    path: str = ""
+    params: dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
+    request_id: str = ""
+    created_at: float = field(default_factory=time.time)
+    platform: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def priority_weight(self) -> int:
+        """Numeric weight for sorting (lower = higher priority)."""
+        return _PRIORITY_WEIGHTS.get(self.priority, 2)
+
+
+class PriorityQueue:
+    """Thread-safe priority queue for API requests.
+
+    Uses a heap so that the highest-priority (lowest weight) item is
+    always dequeued first.  Requests with equal priority are served in
+    FIFO order based on ``created_at``.
+    """
+
+    def __init__(self, max_size: int = 10000) -> None:
+
+        self._heap: list[tuple[int, float, int, PrioritizedRequest]] = []
+        self._counter = 0
+        self._max_size = max_size
+        self._lock = threading.Lock()
+        self._size = 0
+
+    def enqueue(self, request: PrioritizedRequest) -> None:
+        """Add a request to the queue.  Raises RuntimeError when full."""
+        import heapq
+
+        with self._lock:
+            if self._size >= self._max_size:
+                raise RuntimeError(f"Priority queue full (max_size={self._max_size})")
+            heapq.heappush(self._heap, (request.priority_weight, request.created_at, self._counter, request))
+            self._counter += 1
+            self._size += 1
+
+    def dequeue(self) -> PrioritizedRequest | None:
+        """Remove and return the highest-priority request."""
+        import heapq
+
+        with self._lock:
+            if not self._heap:
+                return None
+            _, _, _, request = heapq.heappop(self._heap)
+            self._size -= 1
+            return request
+
+    def peek(self) -> PrioritizedRequest | None:
+        """View the next request without removing it."""
+        with self._lock:
+            return self._heap[0][3] if self._heap else None
+
+    @property
+    def size(self) -> int:
+        return self._size
+
+    @property
+    def is_empty(self) -> bool:
+        return self._size == 0
+
+    def clear(self) -> None:
+        with self._lock:
+            self._heap.clear()
+            self._size = 0
+            self._counter = 0
+
+    def get_priority_distribution(self) -> dict[str, int]:
+        """Count of queued requests per priority level."""
+        with self._lock:
+            dist: dict[str, int] = {}
+            for _, _, _, req in self._heap:
+                name = req.priority.value if isinstance(req.priority, RequestPriority) else str(req.priority)
+                dist[name] = dist.get(name, 0) + 1
+            return dist
+
+
+@dataclass
+class PriorityStats:
+    """Statistics for priority-based request scheduling."""
+
+    total_dispatched: int = 0
+    by_priority: dict[str, int] = field(default_factory=dict)
+    total_delayed: int = 0
+    total_reordered: int = 0
+    total_queue_time_ms: float = 0.0
+    max_queue_time_ms: float = 0.0
+
+    @property
+    def avg_queue_time_ms(self) -> float:
+        if self.total_dispatched == 0:
+            return 0.0
+        return self.total_queue_time_ms / self.total_dispatched
+
+    def record_dispatch(self, priority: str, queue_time_ms: float, reordered: bool = False) -> None:
+        self.total_dispatched += 1
+        self.by_priority[priority] = self.by_priority.get(priority, 0) + 1
+        self.total_queue_time_ms += queue_time_ms
+        self.max_queue_time_ms = max(self.max_queue_time_ms, queue_time_ms)
+        if queue_time_ms > 0:
+            self.total_delayed += 1
+        if reordered:
+            self.total_reordered += 1
+
+    def get_summary(self) -> dict[str, Any]:
+        return {
+            "total_dispatched": self.total_dispatched,
+            "by_priority": dict(self.by_priority),
+            "total_delayed": self.total_delayed,
+            "total_reordered": self.total_reordered,
+            "avg_queue_time_ms": round(self.avg_queue_time_ms, 2),
+            "max_queue_time_ms": round(self.max_queue_time_ms, 2),
+        }
+
+    def reset(self) -> None:
+        self.total_dispatched = 0
+        self.by_priority.clear()
+        self.total_delayed = 0
+        self.total_reordered = 0
+        self.total_queue_time_ms = 0.0
+        self.max_queue_time_ms = 0.0
+
+
+class PriorityScheduler:
+    """Dispatches prioritized requests with queue management and statistics."""
+
+    def __init__(
+        self,
+        rate_limiter: ConfigurableRateLimiter | None = None,
+        max_queue_size: int = 10000,
+    ) -> None:
+        self._queue = PriorityQueue(max_size=max_queue_size)
+        self._rate_limiter = rate_limiter
+        self.stats = PriorityStats()
+        self._lock = threading.Lock()
+
+    @property
+    def queue_size(self) -> int:
+        return self._queue.size
+
+    @property
+    def queue_empty(self) -> bool:
+        return self._queue.is_empty
+
+    def enqueue(self, request: PrioritizedRequest) -> None:
+        self._queue.enqueue(request)
+
+    def dequeue(self) -> PrioritizedRequest | None:
+        return self._queue.dequeue()
+
+    async def schedule_and_execute(
+        self,
+        request: PrioritizedRequest,
+        execute_fn: Callable[..., Awaitable[Any]],
+    ) -> Any:
+        """Schedule a request respecting priority and rate limits, then execute."""
+        enqueued_at = time.time()
+
+        if self._rate_limiter and request.platform:
+            await self._rate_limiter.acquire(request.platform, request.path)
+
+        queue_time_ms = (time.time() - enqueued_at) * 1000
+
+        self.stats.record_dispatch(
+            priority=request.priority.value if isinstance(request.priority, RequestPriority) else str(request.priority),
+            queue_time_ms=queue_time_ms,
+        )
+
+        return await execute_fn(request)
+
+    def get_queue_distribution(self) -> dict[str, int]:
+        return self._queue.get_priority_distribution()
+
+    def get_stats_summary(self) -> dict[str, Any]:
+        return {
+            "queue_size": self.queue_size,
+            "queue_distribution": self.get_queue_distribution(),
+            "stats": self.stats.get_summary(),
+        }
+
+    def reset_stats(self) -> None:
+        self.stats.reset()
+
+    def clear_queue(self) -> None:
+        self._queue.clear()
+
 
 # ── Metrics ────────────────────────────────────────────────
 
@@ -1740,6 +2056,7 @@ class CommerceMCPBase:
         access_token: str = "",
         reconnect_config: ReconnectConfig | None = None,
         compression_config: CompressionConfig | None = None,
+        rate_limit_config: RateLimitConfig | None = None,
     ) -> None:
         self.app_key = app_key
         self.app_secret = app_secret
@@ -1750,6 +2067,8 @@ class CommerceMCPBase:
         self._health_cache = HealthCheckCache(ttl_seconds=30.0)
         self.cache_warmer = CacheWarmer()
         self._compressor = RequestCompressor(compression_config)
+        self._configurable_limiter = ConfigurableRateLimiter(rate_limit_config)
+        self._priority_scheduler = PriorityScheduler(rate_limiter=self._configurable_limiter)
 
     def _get_client(self) -> httpx.AsyncClient:
         """Get or create an HTTP client with connection pooling.
@@ -2186,6 +2505,54 @@ class CommerceMCPBase:
             Dict with compression metrics.
         """
         return self._compressor.get_stats()
+
+    # ── Priority Scheduling Convenience ────────────────────
+
+    async def prioritized_request(
+        self,
+        method: str,
+        path: str,
+        priority: RequestPriority = RequestPriority.NORMAL,
+        params: dict | None = None,
+        data: dict | None = None,
+        request_id: str = "",
+    ) -> dict[str, Any]:
+        """Make a priority-aware API request."""
+        request = PrioritizedRequest(
+            priority=priority,
+            method=method,
+            path=path,
+            params=params or {},
+            data=data or {},
+            request_id=request_id,
+            platform=self.__class__.__name__.upper(),
+        )
+        return await self._priority_scheduler.schedule_and_execute(
+            request,
+            execute_fn=lambda r: self._request(r.method, r.path, params=dict(r.params), data=dict(r.data)),
+        )
+
+    @property
+    def priority_scheduler(self) -> PriorityScheduler:
+        """Access the priority scheduler."""
+        return self._priority_scheduler
+
+    @property
+    def configurable_limiter(self) -> ConfigurableRateLimiter:
+        """Access the configurable rate limiter."""
+        return self._configurable_limiter
+
+    def get_priority_stats(self) -> dict[str, Any]:
+        """Get priority scheduling statistics."""
+        return self._priority_scheduler.get_stats_summary()
+
+    def get_rate_limit_stats(self) -> dict[str, Any]:
+        """Get configurable rate limiter statistics."""
+        return self._configurable_limiter.get_stats_summary()
+
+    def auto_adjust_rate_limits(self, **kwargs: Any) -> dict[str, Any]:
+        """Auto-adjust rate limits based on throttle statistics."""
+        return self._configurable_limiter.auto_adjust_from_stats(**kwargs)
 
     # ── Batch Operations ──────────────────────────────────
 

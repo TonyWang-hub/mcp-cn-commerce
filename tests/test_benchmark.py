@@ -15,7 +15,6 @@ Run with:
 from __future__ import annotations
 
 import asyncio
-import statistics
 import sys
 import threading
 import time
@@ -35,8 +34,6 @@ from cn_commerce_base import (
     BatchSummary,
     CacheWarmer,
     CommerceMCPBase,
-    ConfigurableRateLimiter,
-    EndpointMetrics,
     HealthCheckCache,
     HealthCheckResult,
     MetricsCollector,
@@ -44,7 +41,6 @@ from cn_commerce_base import (
     PriorityQueue,
     PriorityScheduler,
     PriorityStats,
-    RateLimitConfig,
     RequestPriority,
 )
 
@@ -57,12 +53,14 @@ _BENCHMARK_RESULTS: list[dict[str, Any]] = []
 
 def _record(name: str, value: float, unit: str = "ops/s", detail: str = "") -> None:
     """Record a benchmark result for summary output."""
-    _BENCHMARK_RESULTS.append({
-        "name": name,
-        "value": value,
-        "unit": unit,
-        "detail": detail,
-    })
+    _BENCHMARK_RESULTS.append(
+        {
+            "name": name,
+            "value": value,
+            "unit": unit,
+            "detail": detail,
+        }
+    )
 
 
 # ── HealthCheckCache Benchmarks ─────────────────────────────
@@ -474,11 +472,13 @@ class TestPriorityQueueBenchmark:
         def producer(n: int) -> None:
             try:
                 for i in range(n):
-                    pq.enqueue(PrioritizedRequest(
-                        priority=RequestPriority.NORMAL,
-                        method="GET",
-                        path=f"/api/{i}",
-                    ))
+                    pq.enqueue(
+                        PrioritizedRequest(
+                            priority=RequestPriority.NORMAL,
+                            method="GET",
+                            path=f"/api/{i}",
+                        )
+                    )
             except Exception as e:
                 errors.append(e)
 
@@ -562,7 +562,7 @@ class TestBatchOperationsBenchmark:
     def test_batch_request_item_creation_speed(self):
         """Creating BatchRequestItem instances should be fast."""
         start = time.perf_counter()
-        items = [
+        [
             BatchRequestItem(
                 method="GET",
                 path=f"/api/test/{i}",
@@ -802,10 +802,9 @@ class TestConcurrentRequestBenchmark:
         ]
 
         start = time.perf_counter()
-        summaries = await asyncio.gather(*[
-            asyncio.to_thread(CommerceMCPBase._batch_aggregate, r, 5000.0)
-            for r in results_lists
-        ])
+        summaries = await asyncio.gather(
+            *[asyncio.to_thread(CommerceMCPBase._batch_aggregate, r, 5000.0) for r in results_lists]
+        )
         elapsed = time.perf_counter() - start
 
         ops = 20 / elapsed
@@ -862,7 +861,7 @@ class TestEndToEndPipelineBenchmark:
         warmer = CacheWarmer()
         scheduler = PriorityScheduler()
         collector = MetricsCollector()
-        cache = HealthCheckCache(ttl_seconds=60.0)
+        HealthCheckCache(ttl_seconds=60.0)
 
         async def fake_fetch() -> dict[str, Any]:
             return {"items": list(range(10))}
@@ -903,7 +902,7 @@ class TestEndToEndPipelineBenchmark:
 
         # 3. Verify
         global_m = collector.get_global_metrics()
-        summary = collector.get_summary()
+        collector.get_summary()
 
         assert len(warmup_results) == 8
         assert len(results) == 200

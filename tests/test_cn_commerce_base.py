@@ -5,6 +5,7 @@ Tests the base classes, error handling, and utility functions.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
@@ -20,8 +21,12 @@ if str(_shared_dir) not in sys.path:
     sys.path.insert(0, str(_shared_dir))
 
 from cn_commerce_base import (
+    BatchRequestItem,
+    BatchResultItem,
+    BatchSummary,
     CommerceAPIError,
     CommerceMCPBase,
+    ConfigLoader,
     ConfigValidationError,
     EndpointMetrics,
     MetricsCollector,
@@ -458,3 +463,446 @@ class TestHealthCheck:
             result = await client.health_check()
         assert result["api_reachable"] is False
         assert "error" in result
+
+
+# ── BatchRequestItem Tests ───────────────────────────────
+
+
+class TestBatchRequestItem:
+    """Tests for BatchRequestItem dataclass."""
+
+    def test_basic_creation(self):
+        item = BatchRequestItem(method="GET", path="/api/test")
+        assert item.method == "GET"
+        assert item.path == "/api/test"
+        assert item.params == {}
+        assert item.data == {}
+        assert item.request_id == ""
+
+    def test_with_all_fields(self):
+        item = BatchRequestItem(
+            method="POST",
+            path="/api/orders",
+            params={"page": 1},
+            data={"name": "test"},
+            request_id="req-1",
+        )
+        assert item.method == "POST"
+        assert item.params == {"page": 1}
+        assert item.data == {"name": "test"}
+        assert item.request_id == "req-1"
+
+    def test_params_default_factory(self):
+        """Each instance should have independent default dicts."""
+        a = BatchRequestItem(method="GET", path="/a")
+        b = BatchRequestItem(method="GET", path="/b")
+        a.params["key"] = "val"
+        assert "key" not in b.params
+
+
+# ── BatchResultItem Tests ────────────────────────────────
+
+
+class TestBatchResultItem:
+    """Tests for BatchResultItem dataclass."""
+
+    def test_success_result(self):
+        r = BatchResultItem(request_id="r1", success=True, data={"ok": 1}, latency_ms=42.5)
+        assert r.success is True
+        assert r.data == {"ok": 1}
+        assert r.error is None
+        assert r.latency_ms == 42.5
+
+    def test_failure_result(self):
+        err = CommerceAPIError(40001, "bad")
+        r = BatchResultItem(request_id="r2", success=False, error=err)
+        assert r.success is False
+        assert r.data is None
+        assert isinstance(r.error, CommerceAPIError)
+
+    def test_defaults(self):
+        r = BatchResultItem(request_id="", success=True)
+        assert r.data is None
+        assert r.error is None
+        assert r.latency_ms == 0.0
+
+
+# ── BatchSummary Tests ───────────────────────────────────
+
+
+class TestBatchSummary:
+    """Tests for BatchSummary dataclass."""
+
+    def test_basic_creation(self):
+        results = [
+            BatchResultItem(request_id="1", success=True),
+            BatchResultItem(request_id="2", success=False, error=CommerceAPIError(1, "e")),
+        ]
+        summary = BatchSummary(
+            total=2,
+            succeeded=1,
+            failed=1,
+            results=results,
+            total_latency_ms=100.0,
+            error_summary={"CommerceAPIError": 1},
+        )
+        assert summary.total == 2
+        assert summary.succeeded == 1
+        assert summary.failed == 1
+        assert len(summary.results) == 2
+        assert summary.error_summary == {"CommerceAPIError": 1}
+
+    def test_error_summary_default_factory(self):
+        """Each instance should have independent default error_summary."""
+        a = BatchSummary(total=0, succeeded=0, failed=0, results=[], total_latency_ms=0.0)
+        b = BatchSummary(total=0, succeeded=0, failed=0, results=[], total_latency_ms=0.0)
+        a.error_summary["X"] = 1
+        assert "X" not in b.error_summary
+
+
+# ── _batch_aggregate Tests ───────────────────────────────
+
+
+class TestBatchAggregate:
+    """Tests for CommerceMCPBase._batch_aggregate static method."""
+
+    def test_all_success(self):
+        results = [
+            BatchResultItem(request_id="1", success=True, latency_ms=10.0),
+            BatchResultItem(request_id="2", success=True, latency_ms=20.0),
+        ]
+        summary = CommerceMCPBase._batch_aggregate(results, total_latency_ms=25.0)
+        assert summary.total == 2
+        assert summary.succeeded == 2
+        assert summary.failed == 0
+        assert summary.error_summary == {}
+
+    def test_mixed_results(self):
+        results = [
+            BatchResultItem(request_id="1", success=True),
+            BatchResultItem(request_id="2", success=False, error=CommerceAPIError(1, "e")),
+            BatchResultItem(request_id="3", success=False, error=ValueError("v")),
+        ]
+        summary = CommerceMCPBase._batch_aggregate(results, total_latency_ms=50.0)
+        assert summary.total == 3
+        assert summary.succeeded == 1
+        assert summary.failed == 2
+        assert summary.error_summary["CommerceAPIError"] == 1
+        assert summary.error_summary["ValueError"] == 1
+
+    def test_empty_results(self):
+        summary = CommerceMCPBase._batch_aggregate([], total_latency_ms=0.0)
+        assert summary.total == 0
+        assert summary.succeeded == 0
+        assert summary.failed == 0
+
+    def test_same_error_type_counted(self):
+        err = CommerceAPIError(1, "e")
+        results = [
+            BatchResultItem(request_id="a", success=False, error=err),
+            BatchResultItem(request_id="b", success=False, error=err),
+        ]
+        summary = CommerceMCPBase._batch_aggregate(results, total_latency_ms=10.0)
+        assert summary.error_summary["CommerceAPIError"] == 2
+
+
+# ── _batch_request Tests ─────────────────────────────────
+
+
+class TestBatchRequest:
+    """Tests for CommerceMCPBase._batch_request."""
+
+    @pytest.mark.asyncio
+    async def test_empty_requests_raises(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        with pytest.raises(ValueError, match="cannot be empty"):
+            await client._batch_request([])
+
+    @pytest.mark.asyncio
+    async def test_single_request_success(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        with patch.object(client, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = {"result": {"id": 1}}
+            summary = await client._batch_request(
+                [BatchRequestItem("GET", "/api/test", request_id="t1")],
+            )
+        assert summary.total == 1
+        assert summary.succeeded == 1
+        assert summary.failed == 0
+        assert summary.results[0].data == {"result": {"id": 1}}
+        assert summary.results[0].latency_ms > 0
+
+    @pytest.mark.asyncio
+    async def test_multiple_requests_all_success(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        with patch.object(client, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = {"result": "ok"}
+            requests = [BatchRequestItem("GET", "/api/a", request_id=f"r{i}") for i in range(5)]
+            summary = await client._batch_request(requests, max_concurrency=3)
+        assert summary.total == 5
+        assert summary.succeeded == 5
+        assert summary.failed == 0
+        assert mock_req.call_count == 5
+
+    @pytest.mark.asyncio
+    async def test_partial_failure(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        call_count = 0
+
+        async def _side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise CommerceAPIError(40001, "bad request")
+            return {"result": "ok"}
+
+        with patch.object(client, "_request", side_effect=_side_effect):
+            requests = [BatchRequestItem("GET", "/api/a", request_id=f"r{i}") for i in range(3)]
+            summary = await client._batch_request(requests)
+
+        assert summary.total == 3
+        assert summary.failed == 1
+        assert summary.error_summary["CommerceAPIError"] == 1
+
+    @pytest.mark.asyncio
+    async def test_concurrency_clamped(self):
+        """max_concurrency is clamped to 1-20."""
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        with patch.object(client, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = {"result": "ok"}
+            requests = [BatchRequestItem("GET", "/api/a", request_id="r0")]
+            # Should not raise even with out-of-range values
+            await client._batch_request(requests, max_concurrency=0)
+            await client._batch_request(requests, max_concurrency=100)
+
+    @pytest.mark.asyncio
+    async def test_fail_fast_mode(self):
+        """fail_fast stops submitting after first error."""
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        call_count = 0
+
+        async def _side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise CommerceAPIError(500, "server error")
+            # Slow down subsequent calls to ensure fail_fast has time to trigger
+            await asyncio.sleep(0.05)
+            return {"result": "ok"}
+
+        with patch.object(client, "_request", side_effect=_side_effect):
+            requests = [BatchRequestItem("GET", "/api/a", request_id=f"r{i}") for i in range(5)]
+            summary = await client._batch_request(requests, fail_fast=True)
+
+        assert summary.failed >= 1
+        assert summary.error_summary.get("CommerceAPIError", 0) >= 1
+
+    @pytest.mark.asyncio
+    async def test_request_params_not_mutated(self):
+        """Original request params should not be mutated by batch execution."""
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        with patch.object(client, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = {"result": "ok"}
+            item = BatchRequestItem("GET", "/api/a", params={"key": "val"}, request_id="r0")
+            await client._batch_request([item])
+        # Original params unchanged
+        assert item.params == {"key": "val"}
+
+    @pytest.mark.asyncio
+    async def test_request_ids_preserved(self):
+        """request_id should match between input and results."""
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        with patch.object(client, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = {"result": "ok"}
+            requests = [
+                BatchRequestItem("GET", "/api", request_id="alpha"),
+                BatchRequestItem("GET", "/api", request_id="beta"),
+                BatchRequestItem("GET", "/api", request_id="gamma"),
+            ]
+            summary = await client._batch_request(requests)
+        result_ids = {r.request_id for r in summary.results}
+        assert result_ids == {"alpha", "beta", "gamma"}
+
+    @pytest.mark.asyncio
+    async def test_latency_tracked(self):
+        """Each result and the summary should have latency > 0."""
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        with patch.object(client, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = {"result": "ok"}
+            summary = await client._batch_request(
+                [BatchRequestItem("GET", "/api", request_id="r0")],
+            )
+        assert summary.total_latency_ms > 0
+        assert summary.results[0].latency_ms > 0
+
+    @pytest.mark.asyncio
+    async def test_mixed_success_and_failure_types(self):
+        """Multiple error types in a single batch."""
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        call_count = 0
+
+        async def _side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise CommerceAPIError(40001, "api error")
+            if call_count == 3:
+                raise httpx.ConnectError("connection refused")
+            return {"result": "ok"}
+
+        with patch.object(client, "_request", side_effect=_side_effect):
+            requests = [BatchRequestItem("GET", "/api", request_id=f"r{i}") for i in range(4)]
+            summary = await client._batch_request(requests)
+
+        assert summary.total == 4
+        assert summary.succeeded == 2
+        assert summary.failed == 2
+        assert summary.error_summary["CommerceAPIError"] == 1
+        assert summary.error_summary["ConnectError"] == 1
+
+
+# ── ConfigLoader Tests ───────────────────────────────────
+
+
+class TestConfigLoader:
+    """Tests for ConfigLoader configuration file loading."""
+
+    def test_load_json_file(self, tmp_path):
+        """Load config from a JSON file."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"host": "localhost", "port": 8080}))
+        loader = ConfigLoader(config_file)
+        assert loader.get("host") == "localhost"
+        assert loader.get("port") == 8080
+
+    def test_load_yaml_file(self, tmp_path):
+        """Load config from a YAML file."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("host: localhost\nport: 8080\n")
+        loader = ConfigLoader(config_file)
+        assert loader.get("host") == "localhost"
+        assert loader.get("port") == 8080
+
+    def test_load_yml_file(self, tmp_path):
+        """Load config from a .yml file."""
+        config_file = tmp_path / "config.yml"
+        config_file.write_text("host: localhost\n")
+        loader = ConfigLoader(config_file)
+        assert loader.get("host") == "localhost"
+
+    def test_file_not_found(self, tmp_path):
+        """Raise FileNotFoundError for missing config file."""
+        with pytest.raises(FileNotFoundError):
+            ConfigLoader(tmp_path / "nonexistent.json")
+
+    def test_unsupported_format(self, tmp_path):
+        """Raise ValueError for unsupported file formats."""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text("[section]\nkey = 'value'\n")
+        with pytest.raises(ValueError, match="Unsupported config format"):
+            ConfigLoader(config_file)
+
+    def test_env_override(self, tmp_path):
+        """Environment variables override file values."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"host": "file-host", "port": 8080}))
+        with patch.dict(os.environ, {"MYAPP_HOST": "env-host"}):
+            loader = ConfigLoader(config_file, env_prefix="MYAPP_")
+            assert loader.get("host") == "env-host"
+            # port should still come from file
+            assert loader.get("port") == 8080
+
+    def test_get_default(self, tmp_path):
+        """Return default when key not found anywhere."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"host": "localhost"}))
+        loader = ConfigLoader(config_file)
+        assert loader.get("missing_key", default="fallback") == "fallback"
+
+    def test_get_nested(self, tmp_path):
+        """Access nested config values with dot notation."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "database": {"host": "db.example.com", "port": 5432},
+            "app": {"name": "test"},
+        }))
+        loader = ConfigLoader(config_file)
+        assert loader.get_nested("database.host") == "db.example.com"
+        assert loader.get_nested("database.port") == 5432
+        assert loader.get_nested("app.name") == "test"
+        assert loader.get_nested("missing.path", default="none") == "none"
+
+    def test_get_nested_env_override(self, tmp_path):
+        """Environment variables override nested config values."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"database": {"host": "file-host"}}))
+        with patch.dict(os.environ, {"APP_DATABASE_HOST": "env-host"}):
+            loader = ConfigLoader(config_file, env_prefix="APP_")
+            assert loader.get_nested("database.host") == "env-host"
+
+    def test_deep_merge(self):
+        """Deep merge two dicts, override takes precedence."""
+        base = {"a": 1, "b": {"c": 2, "d": 3}}
+        override = {"b": {"c": 99, "e": 4}, "f": 5}
+        result = ConfigLoader.deep_merge(base, override)
+        assert result == {"a": 1, "b": {"c": 99, "d": 3, "e": 4}, "f": 5}
+
+    def test_deep_merge_non_dict_override(self):
+        """Non-dict override replaces base value entirely."""
+        base = {"a": {"b": 1}}
+        override = {"a": "replaced"}
+        result = ConfigLoader.deep_merge(base, override)
+        assert result == {"a": "replaced"}
+
+    def test_validate_required(self):
+        """Validate required keys are present."""
+        config = {"host": "localhost", "database": {"port": 5432}}
+        missing = ConfigLoader.validate_required(config, ["host", "database.port", "name"])
+        assert "name" in missing
+        assert "host" not in missing
+        assert "database.port" not in missing
+
+    def test_validate_required_all_present(self):
+        """Return empty list when all required keys present."""
+        config = {"host": "localhost", "port": 8080}
+        missing = ConfigLoader.validate_required(config, ["host", "port"])
+        assert missing == []
+
+    def test_apply_env_overrides(self, tmp_path):
+        """apply_env_overrides applies env vars to config dict."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"host": "original"}))
+        with patch.dict(os.environ, {"CFG_NEW_KEY": "new_value"}):
+            loader = ConfigLoader(config_file, env_prefix="CFG_")
+            loader.apply_env_overrides()
+            assert loader.config["new_key"] == "new_value"
+
+    def test_no_file_mode(self):
+        """ConfigLoader works without a config file (env-only mode)."""
+        with patch.dict(os.environ, {"TEST_VALUE": "from_env"}):
+            loader = ConfigLoader(env_prefix="TEST_")
+            assert loader.get("value") == "from_env"
+            assert loader.config == {}
+
+    def test_properties(self, tmp_path):
+        """Config path and env prefix properties."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"a": 1}))
+        loader = ConfigLoader(config_file, env_prefix="P_")
+        assert loader.config_path == config_file
+        assert loader.env_prefix == "P_"
+        assert loader.config == {"a": 1}
+
+    def test_empty_json_file(self, tmp_path):
+        """Empty JSON object returns empty config."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text("{}")
+        loader = ConfigLoader(config_file)
+        assert loader.config == {}
+
+    def test_empty_yaml_file(self, tmp_path):
+        """Empty YAML file returns empty config."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("")
+        loader = ConfigLoader(config_file)
+        assert loader.config == {}

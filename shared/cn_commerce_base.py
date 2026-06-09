@@ -30,7 +30,6 @@ from typing import Any
 
 import httpx
 
-
 # ── Connection Pool Monitoring ───────────────────────────
 
 
@@ -101,12 +100,8 @@ class ConnectionPoolMonitor:
     def get_metrics(self) -> PoolMetrics:
         """Get current pool metrics snapshot."""
         with self._lock:
-            utilization = (
-                self._active_count / self._max_connections if self._max_connections > 0 else 0.0
-            )
-            avg_wait = (
-                self._total_wait_ms / self._acquire_count if self._acquire_count > 0 else 0.0
-            )
+            utilization = self._active_count / self._max_connections if self._max_connections > 0 else 0.0
+            avg_wait = self._total_wait_ms / self._acquire_count if self._acquire_count > 0 else 0.0
             return PoolMetrics(
                 total_connections=self._active_count,
                 active_connections=self._active_count,
@@ -293,8 +288,12 @@ class Tracer:
         trace_id = parent.trace_id if parent else self._generate_id()
         parent_id = parent.span_id if parent else None
         span = Span(
-            trace_id=trace_id, span_id=self._generate_id(), parent_id=parent_id,
-            name=name, start_time=time.time(), attributes=attributes or {},
+            trace_id=trace_id,
+            span_id=self._generate_id(),
+            parent_id=parent_id,
+            name=name,
+            start_time=time.time(),
+            attributes=attributes or {},
         )
         if self.service_name:
             span.set_attribute("service.name", self.service_name)
@@ -382,10 +381,12 @@ class Tracer:
             self.finish_span(span)
 
 
-class span_scope:
+class SpanScope:
     """Context manager for automatic span lifecycle management."""
 
-    def __init__(self, tracer: Tracer, name: str, parent: Span | None = None, attributes: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self, tracer: Tracer, name: str, parent: Span | None = None, attributes: dict[str, Any] | None = None
+    ) -> None:
         self.tracer = tracer
         self.name = name
         self.parent = parent
@@ -1414,12 +1415,10 @@ class ReconnectConfig:
         Returns:
             Delay in seconds.
         """
-        delay = min(self.base_delay * (2 ** attempt), self.max_delay)
+        delay = min(self.base_delay * (2**attempt), self.max_delay)
         if self.jitter:
             delay = delay * (0.5 + random.random())
         return delay
-
-
 
 
 # ── Health Check ────────────────────────────────────────────
@@ -1647,15 +1646,12 @@ class CommerceMCPBase:
                 self._client = None
 
                 if attempt == cfg.max_retries:
-                    logger.error(
-                        f"Auto-reconnect failed after {cfg.max_retries + 1} attempts: {exc}"
-                    )
+                    logger.error(f"Auto-reconnect failed after {cfg.max_retries + 1} attempts: {exc}")
                     raise
 
                 delay = cfg.compute_delay(attempt)
                 logger.warning(
-                    f"Reconnect attempt {attempt + 1}/{cfg.max_retries} failed: {exc}. "
-                    f"Retrying in {delay:.2f}s"
+                    f"Reconnect attempt {attempt + 1}/{cfg.max_retries} failed: {exc}. " f"Retrying in {delay:.2f}s"
                 )
                 await asyncio.sleep(delay)
 
@@ -1964,7 +1960,7 @@ class CommerceMCPBase:
                         # For named dependencies, check if they are configured
                         dep_info["reachable"] = True
                         dep_info["configured"] = True
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     dep_info["error"] = "timeout"
                 except Exception as exc:
                     dep_info["error"] = str(exc)
@@ -2826,8 +2822,6 @@ class WebhookManager:
         self._delivery_results.clear()
 
 
-
-
 # ── Configuration Validation ───────────────────────────────
 
 
@@ -3015,9 +3009,7 @@ class ConfigValidator:
             if rule.pattern and isinstance(value, str):
                 if not re.match(rule.pattern, value):
                     result.invalid_keys.append(full_key)
-                    result.add_error(
-                        f"Configuration '{full_key}' does not match required pattern: {rule.pattern}"
-                    )
+                    result.add_error(f"Configuration '{full_key}' does not match required pattern: {rule.pattern}")
 
             # Allowed values check
             if rule.allowed_values is not None:
@@ -3031,14 +3023,10 @@ class ConfigValidator:
             if isinstance(value, (int, float)):
                 if rule.min_value is not None and value < rule.min_value:
                     result.invalid_keys.append(full_key)
-                    result.add_error(
-                        f"Configuration '{full_key}' value {value} is below minimum {rule.min_value}"
-                    )
+                    result.add_error(f"Configuration '{full_key}' value {value} is below minimum {rule.min_value}")
                 if rule.max_value is not None and value > rule.max_value:
                     result.invalid_keys.append(full_key)
-                    result.add_error(
-                        f"Configuration '{full_key}' value {value} is above maximum {rule.max_value}"
-                    )
+                    result.add_error(f"Configuration '{full_key}' value {value} is above maximum {rule.max_value}")
 
             if isinstance(value, str):
                 if rule.min_length is not None and len(value) < rule.min_length:
@@ -3063,9 +3051,7 @@ class ConfigValidator:
                 if dep_value is None or dep_value == "":
                     full_key = f"{prefix}{key}" if prefix else key
                     full_dep = f"{prefix}{dep_key}" if prefix else dep_key
-                    error_msg = (
-                        f"Configuration '{full_key}' requires '{full_dep}' to be set"
-                    )
+                    error_msg = f"Configuration '{full_key}' requires '{full_dep}' to be set"
                     result.dependency_errors.append(error_msg)
                     result.add_error(error_msg)
 
@@ -3147,7 +3133,6 @@ class ConfigValidator:
             return temp.validate(config, prefix=f"{env_prefix}_")
 
         return self.validate(config, prefix=f"{env_prefix}_")
-
 
 
 # ── Batch Operations ──────────────────────────────────────

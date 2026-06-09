@@ -15,7 +15,6 @@ import statistics
 import sys
 import time
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -33,7 +32,6 @@ from cn_commerce_base import (
     RateLimiter,
     RetryConfig,
 )
-
 
 # ── HTTP Client Connection Pool Tests ──────────────────────
 
@@ -55,6 +53,7 @@ class TestHTTPClientConnectionPool:
         assert not c1.is_closed
         # Clean up
         import asyncio
+
         loop = asyncio.new_event_loop()
         loop.run_until_complete(client.close())
         loop.close()
@@ -67,6 +66,7 @@ class TestHTTPClientConnectionPool:
         assert c is not None
         assert not c.is_closed
         import asyncio
+
         loop = asyncio.new_event_loop()
         loop.run_until_complete(client.close())
         loop.close()
@@ -99,6 +99,7 @@ class TestHTTPClientConnectionPool:
         assert ca is not cb
         # Clean up
         import asyncio
+
         loop = asyncio.new_event_loop()
         loop.run_until_complete(a.close())
         loop.run_until_complete(b.close())
@@ -228,12 +229,12 @@ class TestRateLimiterPerformance:
             timestamps.append(time.perf_counter())
 
         # Check intervals between consecutive requests
-        intervals = [timestamps[i+1] - timestamps[i] for i in range(len(timestamps)-1)]
+        intervals = [timestamps[i + 1] - timestamps[i] for i in range(len(timestamps) - 1)]
         avg_interval = statistics.mean(intervals)
         # Allow some tolerance for async scheduling
-        assert avg_interval >= expected_interval * 0.5, (
-            f"Average interval {avg_interval:.4f}s < expected {expected_interval:.4f}s"
-        )
+        assert (
+            avg_interval >= expected_interval * 0.5
+        ), f"Average interval {avg_interval:.4f}s < expected {expected_interval:.4f}s"
 
     @pytest.mark.asyncio
     async def test_rate_limiter_high_throughput(self):
@@ -248,9 +249,7 @@ class TestRateLimiterPerformance:
         elapsed = time.perf_counter() - start
 
         expected_min = (count - 1) / rps  # Minimum expected time
-        assert elapsed >= expected_min * 0.8, (
-            f"Elapsed {elapsed:.3f}s < expected minimum {expected_min:.3f}s"
-        )
+        assert elapsed >= expected_min * 0.8, f"Elapsed {elapsed:.3f}s < expected minimum {expected_min:.3f}s"
 
     def test_rate_limiter_min_interval_calculation(self):
         """Verify min_interval calculation for various rates."""

@@ -6,4 +6,4 @@ every platform server. Public entry points live in :mod:`shared.cn_commerce_base
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"

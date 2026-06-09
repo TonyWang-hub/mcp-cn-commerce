@@ -1,263 +1,202 @@
-# Request Result Cache & Response Decompression
+# Request Deduplication, Cache Warmup & Compression
 
-This document describes the request result caching and response decompression features available in `mcp-cn-commerce`.
+This document describes the request-efficiency features that ship in
+`shared.cn_commerce_base`: **request deduplication**, **cache warmup**, and
+**outgoing request compression**.
+
+> **Scope note.** There is currently no transparent per-request *result* cache or
+> response *decompression* layer inside `CommerceMCPBase._request()`. The
+> features below are the real, available primitives for avoiding redundant work
+> and pre-loading reference data. Deduplication and cache warmup are **opt-in**;
+> outgoing compression is configured per client.
 
 ## Table of Contents
 
-- [Request Result Cache](#request-result-cache)
-  - [Overview](#overview)
-  - [Configuration](#configuration)
-  - [Usage](#usage)
-  - [Cache Invalidation](#cache-invalidation)
-  - [Statistics](#cache-statistics)
-- [Response Decompression](#response-decompression)
-  - [Overview](#overview-1)
-  - [Supported Encodings](#supported-encodings)
-  - [Usage](#usage-1)
-  - [Statistics](#decompression-statistics)
-- [Integration Example](#integration-example)
+- [Request Deduplication](#request-deduplication)
+- [Cache Warmup](#cache-warmup)
+- [Outgoing Request Compression](#outgoing-request-compression)
 
 ---
 
-## Request Result Cache
+## Request Deduplication
 
 ### Overview
 
-The `RequestResultCache` provides an LRU + TTL cache for API request results. When enabled, identical GET requests return cached responses without hitting the API, reducing latency and API call volume.
+`RequestDeduplicator` suppresses identical requests issued within a configurable
+time window. It is content-based: the key is a SHA-256 of
+`method + path + params + data`. This is useful when several callers (or retries)
+would otherwise fire the same call in a short burst.
 
-Key features:
-- **LRU eviction**: When the cache reaches `max_size`, the least-recently-used entry is evicted.
-- **Per-entry TTL**: Each cached entry expires after a configurable duration.
-- **Thread-safe**: All operations are protected by a lock for concurrent access.
-- **Deterministic cache keys**: Generated from method + path + params + data using SHA-256.
-
-### Configuration
-
-Create a `RequestCacheConfig` and pass it when initializing the client:
-
-```python
-from shared.cn_commerce_base import (
-    RequestCacheConfig,
-    CommerceMCPBase,
-)
-
-cache_config = RequestCacheConfig(
-    enabled=True,               # Enable/disable caching
-    max_size=512,               # Max cached entries (LRU eviction)
-    default_ttl_seconds=300.0,  # Default TTL (5 minutes)
-    cacheable_methods=("GET",), # HTTP methods to cache
-)
-
-client = CommerceMCPBase(
-    app_key="...",
-    app_secret="...",
-    cache_config=cache_config,
-)
-```
-
-**Parameters:**
-
-| Parameter                | Type              | Default   | Description                                    |
-| ------------------------ | ----------------- | --------- | ---------------------------------------------- |
-| `enabled`                | `bool`            | `True`    | Whether request result caching is active        |
-| `max_size`               | `int`             | `512`     | Maximum number of cached entries                |
-| `default_ttl_seconds`    | `float`           | `300.0`   | Default time-to-live for cached entries         |
-| `cacheable_methods`      | `tuple[str, ...]` | `("GET",)`| HTTP methods eligible for caching               |
-| `exclude_error_responses`| `bool`            | `True`    | Skip caching error responses                    |
+It is **opt-in** -- the base client does not deduplicate `_request()` calls for
+you. You create a deduplicator and consult it before issuing a request.
 
 ### Usage
 
-Result caching is integrated into `CommerceMCPBase._request()`. When enabled, GET requests automatically check the cache before making an API call, and store successful responses:
-
 ```python
-# First call -- hits the API
-result = await client._request("GET", "/api/products", params={"page": "1"})
+from shared.cn_commerce_base import RequestDeduplicator
 
-# Second identical call -- served from cache
-result = await client._request("GET", "/api/products", params={"page": "1"})
-```
+dedup = RequestDeduplicator(window_seconds=30.0)
 
-You can bypass the cache for specific requests:
-
-```python
-# Skip cache for this request
-result = await client._request("GET", "/api/orders", use_cache=False)
-
-# Override TTL for this specific entry
-result = await client._request("GET", "/api/config", cache_ttl=60.0)
-```
-
-For standalone use outside `CommerceMCPBase`:
-
-```python
-from shared.cn_commerce_base import RequestResultCache, RequestCacheConfig
-
-cache = RequestResultCache(RequestCacheConfig(max_size=256))
-key = RequestResultCache.make_key("GET", "/api/products", params={"page": "1"})
-
-cached = cache.get(key)
-if cached is None:
-    result = await fetch_data()
-    cache.set(key, result, ttl_seconds=120)
+# `check_and_record` returns True if this request was already seen in the window.
+if dedup.check_and_record("GET", "/api/order", params={"id": "123"}):
+    # Duplicate within the window -- skip the call.
+    ...
 else:
-    result = cached
+    result = await client._request("GET", "/api/order", params={"id": "123"})
 ```
 
-### Cache Invalidation
+If you need the check and the record as separate steps:
 
 ```python
-# Invalidate a specific entry by key
-key = RequestResultCache.make_key("GET", "/api/products")
-client.invalidate_result_cache(key)
-
-# Invalidate all cached entries
-client.invalidate_result_cache()
-
-# Direct cache access
-client._result_cache.clear()
-client._result_cache.cleanup_expired()  # Remove expired entries only
+key = dedup.compute_key("GET", "/api/order", params={"id": "123"})
+if not dedup.is_duplicate(key):
+    result = await client._request("GET", "/api/order", params={"id": "123"})
+    dedup.record(key)
 ```
 
-### Cache Statistics
+### Maintenance & statistics
 
 ```python
-stats = client.get_result_cache_stats()
+dedup.cleanup()              # drop hashes older than the window; returns count removed
+dedup.invalidate()           # clear all tracked hashes
+dedup.invalidate(key)        # clear a single key
+dedup.window_seconds = 60.0  # adjust the window at runtime
+
+stats = dedup.get_stats()
 # {
-#     "total_requests": 100,
-#     "cache_hits": 75,
-#     "cache_misses": 25,
-#     "hit_rate": 0.75,
-#     "total_stored": 25,
-#     "total_evicted": 3,
-#     "total_invalidated": 0,
-#     "total_bytes_cached": 524288,
-#     "current_size": 22,
-#     "max_size": 512,
-#     "config": { ... },
+#   "total_requests": 2,
+#   "total_deduplicated": 1,
+#   "total_unique": 1,
+#   "dedup_rate": 0.5,
+#   "dedup_window_seconds": 30.0,
+#   "active_hashes": 1,
 # }
+```
+
+### Built-in dedup in the retry queue
+
+`RetryRequestQueue` (see [request-queue.md](request-queue.md)) has its own
+deduplication, controlled by `RetryQueueConfig.dedup_window`. When you `enqueue`
+a failed request that matches a recently-enqueued one, it is skipped and
+`stats.total_deduplicated` is incremented (pass `force=True` to bypass).
+
+```python
+from shared.cn_commerce_base import RetryRequestQueue, RetryQueueConfig
+
+queue = RetryRequestQueue(RetryQueueConfig(dedup_window=30.0))
+await queue.enqueue(method="GET", path="/api/order", params={"id": "1"})
+await queue.enqueue(method="GET", path="/api/order", params={"id": "1"})  # deduplicated
 ```
 
 ---
 
-## Response Decompression
+## Cache Warmup
 
 ### Overview
 
-The `ResponseDecompressor` transparently decompresses HTTP response bodies based on the `Content-Encoding` header. This is integrated into `CommerceMCPBase._request()` and works automatically -- no configuration needed.
+`CacheWarmer` pre-loads reference data (categories, hot products, etc.) so the
+first real request doesn't pay the cold-start cost. Every `CommerceMCPBase`
+instance owns one as `client.cache_warmer`, and the base exposes a
+`warmup_cache()` convenience.
 
-### Supported Encodings
-
-| Encoding      | Description                    |
-| ------------- | ------------------------------ |
-| `gzip`        | gzip compression (RFC 1952)    |
-| `x-gzip`      | Alias for gzip                 |
-| `deflate`     | deflate compression (RFC 1951) |
-| `br`          | Brotli (requires `brotli` package) |
-| `identity`    | No compression (passthrough)   |
+It is **opt-in** in the sense that nothing is warmed until you register tasks and
+trigger a warmup.
 
 ### Usage
 
-Response decompression is automatic in `CommerceMCPBase._request()`. If the API returns a `Content-Encoding: gzip` header, the response body is decompressed before parsing JSON.
-
-For standalone use:
-
 ```python
-from shared.cn_commerce_base import ResponseDecompressor
-
-decompressor = ResponseDecompressor()
-
-# Decompress a gzip response
-body = decompressor.decompress(compressed_bytes, content_encoding="gzip")
-
-# No encoding -- returns as-is
-body = decompressor.decompress(plain_bytes, content_encoding="identity")
-```
-
-### Decompression Statistics
-
-```python
-stats = client.get_decompression_stats()
-# {
-#     "total_responses": 100,
-#     "decompressed_responses": 45,
-#     "decompression_rate": 0.45,
-#     "total_compressed_bytes": 1048576,
-#     "total_decompressed_bytes": 2097152,
-#     "bytes_saved": 1048576,
-#     "avg_compression_ratio": 2.0,
-#     "decompression_errors": 0,
-# }
-```
-
----
-
-## Integration Example
-
-Complete example combining all features:
-
-```python
-import asyncio
-from shared.cn_commerce_base import (
-    CommerceMCPBase,
-    CompressionConfig,
-    CompressionMethod,
-    RequestCacheConfig,
-)
+from shared.cn_commerce_base import CommerceMCPBase
 
 
 class MyPlatformClient(CommerceMCPBase):
-    BASE_URL = "https://api.example.com"
+    BASE_URL = "https://api.example.com/"
 
     def __init__(self) -> None:
-        super().__init__(
-            app_key="my_key",
-            app_secret="my_secret",
-            # Request body compression (outgoing)
-            compression_config=CompressionConfig(
-                method=CompressionMethod.GZIP,
-                min_size_bytes=1024,
-            ),
-            # Result caching
-            cache_config=RequestCacheConfig(
-                max_size=256,
-                default_ttl_seconds=120.0,
-            ),
-        )
-        # Cache warmup tasks
+        super().__init__(app_key="...", app_secret="...")
+        # Register warmup tasks (priority: lower runs first).
         self.cache_warmer.register(
             platform="MY_PLATFORM",
             cache_key="categories",
             fetch_fn=self._fetch_categories,
-            ttl_seconds=600,
+            priority=0,
+            ttl_seconds=600.0,
         )
-
 
     async def _fetch_categories(self):
         return await self._request("GET", "/api/categories")
 
 
-async def main():
-    client = MyPlatformClient()
+client = MyPlatformClient()
 
-    # 1. Warm reference data cache
-    await client.warmup_cache()
+# Warm everything (or pass platforms=[...] to warm a subset).
+results = await client.warmup_cache()
+for r in results:
+    print(r["platform"], r["cache_key"], r["success"], f"{r['latency_ms']}ms")
+```
 
-    # 2. Make requests (result cache is automatic)
-    products = await client._request("GET", "/api/products", params={"page": "1"})
-    products_again = await client._request("GET", "/api/products", params={"page": "1"})
-    # ^ Second call served from cache
+You can also drive the `CacheWarmer` directly:
 
-    # 3. Check all stats
-    print("Compression:", client.get_compression_stats())
-    print("Decompression:", client.get_decompression_stats())
-    print("Result Cache:", client.get_result_cache_stats())
+```python
+warmer = client.cache_warmer
+await warmer.warmup_all()                 # run all registered tasks
+await warmer.warmup_platform("TAOBAO")    # run tasks for one platform
+task = warmer.start_scheduled(interval_seconds=300)  # periodic re-warm (asyncio.Task)
+warmer.stop_scheduled()
+```
 
-    # 4. Invalidate when data changes
-    client.invalidate_result_cache()
+---
 
-    # 5. Cleanup
-    await client.close()
+## Outgoing Request Compression
 
+### Overview
 
-asyncio.run(main())
+`RequestCompressor` compresses **outgoing POST bodies** before they are sent.
+This is configured per client via `compression_config`; the base applies it
+inside `_request()` for POST requests whose body exceeds the configured minimum
+size.
+
+### Supported methods
+
+| Method (`CompressionMethod`) | Description |
+|---|---|
+| `NONE` (`"none"`) | No compression (default) |
+| `GZIP` (`"gzip"`) | gzip compression |
+| `DEFLATE` (`"deflate"`) | deflate compression |
+| `AUTO` (`"auto"`) | Pick a method automatically |
+
+### Usage
+
+```python
+from shared.cn_commerce_base import (
+    CommerceMCPBase,
+    CompressionConfig,
+    CompressionMethod,
+)
+
+client = CommerceMCPBase(
+    app_key="...",
+    app_secret="...",
+    compression_config=CompressionConfig(
+        method=CompressionMethod.GZIP,
+        min_size_bytes=1024,   # only compress bodies larger than 1 KiB
+    ),
+)
+
+# POST bodies are now compressed automatically when they exceed min_size_bytes.
+await client._request("POST", "/api/batch", data={"items": [...]})
+```
+
+### Statistics
+
+```python
+stats = client.get_compression_stats()
+# {
+#   "total_requests": 100,
+#   "compressed_requests": 45,
+#   "compression_rate": 0.45,
+#   "total_original_bytes": 2097152,
+#   "total_compressed_bytes": 1048576,
+#   "bytes_saved": 1048576,
+#   "avg_compression_ratio": 2.0,
+# }
 ```

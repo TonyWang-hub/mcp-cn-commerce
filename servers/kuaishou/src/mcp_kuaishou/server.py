@@ -11,18 +11,17 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import sys
-from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-# Let the server find the shared base class at <repo-root>/shared/
-_project_root = Path(__file__).resolve().parents[4]
-if str(_project_root) not in sys.path:
-    sys.path.insert(0, str(_project_root))
-
-from shared.cn_commerce_base import CommerceMCPBase, ConfigValidationError, SignMethod
+from shared.cn_commerce_base import (
+    CommerceMCPBase,
+    ConfigValidationError,
+    SignMethod,
+    canonicalize_sign_value,
+    register_common_tools,
+)
 
 # ── Kuaishou client ───────────────────────────────────────────────────────────
 
@@ -62,7 +61,11 @@ class KuaishouMCP(CommerceMCPBase):
 
         to_sign = {k: v for k, v in params.items() if k not in ("sign", "sign_method") and v != ""}
         sorted_keys = sorted(to_sign.keys())
-        raw = self.sign_secret + "".join(f"{k}{to_sign[k]}" for k in sorted_keys) + self.sign_secret
+        raw = (
+            self.sign_secret
+            + "".join(f"{k}{canonicalize_sign_value(to_sign[k])}" for k in sorted_keys)
+            + self.sign_secret
+        )
         return hashlib.md5(raw.encode()).hexdigest().upper()
 
     # ── Convenience wrapper ───────────────────────────────────────────────
@@ -342,6 +345,10 @@ async def list_coupons(
 
     result = await ks._call("/open/api/coupon/list", params)
     return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+# ── Cross-platform operational tools (get_metrics/get_traces/get_alerts/export_data) ──
+register_common_tools(mcp, ks)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

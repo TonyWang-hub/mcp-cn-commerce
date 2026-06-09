@@ -2,6 +2,20 @@
 
 mcp-cn-commerce provides built-in request replay and debug capabilities for diagnosing API issues, reproducing bugs, and validating API changes.
 
+## Status: opt-in (except tracing)
+
+`RequestRecorder`, `RequestReplayer`, `DebugLogger`, and
+`DebugBreakpointManager` are **opt-in** helpers in `shared.cn_commerce_base`:
+construct them yourself as shown below. They are not attached to the platform
+servers and are not exposed as MCP tools.
+
+The one exception is **request tracing**, which *is* always on: every
+`CommerceMCPBase` request is traced automatically and surfaced via
+`client.get_trace_summary()` and the `get_traces` MCP tool. The standalone
+`RequestTracer` usage shown in [Request Tracing](#request-tracing) below is the
+same class the base uses internally -- see [tracing.md](tracing.md) for the
+wired-in behaviour.
+
 ## Request Recording
 
 ### Basic Usage

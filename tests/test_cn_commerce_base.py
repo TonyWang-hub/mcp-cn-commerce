@@ -25,6 +25,11 @@ if str(_shared_dir) not in sys.path:
 from cn_commerce_base import (
     DEFAULT_RETRY,
     RATE_LIMIT_RETRY,
+    Alert,
+    AlertManager,
+    AlertNotifier,
+    AlertRule,
+    AlertSeverity,
     BatchRequestItem,
     BatchResultItem,
     BatchSummary,
@@ -4044,3 +4049,645 @@ class TestDebugBreakpointManager:
         stats = mgr.get_stats()
         assert stats["total_checks"] == 1
         assert stats["total_hits"] == 1
+
+
+# ── AlertSeverity Tests ────────────────────────────────────
+
+
+class TestAlertSeverity:
+    """Tests for AlertSeverity enum."""
+
+    def test_critical(self):
+        assert AlertSeverity.CRITICAL == "critical"
+
+    def test_high(self):
+        assert AlertSeverity.HIGH == "high"
+
+    def test_medium(self):
+        assert AlertSeverity.MEDIUM == "medium"
+
+    def test_low(self):
+        assert AlertSeverity.LOW == "low"
+
+
+# ── AlertRule Tests ────────────────────────────────────────
+
+
+class TestAlertRule:
+    """Tests for AlertRule dataclass."""
+
+    def test_default_values(self):
+        rule = AlertRule()
+        assert rule.rule_id != ""
+        assert rule.enabled is True
+        assert rule.cooldown_seconds == 300.0
+        assert rule.comparison == "gt"
+
+    def test_custom_values(self):
+        rule = AlertRule(
+            name="test_rule",
+            description="Test alert",
+            metric_path="global.error_rate",
+            threshold=0.5,
+            comparison="gt",
+            severity=AlertSeverity.HIGH,
+            cooldown_seconds=60.0,
+        )
+        assert rule.name == "test_rule"
+        assert rule.threshold == 0.5
+        assert rule.severity == AlertSeverity.HIGH
+
+    def test_evaluate_gt(self):
+        rule = AlertRule(metric_path="global.error_rate", threshold=0.1, comparison="gt")
+        assert rule.evaluate(0.2) is True
+        assert rule.evaluate(0.1) is False
+        assert rule.evaluate(0.05) is False
+
+    def test_evaluate_gte(self):
+        rule = AlertRule(metric_path="global.error_rate", threshold=0.1, comparison="gte")
+        assert rule.evaluate(0.2) is True
+        assert rule.evaluate(0.1) is True
+        assert rule.evaluate(0.05) is False
+
+    def test_evaluate_lt(self):
+        rule = AlertRule(metric_path="global.error_rate", threshold=0.1, comparison="lt")
+        assert rule.evaluate(0.05) is True
+        assert rule.evaluate(0.1) is False
+        assert rule.evaluate(0.2) is False
+
+    def test_evaluate_lte(self):
+        rule = AlertRule(metric_path="global.error_rate", threshold=0.1, comparison="lte")
+        assert rule.evaluate(0.05) is True
+        assert rule.evaluate(0.1) is True
+        assert rule.evaluate(0.2) is False
+
+    def test_evaluate_eq(self):
+        rule = AlertRule(metric_path="global.error_rate", threshold=0.1, comparison="eq")
+        assert rule.evaluate(0.1) is True
+        assert rule.evaluate(0.2) is False
+
+    def test_evaluate_unknown_comparison(self):
+        rule = AlertRule(metric_path="global.error_rate", threshold=0.1, comparison="unknown")
+        assert rule.evaluate(0.5) is False
+
+    def test_to_dict(self):
+        rule = AlertRule(
+            name="test",
+            metric_path="global.error_rate",
+            threshold=0.5,
+            severity=AlertSeverity.HIGH,
+        )
+        d = rule.to_dict()
+        assert d["name"] == "test"
+        assert d["threshold"] == 0.5
+        assert d["severity"] == "high"
+        assert "rule_id" in d
+
+    def test_from_dict(self):
+        data = {
+            "rule_id": "abc123",
+            "name": "test",
+            "metric_path": "global.error_rate",
+            "threshold": 0.5,
+            "comparison": "gt",
+            "severity": "high",
+            "cooldown_seconds": 60.0,
+            "enabled": True,
+            "tags": ["prod"],
+            "platform": "OCEANENGINE",
+        }
+        rule = AlertRule.from_dict(data)
+        assert rule.rule_id == "abc123"
+        assert rule.name == "test"
+        assert rule.severity == "high"
+        assert rule.platform == "OCEANENGINE"
+        assert rule.tags == ["prod"]
+
+    def test_from_dict_defaults(self):
+        rule = AlertRule.from_dict({})
+        assert rule.comparison == "gt"
+        assert rule.severity == AlertSeverity.MEDIUM
+
+    def test_roundtrip(self):
+        original = AlertRule(
+            name="roundtrip",
+            metric_path="global.avg_latency_ms",
+            threshold=1000.0,
+            severity=AlertSeverity.CRITICAL,
+        )
+        d = original.to_dict()
+        restored = AlertRule.from_dict(d)
+        assert restored.name == original.name
+        assert restored.metric_path == original.metric_path
+        assert restored.threshold == original.threshold
+        assert restored.severity == original.severity
+
+
+# ── Alert Tests ────────────────────────────────────────────
+
+
+class TestAlert:
+    """Tests for Alert dataclass."""
+
+    def test_default_values(self):
+        alert = Alert()
+        assert alert.alert_id != ""
+        assert alert.status == "firing"
+        assert alert.fired_at != ""
+        assert alert.resolved_at == ""
+
+    def test_custom_values(self):
+        alert = Alert(
+            rule_id="r1",
+            rule_name="high_error_rate",
+            severity=AlertSeverity.HIGH,
+            message="Error rate too high",
+            metric_value=0.25,
+            threshold=0.1,
+            metric_path="global.error_rate",
+        )
+        assert alert.rule_id == "r1"
+        assert alert.metric_value == 0.25
+        assert alert.severity == "high"
+
+    def test_to_dict(self):
+        alert = Alert(
+            rule_name="test",
+            severity=AlertSeverity.MEDIUM,
+            metric_value=42.0,
+            threshold=10.0,
+        )
+        d = alert.to_dict()
+        assert d["rule_name"] == "test"
+        assert d["metric_value"] == 42.0
+        assert d["threshold"] == 10.0
+        assert d["status"] == "firing"
+
+
+# ── AlertNotifier Tests ────────────────────────────────────
+
+
+class TestAlertNotifier:
+    """Tests for AlertNotifier."""
+
+    def test_add_callback(self):
+        notifier = AlertNotifier()
+        notifier.add_callback(lambda alert: None)
+        assert len(notifier._callbacks) == 1
+
+    def test_remove_callback(self):
+        notifier = AlertNotifier()
+        def cb(alert):
+            return None
+        notifier.add_callback(cb)
+        assert notifier.remove_callback(cb) is True
+        assert len(notifier._callbacks) == 0
+
+    def test_remove_nonexistent_callback(self):
+        notifier = AlertNotifier()
+        assert notifier.remove_callback(lambda alert: None) is False
+
+    @pytest.mark.asyncio
+    async def test_notify_sync_callback(self):
+        notifier = AlertNotifier()
+        received = []
+
+        def on_alert(alert):
+            received.append(alert)
+
+        notifier.add_callback(on_alert)
+        alert = Alert(rule_name="test", message="test alert")
+        result = await notifier.notify(alert)
+
+        assert len(received) == 1
+        assert received[0].alert_id == alert.alert_id
+        assert result["channels_notified"] == 1
+        assert result["results"][0]["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_notify_async_callback(self):
+        notifier = AlertNotifier()
+        received = []
+
+        async def on_alert(alert):
+            received.append(alert)
+
+        notifier.add_callback(on_alert)
+        alert = Alert(rule_name="test", message="async test")
+        result = await notifier.notify(alert)
+
+        assert len(received) == 1
+        assert result["channels_notified"] == 1
+
+    @pytest.mark.asyncio
+    async def test_notify_multiple_callbacks(self):
+        notifier = AlertNotifier()
+        count = [0, 0]
+
+        def cb1(alert):
+            count[0] += 1
+
+        def cb2(alert):
+            count[1] += 1
+
+        notifier.add_callback(cb1)
+        notifier.add_callback(cb2)
+        alert = Alert(rule_name="test")
+        await notifier.notify(alert)
+
+        assert count[0] == 1
+        assert count[1] == 1
+
+    @pytest.mark.asyncio
+    async def test_notify_callback_error(self):
+        notifier = AlertNotifier()
+
+        def failing_cb(alert):
+            raise RuntimeError("notification failed")
+
+        notifier.add_callback(failing_cb)
+        alert = Alert(rule_name="test")
+        result = await notifier.notify(alert)
+
+        assert result["results"][0]["success"] is False
+        assert "notification failed" in result["results"][0]["error"]
+        stats = notifier.get_stats()
+        assert stats["total_failed"] == 1
+
+    def test_get_stats(self):
+        notifier = AlertNotifier()
+        stats = notifier.get_stats()
+        assert stats["registered_callbacks"] == 0
+        assert stats["total_notifications"] == 0
+        assert stats["total_success"] == 0
+        assert stats["total_failed"] == 0
+
+    def test_reset_stats(self):
+        notifier = AlertNotifier()
+        notifier._stats["total_notifications"] = 5
+        notifier.reset_stats()
+        assert notifier._stats["total_notifications"] == 0
+
+
+# ── AlertManager Tests ─────────────────────────────────────
+
+
+class TestAlertManager:
+    """Tests for AlertManager."""
+
+    def test_default_init_includes_rules(self):
+        manager = AlertManager()
+        rules = manager.list_rules()
+        assert len(rules) == 4  # Default rules
+
+    def test_init_without_defaults(self):
+        manager = AlertManager(include_default_rules=False)
+        rules = manager.list_rules()
+        assert len(rules) == 0
+
+    def test_add_rule(self):
+        manager = AlertManager(include_default_rules=False)
+        rule = AlertRule(name="test", metric_path="global.error_rate", threshold=0.5)
+        manager.add_rule(rule)
+        assert len(manager.list_rules()) == 1
+
+    def test_remove_rule(self):
+        manager = AlertManager(include_default_rules=False)
+        rule = AlertRule(name="test", metric_path="global.error_rate", threshold=0.5)
+        manager.add_rule(rule)
+        assert manager.remove_rule(rule.rule_id) is True
+        assert len(manager.list_rules()) == 0
+
+    def test_remove_nonexistent_rule(self):
+        manager = AlertManager(include_default_rules=False)
+        assert manager.remove_rule("nonexistent") is False
+
+    def test_get_rule(self):
+        manager = AlertManager(include_default_rules=False)
+        rule = AlertRule(name="test", metric_path="global.error_rate", threshold=0.5)
+        manager.add_rule(rule)
+        retrieved = manager.get_rule(rule.rule_id)
+        assert retrieved is not None
+        assert retrieved.name == "test"
+
+    def test_list_rules_filter_enabled(self):
+        manager = AlertManager(include_default_rules=False)
+        manager.add_rule(AlertRule(name="enabled", enabled=True))
+        manager.add_rule(AlertRule(name="disabled", enabled=False))
+        assert len(manager.list_rules(enabled_only=True)) == 1
+
+    def test_list_rules_filter_severity(self):
+        manager = AlertManager(include_default_rules=False)
+        manager.add_rule(AlertRule(name="high", severity=AlertSeverity.HIGH))
+        manager.add_rule(AlertRule(name="low", severity=AlertSeverity.LOW))
+        assert len(manager.list_rules(severity=AlertSeverity.HIGH)) == 1
+
+    def test_list_rules_filter_tags(self):
+        manager = AlertManager(include_default_rules=False)
+        manager.add_rule(AlertRule(name="tagged", tags=["prod", "api"]))
+        manager.add_rule(AlertRule(name="untagged"))
+        assert len(manager.list_rules(tags=["prod"])) == 1
+
+    def test_evaluate_metrics_triggers_alert(self):
+        manager = AlertManager(include_default_rules=False)
+        manager.add_rule(
+            AlertRule(
+                name="high_error_rate",
+                metric_path="global.error_rate",
+                threshold=0.1,
+                comparison="gt",
+            )
+        )
+        metrics_summary = {
+            "global": {
+                "error_rate": 0.25,
+                "total_requests": 100,
+            },
+        }
+        alerts = manager.evaluate_metrics(metrics_summary)
+        assert len(alerts) == 1
+        assert alerts[0].rule_name == "high_error_rate"
+        assert alerts[0].metric_value == 0.25
+
+    def test_evaluate_metrics_no_trigger(self):
+        manager = AlertManager(include_default_rules=False)
+        manager.add_rule(
+            AlertRule(
+                name="high_error_rate",
+                metric_path="global.error_rate",
+                threshold=0.1,
+                comparison="gt",
+            )
+        )
+        metrics_summary = {
+            "global": {
+                "error_rate": 0.05,
+            },
+        }
+        alerts = manager.evaluate_metrics(metrics_summary)
+        assert len(alerts) == 0
+
+    def test_evaluate_metrics_cooldown(self):
+        manager = AlertManager(include_default_rules=False)
+        manager.add_rule(
+            AlertRule(
+                name="test",
+                metric_path="global.error_rate",
+                threshold=0.1,
+                comparison="gt",
+                cooldown_seconds=999999.0,  # Very long cooldown
+            )
+        )
+        metrics_summary = {"global": {"error_rate": 0.5}}
+
+        # First evaluation fires
+        alerts1 = manager.evaluate_metrics(metrics_summary)
+        assert len(alerts1) == 1
+
+        # Immediate second evaluation is suppressed by cooldown
+        alerts2 = manager.evaluate_metrics(metrics_summary)
+        assert len(alerts2) == 0
+
+    def test_evaluate_metrics_disabled_rule_skipped(self):
+        manager = AlertManager(include_default_rules=False)
+        manager.add_rule(
+            AlertRule(
+                name="disabled",
+                metric_path="global.error_rate",
+                threshold=0.1,
+                comparison="gt",
+                enabled=False,
+            )
+        )
+        metrics_summary = {"global": {"error_rate": 0.5}}
+        alerts = manager.evaluate_metrics(metrics_summary)
+        assert len(alerts) == 0
+
+    def test_evaluate_metrics_platform_filter(self):
+        manager = AlertManager(include_default_rules=False)
+        manager.add_rule(
+            AlertRule(
+                name="platform_specific",
+                metric_path="global.error_rate",
+                threshold=0.1,
+                comparison="gt",
+                platform="OCEANENGINE",
+            )
+        )
+        metrics_summary = {"global": {"error_rate": 0.5}}
+
+        # Wrong platform
+        alerts = manager.evaluate_metrics(metrics_summary, platform="TAOBAO")
+        assert len(alerts) == 0
+
+        # Correct platform
+        alerts = manager.evaluate_metrics(metrics_summary, platform="OCEANENGINE")
+        assert len(alerts) == 1
+
+    def test_evaluate_metrics_invalid_metric_path(self):
+        manager = AlertManager(include_default_rules=False)
+        manager.add_rule(
+            AlertRule(
+                name="bad_path",
+                metric_path="nonexistent.path.here",
+                threshold=0.1,
+            )
+        )
+        metrics_summary = {"global": {"error_rate": 0.5}}
+        alerts = manager.evaluate_metrics(metrics_summary)
+        assert len(alerts) == 0
+
+    @pytest.mark.asyncio
+    async def test_fire_alert(self):
+        manager = AlertManager(include_default_rules=False)
+        received = []
+
+        def on_alert(alert):
+            received.append(alert)
+
+        manager.notifier.add_callback(on_alert)
+        alert = Alert(rule_name="test", message="test alert")
+        await manager.fire_alert(alert)
+
+        assert len(received) == 1
+        assert len(manager.get_firing_alerts()) == 1
+        stats = manager.get_stats()
+        assert stats["total_alerts_fired"] == 1
+
+    def test_resolve_alert(self):
+        manager = AlertManager(include_default_rules=False)
+        alert = Alert(rule_name="test")
+        manager._firing_alerts[alert.alert_id] = alert
+
+        assert manager.resolve_alert(alert.alert_id) is True
+        assert len(manager.get_firing_alerts()) == 0
+        assert alert.status == "resolved"
+        assert alert.resolved_at != ""
+
+    def test_resolve_nonexistent_alert(self):
+        manager = AlertManager(include_default_rules=False)
+        assert manager.resolve_alert("nonexistent") is False
+
+    def test_silence_rule(self):
+        manager = AlertManager(include_default_rules=False)
+        rule = AlertRule(name="test", metric_path="global.error_rate", cooldown_seconds=60.0)
+        manager.add_rule(rule)
+        assert manager.silence_rule(rule.rule_id, duration_seconds=3600) is True
+        assert manager.get_rule(rule.rule_id).cooldown_seconds == 3600.0
+
+    def test_silence_nonexistent_rule(self):
+        manager = AlertManager(include_default_rules=False)
+        assert manager.silence_rule("nonexistent") is False
+
+    def test_get_firing_alerts_filter_severity(self):
+        manager = AlertManager(include_default_rules=False)
+        manager._firing_alerts["a1"] = Alert(severity=AlertSeverity.HIGH)
+        manager._firing_alerts["a2"] = Alert(severity=AlertSeverity.LOW)
+
+        high_alerts = manager.get_firing_alerts(severity=AlertSeverity.HIGH)
+        assert len(high_alerts) == 1
+
+    def test_get_alert_history(self):
+        manager = AlertManager(include_default_rules=False)
+        manager._alert_history.append(Alert(severity=AlertSeverity.HIGH, rule_name="a"))
+        manager._alert_history.append(Alert(severity=AlertSeverity.LOW, rule_name="b"))
+        history = manager.get_alert_history(severity=AlertSeverity.HIGH)
+        assert len(history) == 1
+        assert history[0]["rule_name"] == "a"
+
+    def test_export_import_rules(self):
+        manager = AlertManager(include_default_rules=False)
+        manager.add_rule(AlertRule(name="r1", metric_path="global.error_rate", threshold=0.1))
+        manager.add_rule(AlertRule(name="r2", metric_path="global.avg_latency_ms", threshold=5000))
+
+        exported = manager.export_rules()
+        assert len(exported) == 2
+
+        manager2 = AlertManager(include_default_rules=False)
+        count = manager2.import_rules(exported)
+        assert count == 2
+        assert len(manager2.list_rules()) == 2
+
+    def test_reset(self):
+        manager = AlertManager(include_default_rules=False)
+        manager._stats["total_evaluations"] = 10
+        manager._alert_history.append(Alert())
+        manager.reset()
+        assert manager._stats["total_evaluations"] == 0
+        assert len(manager._alert_history) == 0
+
+    def test_get_stats(self):
+        manager = AlertManager(include_default_rules=False)
+        manager.add_rule(AlertRule(name="r1"))
+        stats = manager.get_stats()
+        assert stats["rule_count"] == 1
+        assert stats["enabled_rules"] == 1
+        assert stats["firing_alerts"] == 0
+        assert "notifier_stats" in stats
+
+
+# ── Default Alert Rules Tests ──────────────────────────────
+
+
+class TestDefaultAlertRules:
+    """Tests for default alert rules."""
+
+    def test_default_rules_count(self):
+        from cn_commerce_base import DEFAULT_ALERT_RULES
+
+        assert len(DEFAULT_ALERT_RULES) == 4
+
+    def test_default_high_error_rate(self):
+        from cn_commerce_base import DEFAULT_ALERT_RULES
+
+        rule = next(r for r in DEFAULT_ALERT_RULES if r.name == "high_error_rate")
+        assert rule.threshold == 0.1
+        assert rule.severity == AlertSeverity.HIGH
+        assert rule.comparison == "gt"
+
+    def test_default_critical_error_rate(self):
+        from cn_commerce_base import DEFAULT_ALERT_RULES
+
+        rule = next(r for r in DEFAULT_ALERT_RULES if r.name == "critical_error_rate")
+        assert rule.threshold == 0.5
+        assert rule.severity == AlertSeverity.CRITICAL
+
+    def test_default_high_latency(self):
+        from cn_commerce_base import DEFAULT_ALERT_RULES
+
+        rule = next(r for r in DEFAULT_ALERT_RULES if r.name == "high_latency")
+        assert rule.threshold == 5000.0
+        assert rule.severity == AlertSeverity.MEDIUM
+
+    def test_default_critical_latency(self):
+        from cn_commerce_base import DEFAULT_ALERT_RULES
+
+        rule = next(r for r in DEFAULT_ALERT_RULES if r.name == "critical_latency")
+        assert rule.threshold == 30000.0
+        assert rule.severity == AlertSeverity.HIGH
+
+
+# ── CommerceMCPBase Alerting Integration Tests ─────────────
+
+
+class TestCommerceMCPBaseAlerting:
+    """Tests for alerting integration in CommerceMCPBase."""
+
+    def test_has_alert_manager(self):
+        client = CommerceMCPBase()
+        assert isinstance(client.alert_manager, AlertManager)
+
+    def test_evaluate_alerts(self):
+        client = CommerceMCPBase()
+        # Add a rule that will trigger
+        client.alert_manager.add_rule(
+            AlertRule(
+                name="test",
+                metric_path="global.total_requests",
+                threshold=0,
+                comparison="gt",
+                cooldown_seconds=0,
+            )
+        )
+        # Record a request so there's a metric
+        client.metrics.record_request("/api/test", latency_ms=100.0, success=True)
+        alerts = client.evaluate_alerts()
+        assert len(alerts) >= 1
+
+    def test_evaluate_alerts_no_trigger(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        # Default rules: error_rate > 0.1 won't fire when there are no errors
+        client.metrics.record_request("/api/test", latency_ms=10.0, success=True)
+        alerts = client.evaluate_alerts()
+        # Should not trigger high_error_rate (error_rate=0 < 0.1)
+        error_alerts = [a for a in alerts if a.rule_name == "high_error_rate"]
+        assert len(error_alerts) == 0
+
+    @pytest.mark.asyncio
+    async def test_check_and_fire_alerts(self):
+        client = CommerceMCPBase()
+        received = []
+
+        def on_alert(alert):
+            received.append(alert)
+
+        client.alert_manager.notifier.add_callback(on_alert)
+        client.alert_manager.add_rule(
+            AlertRule(
+                name="always_fire",
+                metric_path="global.total_requests",
+                threshold=-1,
+                comparison="gt",
+                cooldown_seconds=0,
+            )
+        )
+        client.metrics.record_request("/api/test", latency_ms=10.0, success=True)
+        results = await client.check_and_fire_alerts()
+        assert len(results) >= 1
+
+    def test_get_alert_stats(self):
+        client = CommerceMCPBase()
+        stats = client.get_alert_stats()
+        assert "rule_count" in stats
+        assert "enabled_rules" in stats
+        assert "notifier_stats" in stats

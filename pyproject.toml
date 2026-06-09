@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Chinese e-commerce platform MCP servers — let AI agents read merchant business data (Ocean Engine, Douyin Shop, JD.com, Taobao, Pinduoduo)"
 requires-python = ">=3.11"
 license = {text = "MIT"}
-authors = [{name = "Wang Zhuo", email = "tonywang@example.com"}]
+authors = [{name = "mcp-cn-commerce contributors"}]
 readme = "README.md"
 keywords = [
     "mcp",

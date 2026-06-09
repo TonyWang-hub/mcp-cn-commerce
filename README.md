@@ -271,16 +271,11 @@ If you use mcp-cn-commerce in your research or project:
 
 ```bibtex
 @software{mcp-cn-commerce,
-  author = {Wang, Zhuo},
   title = {mcp-cn-commerce: MCP Servers for Chinese E-Commerce Platforms},
   year = {2026},
   url = {https://github.com/TonyWang-hub/mcp-cn-commerce}
 }
 ```
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=TonyWang-hub/mcp-cn-commerce&type=Date)](https://star-history.com/#TonyWang-hub/mcp-cn-commerce&Date)
 
 ## License
 

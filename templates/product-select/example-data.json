@@ -1,0 +1,67 @@
+{
+  "category": "女装",
+  "analysis_date": "2026-06-09",
+  "hot_products": [
+    {
+      "platform": "xiaohongshu",
+      "product_name": "法式复古碎花茶歇裙",
+      "price_range": "129-189",
+      "sold_count": 3200,
+      "rating": 4.9,
+      "review_count": 856,
+      "keywords": ["显瘦", "显白", "面料好"],
+      "competitor_count": 156,
+      "avg_competitor_price": 159
+    },
+    {
+      "platform": "doudian",
+      "product_name": "冰丝防晒衣 女薄款",
+      "price_range": "49-89",
+      "sold_count": 8500,
+      "rating": 4.7,
+      "review_count": 2100,
+      "keywords": ["凉爽", "防晒效果好", "轻薄"],
+      "competitor_count": 890,
+      "avg_competitor_price": 69
+    },
+    {
+      "platform": "pdd",
+      "product_name": "大码女装 显瘦阔腿裤",
+      "price_range": "39-69",
+      "sold_count": 12000,
+      "rating": 4.6,
+      "review_count": 3500,
+      "keywords": ["显瘦", "舒服", "性价比高"],
+      "competitor_count": 2300,
+      "avg_competitor_price": 49
+    },
+    {
+      "platform": "jd",
+      "product_name": "职业装女套装 通勤",
+      "price_range": "199-399",
+      "sold_count": 1500,
+      "rating": 4.8,
+      "review_count": 420,
+      "keywords": ["质感好", "版型正", "显气质"],
+      "competitor_count": 450,
+      "avg_competitor_price": 299
+    },
+    {
+      "platform": "kuaishou",
+      "product_name": "中老年女装 妈妈装",
+      "price_range": "59-129",
+      "sold_count": 6800,
+      "rating": 4.5,
+      "review_count": 1800,
+      "keywords": ["舒服", "尺码准", "面料好"],
+      "competitor_count": 320,
+      "avg_competitor_price": 89
+    }
+  ],
+  "price_distribution": {
+    "0-50": {"count": 4500, "percentage": 0.35},
+    "50-100": {"count": 3800, "percentage": 0.29},
+    "100-200": {"count": 3000, "percentage": 0.23},
+    "200+": {"count": 1700, "percentage": 0.13}
+  }
+}

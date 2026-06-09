@@ -3314,6 +3314,56 @@ class CommerceMCPBase:
         """Get alert manager statistics."""
         return self._alert_manager.get_stats()
 
+    # ── Opt-in Advanced Capabilities (lazy accessors) ──────
+    #
+    # These wrappers make standalone opt-in helpers reachable from a base
+    # instance without changing any request behaviour. Each is lazily
+    # constructed on first access so the common path stays lightweight.
+
+    @property
+    def webhook_manager(self) -> WebhookManager:
+        """Access a lazily-created webhook manager for this instance."""
+        existing = getattr(self, "_webhook_manager", None)
+        if existing is None:
+            existing = WebhookManager()
+            self._webhook_manager = existing
+        return existing
+
+    @property
+    def load_balancer(self) -> LoadBalancer:
+        """Access a lazily-created load balancer for this instance."""
+        existing = getattr(self, "_load_balancer", None)
+        if existing is None:
+            existing = LoadBalancer()
+            self._load_balancer = existing
+        return existing
+
+    def create_failover_manager(self, config: FailoverConfig | None = None) -> FailoverManager:
+        """Create a failover manager bound to this instance's load balancer."""
+        return FailoverManager(self.load_balancer, config=config)
+
+    @property
+    def request_recorder(self) -> RequestRecorder:
+        """Access a lazily-created request recorder for this instance."""
+        existing = getattr(self, "_request_recorder", None)
+        if existing is None:
+            existing = RequestRecorder()
+            self._request_recorder = existing
+        return existing
+
+    def create_replayer(self, config: ReplayConfig | None = None) -> RequestReplayer:
+        """Create a replayer bound to this instance's request recorder."""
+        return RequestReplayer(self.request_recorder, config=config)
+
+    @property
+    def deduplicator(self) -> RequestDeduplicator:
+        """Access a lazily-created request deduplicator for this instance."""
+        existing = getattr(self, "_deduplicator", None)
+        if existing is None:
+            existing = RequestDeduplicator()
+            self._deduplicator = existing
+        return existing
+
     # ── Batch Operations ──────────────────────────────────
 
     @staticmethod
@@ -4825,7 +4875,9 @@ class FailoverManager:
         self._lb = load_balancer
         self.config = config or FailoverConfig()
         self._circuit_breakers: dict[str, CircuitBreakerState] = {}
-        self._lock = threading.Lock()
+        # Reentrant: get_healthy_endpoint() holds the lock and calls
+        # is_circuit_open(), which re-acquires it.
+        self._lock = threading.RLock()
         self._recovery_task: asyncio.Task | None = None
         self._failure_history: list[dict[str, Any]] = []
 
@@ -5060,7 +5112,6 @@ class FailoverManager:
 # ── Batch Operations ──────────────────────────────────────
 
 
-@dataclass
 class ExportFormat(StrEnum):
     """Supported export formats."""
 

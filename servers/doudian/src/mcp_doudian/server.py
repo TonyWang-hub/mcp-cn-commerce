@@ -32,6 +32,7 @@ from shared.cn_commerce_base import (
     SignMethod,
     canonicalize_sign_value,
     handle_tool_errors,  # noqa: F401  (re-exported for tool authors / parity with siblings)
+    register_common_tools,
 )
 
 logger = logging.getLogger(__name__)
@@ -1676,6 +1677,14 @@ async def list_brands(
     except Exception as e:
         logger.exception("Unexpected error in list_brands")
         return {"error": f"Unexpected error: {e}", "brands": []}
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Cross-platform operational tools
+#  (get_metrics/get_traces/get_alerts/export_data)
+# ═══════════════════════════════════════════════════════════════
+
+register_common_tools(server, _get_client)
 
 
 # ═══════════════════════════════════════════════════════════════

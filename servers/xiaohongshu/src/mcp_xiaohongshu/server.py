@@ -15,7 +15,13 @@ import time
 import httpx
 from mcp.server.fastmcp import FastMCP
 
-from shared.cn_commerce_base import CommerceAPIError, CommerceMCPBase, ConfigValidationError, SignMethod
+from shared.cn_commerce_base import (
+    CommerceAPIError,
+    CommerceMCPBase,
+    ConfigValidationError,
+    SignMethod,
+    register_common_tools,
+)
 
 # ── Xiaohongshu client ────────────────────────────────────────────────────────
 
@@ -401,6 +407,10 @@ async def get_bill_list(
 
     result = await xhs._call("GET", "/api/bill/list", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+# ── Cross-platform operational tools (get_metrics/get_traces/get_alerts/export_data) ──
+register_common_tools(mcp, xhs)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

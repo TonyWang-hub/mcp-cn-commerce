@@ -20,7 +20,12 @@ from typing import Any
 import httpx
 from mcp.server.fastmcp import FastMCP
 
-from shared.cn_commerce_base import CommerceAPIError, CommerceMCPBase, ConfigValidationError
+from shared.cn_commerce_base import (
+    CommerceAPIError,
+    CommerceMCPBase,
+    ConfigValidationError,
+    register_common_tools,
+)
 
 # ── WeChat Store client ───────────────────────────────────────────────────────
 
@@ -383,6 +388,10 @@ async def list_categories(parent_id: int = 0) -> str:
     data = {"parent_id": parent_id}
     result = await _wx._request("POST", "/channels/ec/category/list/get", data=data)
     return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+# ── Cross-platform operational tools (get_metrics/get_traces/get_alerts/export_data) ──
+register_common_tools(mcp, _wx)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

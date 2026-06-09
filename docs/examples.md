@@ -283,9 +283,23 @@
 
 ---
 
+## 可运行示例脚本
+
+无需真实凭证、不联网即可运行的 Python 示例（位于 `examples/`）：
+
+- [observability_demo.py](../examples/best-practices/observability_demo.py) -
+  演示默认开启的请求计量 / 追踪、内置告警评估，以及数据导出（对应
+  `get_metrics` / `get_traces` / `get_alerts` / `export_data` 四个通用 MCP 工具）。
+  运行：`python3 examples/best-practices/observability_demo.py`
+
+更多示例索引见 [examples/README.md](../examples/README.md)。
+
 ## 更多资源
 
 - [平台对比](platforms.md) - 各平台 API 能力对比
 - [常见问题](FAQ.md) - 常见问题解答
+- [监控与告警](monitoring.md) - 计量、健康检查与告警
+- [请求追踪](tracing.md) - 默认开启的 span 追踪
+- [数据导出](data-export.md) - CSV/JSON 导出与 `export_data` 工具
 - [贡献指南](../CONTRIBUTING.md) - 如何参与项目贡献
 - [安全政策](../SECURITY.md) - 安全相关说明

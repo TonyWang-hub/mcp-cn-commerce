@@ -12,7 +12,13 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
-from shared.cn_commerce_base import CommerceAPIError, CommerceMCPBase, ConfigValidationError, SignMethod
+from shared.cn_commerce_base import (
+    CommerceAPIError,
+    CommerceMCPBase,
+    ConfigValidationError,
+    SignMethod,
+    register_common_tools,
+)
 
 # ── Taobao client ───────────────────────────────────────────────────────────────
 
@@ -369,6 +375,10 @@ async def list_categories(parent_cid: str = "0") -> str:
 
     result = await taobao._call("taobao.itemcats.get", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+# ── Cross-platform operational tools (get_metrics/get_traces/get_alerts/export_data) ──
+register_common_tools(mcp, taobao)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════

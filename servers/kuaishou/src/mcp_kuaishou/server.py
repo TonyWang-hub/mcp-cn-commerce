@@ -15,7 +15,13 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from shared.cn_commerce_base import CommerceMCPBase, ConfigValidationError, SignMethod, canonicalize_sign_value
+from shared.cn_commerce_base import (
+    CommerceMCPBase,
+    ConfigValidationError,
+    SignMethod,
+    canonicalize_sign_value,
+    register_common_tools,
+)
 
 # ── Kuaishou client ───────────────────────────────────────────────────────────
 
@@ -339,6 +345,10 @@ async def list_coupons(
 
     result = await ks._call("/open/api/coupon/list", params)
     return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+# ── Cross-platform operational tools (get_metrics/get_traces/get_alerts/export_data) ──
+register_common_tools(mcp, ks)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

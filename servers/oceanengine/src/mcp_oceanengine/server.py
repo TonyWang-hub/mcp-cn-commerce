@@ -17,6 +17,7 @@ from shared.cn_commerce_base import (
     CommerceMCPBase,
     ConfigValidationError,
     handle_tool_errors,
+    register_common_tools,
 )
 
 # ── Ocean Engine API Client ──────────────────────────────
@@ -579,6 +580,12 @@ async def get_diagnosis(advertiser_id: str, campaign_id: str) -> dict:
             "campaign_id": int(campaign_id),
         },
     )
+
+
+# ── Cross-platform operational tools ─────────────────────
+# (get_metrics/get_traces/get_alerts/export_data)
+
+register_common_tools(server, _get_client)
 
 
 # ── Entry Point ──────────────────────────────────────────

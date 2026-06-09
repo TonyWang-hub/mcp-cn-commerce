@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -29,12 +30,19 @@ from cn_commerce_base import (
     BatchSummary,
     CommerceAPIError,
     CommerceMCPBase,
+    ConfigRule,
+    ConfigValidationResult,
+    ConfigValidator,
     ConfigurableRateLimiter,
     ConfigValidationError,
+    ConnectionPoolMonitor,
     EndpointMetrics,
     EndpointRateLimit,
+    HealthCheckCache,
+    HealthCheckResult,
     MetricsCollector,
     PlatformRateLimitConfig,
+    PoolMetrics,
     RateLimitConfig,
     RateLimiter,
     RateLimitStats,
@@ -42,6 +50,10 @@ from cn_commerce_base import (
     RetryConfig,
     SensitiveDataFilter,
     SignMethod,
+    Span,
+    SpanEvent,
+    TraceContext,
+    Tracer,
     format_error_response,
     format_response,
     handle_tool_errors,
@@ -49,6 +61,7 @@ from cn_commerce_base import (
     mask_log_message,
     mask_sensitive_value,
     sanitize_log_context,
+    span_scope,
     validate_api_param,
     validate_env_var_name,
     validate_platform_name,
@@ -479,8 +492,8 @@ class TestHealthCheck:
         client.BASE_URL = "http://127.0.0.1:99999"
         mock_client = AsyncMock()
         mock_client.head.side_effect = httpx.ConnectError("refused")
-        with mock_patch.object(client, "_get_client", return_value=mock_client):
-            result = await client.health_check()
+        with mock_patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client.health_check(use_cache=False)
         assert result["api_reachable"] is False
         assert "error" in result
 
@@ -1400,7 +1413,7 @@ class TestRequest:
         mock_client.get.return_value = mock_response
         mock_client.is_closed = False
 
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             result = await client._request("GET", "/api/test")
 
         assert result == {"result": {"id": 1}}
@@ -1416,7 +1429,7 @@ class TestRequest:
         mock_client.post.return_value = mock_response
         mock_client.is_closed = False
 
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             result = await client._request("POST", "/api/test", data={"key": "val"})
 
         assert result == {"result": {"ok": True}}
@@ -1432,7 +1445,7 @@ class TestRequest:
         mock_client.get.return_value = mock_response
         mock_client.is_closed = False
 
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             with pytest.raises(CommerceAPIError) as exc_info:
                 await client._request("GET", "/api/test")
             assert exc_info.value.code == 40001
@@ -1448,7 +1461,7 @@ class TestRequest:
         mock_client.get.return_value = mock_response
         mock_client.is_closed = False
 
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             await client._request("GET", "/api/test", params={"extra": "value"})
 
         # Check that auth params were included
@@ -1469,7 +1482,7 @@ class TestRequest:
         mock_client.get.return_value = mock_response
         mock_client.is_closed = False
 
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             await client._request("GET", "/api/test")
 
         call_kwargs = mock_client.get.call_args
@@ -1496,7 +1509,7 @@ class TestRequest:
         mock_client.is_closed = False
 
         retry_config = RetryConfig(max_retries=2, base_delay=0.01, jitter=False)
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             result = await client._request("GET", "/api/test", retry_config=retry_config)
 
         assert result == {"result": "ok"}
@@ -1510,7 +1523,7 @@ class TestRequest:
         mock_client.is_closed = False
 
         retry_config = RetryConfig(max_retries=3, base_delay=0.01, jitter=False)
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             with pytest.raises(ValueError, match="not retryable"):
                 await client._request("GET", "/api/test", retry_config=retry_config)
 
@@ -1522,7 +1535,7 @@ class TestRequest:
         mock_client.is_closed = False
 
         retry_config = RetryConfig(max_retries=2, base_delay=0.01, jitter=False)
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             with pytest.raises(httpx.ConnectError):
                 await client._request("GET", "/api/test", retry_config=retry_config)
 
@@ -1554,7 +1567,7 @@ class TestRequest:
             jitter=False,
             retryable_api_codes={40001},
         )
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             result = await client._request("GET", "/api/test", retry_config=retry_config)
 
         assert result == {"result": "ok"}
@@ -1785,8 +1798,8 @@ class TestHealthCheckSuccess:
         mock_client = AsyncMock()
         mock_client.head.return_value = mock_response
 
-        with patch.object(client, "_get_client", return_value=mock_client):
-            result = await client.health_check()
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client.health_check(use_cache=False)
 
         assert result["configured"] is True
         assert result["has_token"] is True
@@ -1803,8 +1816,8 @@ class TestHealthCheckSuccess:
         mock_client = AsyncMock()
         mock_client.head.return_value = mock_response
 
-        with patch.object(client, "_get_client", return_value=mock_client):
-            result = await client.health_check()
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client.health_check(use_cache=False)
 
         assert result["api_reachable"] is False
 
@@ -2252,3 +2265,802 @@ class TestConfigurableRateLimiter:
         await limiter.acquire("TEST", "/api/slow")
         await limiter.acquire("TEST", "/api/fast")
         assert limiter.stats.total_requests >= 2
+
+
+# ── HealthCheckResult Tests ────────────────────────────────
+
+
+class TestHealthCheckResult:
+    """Tests for HealthCheckResult dataclass."""
+
+    def test_default_values(self):
+        result = HealthCheckResult()
+        assert result.status == "unhealthy"
+        assert result.configured is False
+        assert result.has_token is False
+        assert result.api_reachable is False
+        assert result.latency_ms == 0.0
+        assert result.dependencies == {}
+        assert result.cached is False
+        assert result.error == ""
+
+    def test_timestamp_auto_generated(self):
+        result = HealthCheckResult()
+        assert result.timestamp != ""
+        assert "T" in result.timestamp  # ISO 8601
+
+    def test_custom_values(self):
+        result = HealthCheckResult(
+            status="healthy",
+            configured=True,
+            has_token=True,
+            api_reachable=True,
+            latency_ms=42.5,
+        )
+        assert result.status == "healthy"
+        assert result.configured is True
+        assert result.latency_ms == 42.5
+
+    def test_to_dict(self):
+        result = HealthCheckResult(status="healthy", configured=True)
+        d = result.to_dict()
+        assert d["status"] == "healthy"
+        assert d["configured"] is True
+        assert "timestamp" in d
+        assert "latency_ms" in d
+        assert isinstance(d["latency_ms"], float)
+
+    def test_to_dict_latency_rounded(self):
+        result = HealthCheckResult(latency_ms=42.567)
+        d = result.to_dict()
+        assert d["latency_ms"] == 42.57
+
+
+# ── HealthCheckCache Tests ─────────────────────────────────
+
+
+class TestHealthCheckCache:
+    """Tests for HealthCheckCache."""
+
+    def test_get_miss(self):
+        cache = HealthCheckCache(ttl_seconds=30)
+        assert cache.get("nonexistent") is None
+
+    def test_set_and_get(self):
+        cache = HealthCheckCache(ttl_seconds=30)
+        result = HealthCheckResult(status="healthy", configured=True)
+        cache.set("test", result)
+        cached = cache.get("test")
+        assert cached is not None
+        assert cached.status == "healthy"
+        assert cached.cached is True
+
+    def test_get_expired(self):
+        cache = HealthCheckCache(ttl_seconds=0)
+        result = HealthCheckResult(status="healthy")
+        cache.set("test", result)
+        time.sleep(0.01)
+        assert cache.get("test") is None
+
+    def test_invalidate_specific(self):
+        cache = HealthCheckCache(ttl_seconds=30)
+        cache.set("a", HealthCheckResult(status="healthy"))
+        cache.set("b", HealthCheckResult(status="degraded"))
+        cache.invalidate("a")
+        assert cache.get("a") is None
+        assert cache.get("b") is not None
+
+    def test_invalidate_all(self):
+        cache = HealthCheckCache(ttl_seconds=30)
+        cache.set("a", HealthCheckResult(status="healthy"))
+        cache.set("b", HealthCheckResult(status="degraded"))
+        cache.invalidate()
+        assert cache.get("a") is None
+        assert cache.get("b") is None
+
+    def test_invalidate_nonexistent(self):
+        cache = HealthCheckCache(ttl_seconds=30)
+        cache.invalidate("nonexistent")
+
+    def test_get_stats(self):
+        cache = HealthCheckCache(ttl_seconds=30)
+        cache.set("a", HealthCheckResult())
+        cache.set("b", HealthCheckResult())
+        stats = cache.get_stats()
+        assert stats["entry_count"] == 2
+        assert stats["ttl_seconds"] == 30
+        assert "a" in stats["keys"]
+        assert "b" in stats["keys"]
+
+    def test_get_stats_excludes_expired(self):
+        cache = HealthCheckCache(ttl_seconds=0)
+        cache.set("a", HealthCheckResult())
+        time.sleep(0.01)
+        stats = cache.get_stats()
+        assert stats["entry_count"] == 0
+
+
+# ── Enhanced Health Check Tests ────────────────────────────
+
+
+class TestEnhancedHealthCheck:
+    """Tests for the enhanced health_check method."""
+
+    @pytest.mark.asyncio
+    async def test_health_check_returns_status_field(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s", access_token="t")
+        client.BASE_URL = "http://api.example.com"
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.head.return_value = mock_response
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client.health_check(use_cache=False)
+        assert "status" in result
+        assert result["status"] in ("healthy", "degraded", "unhealthy")
+
+    @pytest.mark.asyncio
+    async def test_health_check_healthy_status(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s", access_token="t")
+        client.BASE_URL = "http://api.example.com"
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.head.return_value = mock_response
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client.health_check(use_cache=False)
+        assert result["status"] == "healthy"
+        assert result["configured"] is True
+        assert result["has_token"] is True
+        assert result["api_reachable"] is True
+
+    @pytest.mark.asyncio
+    async def test_health_check_degraded_status(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        client.BASE_URL = "http://api.example.com"
+        mock_response = AsyncMock()
+        mock_response.status_code = 500
+        mock_client = AsyncMock()
+        mock_client.head.return_value = mock_response
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client.health_check(use_cache=False)
+        assert result["status"] == "degraded"
+
+    @pytest.mark.asyncio
+    async def test_health_check_unhealthy_status(self):
+        client = CommerceMCPBase()
+        result = await client.health_check(use_cache=False)
+        assert result["status"] == "unhealthy"
+
+    @pytest.mark.asyncio
+    async def test_health_check_with_cache(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        client.BASE_URL = "http://api.example.com"
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.head.return_value = mock_response
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result1 = await client.health_check(use_cache=True, cache_key="test")
+            result2 = await client.health_check(use_cache=True, cache_key="test")
+        assert result2.get("cached") is True
+
+    @pytest.mark.asyncio
+    async def test_health_check_latency_ms(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        result = await client.health_check(use_cache=False)
+        assert "latency_ms" in result
+        assert isinstance(result["latency_ms"], float)
+
+    @pytest.mark.asyncio
+    async def test_health_check_connection_error(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        client.BASE_URL = "http://127.0.0.1:99999"
+        mock_client = AsyncMock()
+        mock_client.head.side_effect = httpx.ConnectError("refused")
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client.health_check(use_cache=False)
+        assert result["api_reachable"] is False
+        assert result["status"] == "degraded"
+        assert "error" in result
+
+
+# ── Deep Health Check Tests ────────────────────────────────
+
+
+class TestDeepHealthCheck:
+    """Tests for deep_health_check method."""
+
+    @pytest.mark.asyncio
+    async def test_deep_health_check_no_deps(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s", access_token="t")
+        client.BASE_URL = "http://api.example.com"
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.head.return_value = mock_response
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client.deep_health_check()
+        assert result["status"] == "healthy"
+        assert result["dependencies"] == {}
+
+    @pytest.mark.asyncio
+    async def test_deep_health_check_with_url_dep(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s", access_token="t")
+        client.BASE_URL = "http://api.example.com"
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.head.return_value = mock_response
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client.deep_health_check(
+                dependencies=["https://dep.example.com"]
+            )
+        assert "https://dep.example.com" in result["dependencies"]
+        dep = result["dependencies"]["https://dep.example.com"]
+        assert dep["reachable"] is True
+        assert dep["status_code"] == 200
+
+    @pytest.mark.asyncio
+    async def test_deep_health_check_with_named_dep(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s", access_token="t")
+        client.BASE_URL = "http://api.example.com"
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.head.return_value = mock_response
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client.deep_health_check(
+                dependencies=["AUTH_SERVICE"]
+            )
+        assert "AUTH_SERVICE" in result["dependencies"]
+        dep = result["dependencies"]["AUTH_SERVICE"]
+        assert dep["reachable"] is True
+
+    @pytest.mark.asyncio
+    async def test_deep_health_check_dep_error(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s", access_token="t")
+        client.BASE_URL = "http://api.example.com"
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+
+        async def head_side_effect(url, **kwargs):
+            if "dep.example.com" in str(url):
+                raise httpx.ConnectError("dep unreachable")
+            return mock_response
+
+        mock_client.head.side_effect = head_side_effect
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client.deep_health_check(
+                dependencies=["https://dep.example.com"]
+            )
+        dep = result["dependencies"]["https://dep.example.com"]
+        assert dep["reachable"] is False
+        assert "error" in dep
+
+    @pytest.mark.asyncio
+    async def test_deep_health_check_degraded_when_dep_fails(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s", access_token="t")
+        client.BASE_URL = "http://api.example.com"
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+
+        async def head_side_effect(url, **kwargs):
+            if "dep.example.com" in str(url):
+                raise httpx.ConnectError("dep unreachable")
+            return mock_response
+
+        mock_client.head.side_effect = head_side_effect
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client.deep_health_check(
+                dependencies=["https://dep.example.com"]
+            )
+        assert result["status"] == "degraded"
+
+    @pytest.mark.asyncio
+    async def test_deep_health_check_has_latency(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s", access_token="t")
+        client.BASE_URL = "http://api.example.com"
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.head.return_value = mock_response
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client.deep_health_check()
+        assert "latency_ms" in result
+        assert result["latency_ms"] > 0
+
+
+# ── ConfigRule Tests ───────────────────────────────────────
+
+
+class TestConfigRule:
+    """Tests for ConfigRule dataclass."""
+
+    def test_basic_creation(self):
+        rule = ConfigRule("APP_KEY", required=True)
+        assert rule.key == "APP_KEY"
+        assert rule.required is True
+        assert rule.value_type == "str"
+        assert rule.depends_on == []
+
+    def test_all_options(self):
+        rule = ConfigRule(
+            "PORT",
+            required=True,
+            value_type="int",
+            min_value=1,
+            max_value=65535,
+            depends_on=["HOST"],
+            description="Server port",
+        )
+        assert rule.key == "PORT"
+        assert rule.value_type == "int"
+        assert rule.min_value == 1
+        assert rule.max_value == 65535
+        assert rule.depends_on == ["HOST"]
+        assert rule.description == "Server port"
+
+    def test_default_description(self):
+        rule = ConfigRule("APP_KEY")
+        assert rule.description == "APP_KEY"
+
+    def test_allowed_values(self):
+        rule = ConfigRule("MODE", allowed_values=["prod", "dev", "staging"])
+        assert rule.allowed_values == ["prod", "dev", "staging"]
+
+    def test_pattern(self):
+        rule = ConfigRule("VERSION", pattern=r"^\d+\.\d+\.\d+$")
+        assert rule.pattern == r"^\d+\.\d+\.\d+$"
+
+
+# ── ConfigValidationResult Tests ───────────────────────────
+
+
+class TestConfigValidationResult:
+    """Tests for ConfigValidationResult."""
+
+    def test_default_valid(self):
+        result = ConfigValidationResult()
+        assert result.valid is True
+        assert result.errors == []
+        assert result.warnings == []
+
+    def test_add_error(self):
+        result = ConfigValidationResult()
+        result.add_error("Something is wrong")
+        assert result.valid is False
+        assert "Something is wrong" in result.errors
+
+    def test_add_warning(self):
+        result = ConfigValidationResult()
+        result.add_warning("Consider updating")
+        assert result.valid is True
+        assert "Consider updating" in result.warnings
+
+    def test_to_dict(self):
+        result = ConfigValidationResult()
+        result.add_error("err1")
+        result.add_warning("warn1")
+        d = result.to_dict()
+        assert d["valid"] is False
+        assert d["error_count"] == 1
+        assert d["warning_count"] == 1
+        assert "err1" in d["errors"]
+
+
+# ── ConfigValidator Tests ──────────────────────────────────
+
+
+class TestConfigValidator:
+    """Tests for ConfigValidator."""
+
+    def test_add_rule(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("APP_KEY", required=True))
+        assert "APP_KEY" in validator.get_rules()
+
+    def test_add_rules(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rules([
+            ConfigRule("APP_KEY"),
+            ConfigRule("APP_SECRET"),
+        ])
+        assert len(validator.get_rules()) == 2
+
+    def test_validate_required_present(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("APP_KEY", required=True))
+        result = validator.validate({"APP_KEY": "my_key"})
+        assert result.valid is True
+
+    def test_validate_required_missing(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("APP_KEY", required=True))
+        result = validator.validate({})
+        assert result.valid is False
+        assert len(result.missing_keys) == 1
+
+    def test_validate_optional_missing_ok(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("OPTIONAL_KEY", required=False))
+        result = validator.validate({})
+        assert result.valid is True
+
+    def test_validate_type_str(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("NAME", value_type="str"))
+        assert validator.validate({"NAME": "hello"}).valid is True
+        result = validator.validate({"NAME": 123})
+        assert result.valid is False
+
+    def test_validate_type_int(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("PORT", value_type="int"))
+        assert validator.validate({"PORT": 8080}).valid is True
+        result = validator.validate({"PORT": "not_int"})
+        assert result.valid is False
+
+    def test_validate_type_int_rejects_bool(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("FLAG", value_type="int"))
+        result = validator.validate({"FLAG": True})
+        assert result.valid is False
+
+    def test_validate_type_url(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("WEBHOOK_URL", value_type="url"))
+        assert validator.validate({"WEBHOOK_URL": "https://example.com"}).valid is True
+        result = validator.validate({"WEBHOOK_URL": "not_a_url"})
+        assert result.valid is False
+
+    def test_validate_type_email(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("EMAIL", value_type="email"))
+        assert validator.validate({"EMAIL": "test@example.com"}).valid is True
+        result = validator.validate({"EMAIL": "not_an_email"})
+        assert result.valid is False
+
+    def test_validate_range_min_value(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("PORT", value_type="int", min_value=1))
+        assert validator.validate({"PORT": 8080}).valid is True
+        result = validator.validate({"PORT": 0})
+        assert result.valid is False
+        assert "below minimum" in result.errors[0]
+
+    def test_validate_range_max_value(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("PORT", value_type="int", max_value=65535))
+        assert validator.validate({"PORT": 8080}).valid is True
+        result = validator.validate({"PORT": 70000})
+        assert result.valid is False
+        assert "above maximum" in result.errors[0]
+
+    def test_validate_range_min_length(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("KEY", min_length=8))
+        assert validator.validate({"KEY": "12345678"}).valid is True
+        result = validator.validate({"KEY": "short"})
+        assert result.valid is False
+        assert "below minimum" in result.errors[0]
+
+    def test_validate_range_max_length(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("KEY", max_length=64))
+        assert validator.validate({"KEY": "ok"}).valid is True
+        result = validator.validate({"KEY": "x" * 65})
+        assert result.valid is False
+        assert "exceeds maximum" in result.errors[0]
+
+    def test_validate_pattern(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("VERSION", pattern=r"^\d+\.\d+\.\d+$"))
+        assert validator.validate({"VERSION": "1.2.3"}).valid is True
+        result = validator.validate({"VERSION": "not_semver"})
+        assert result.valid is False
+
+    def test_validate_allowed_values(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("MODE", allowed_values=["prod", "dev"]))
+        assert validator.validate({"MODE": "prod"}).valid is True
+        result = validator.validate({"MODE": "staging"})
+        assert result.valid is False
+        assert "not in allowed values" in result.errors[0]
+
+    def test_validate_dependency_present(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("APP_KEY", required=True))
+        validator.add_rule(ConfigRule("TOKEN", depends_on=["APP_KEY"]))
+        result = validator.validate({"APP_KEY": "key", "TOKEN": "tok"})
+        assert result.valid is True
+        assert len(result.dependency_errors) == 0
+
+    def test_validate_dependency_missing(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("APP_KEY", required=True))
+        validator.add_rule(ConfigRule("TOKEN", depends_on=["APP_KEY"]))
+        result = validator.validate({"TOKEN": "tok"})
+        assert result.valid is False
+        assert len(result.dependency_errors) == 1
+        assert "APP_KEY" in result.dependency_errors[0]
+
+    def test_validate_dependency_not_set_ok(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("TOKEN", required=False, depends_on=["APP_KEY"]))
+        result = validator.validate({})
+        assert result.valid is True
+
+    def test_validate_with_prefix(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("APP_KEY", required=True))
+        result = validator.validate({}, prefix="OCEANENGINE_")
+        assert result.valid is False
+        assert "OCEANENGINE_APP_KEY" in result.missing_keys[0]
+
+    def test_validate_multiple_rules(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rules([
+            ConfigRule("APP_KEY", required=True, min_length=8),
+            ConfigRule("APP_SECRET", required=True, min_length=16),
+            ConfigRule("TIMEOUT", required=False, value_type="int", min_value=1, max_value=300),
+        ])
+        result = validator.validate({
+            "APP_KEY": "my_key_123",
+            "APP_SECRET": "my_secret_value_12345678",
+            "TIMEOUT": 30,
+        })
+        assert result.valid is True
+
+    def test_validate_from_env_success(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("APP_KEY", required=True))
+        validator.add_rule(ConfigRule("APP_SECRET", required=True))
+        with patch.dict(os.environ, {"TEST_APP_KEY": "key", "TEST_APP_SECRET": "secret"}):
+            result = validator.validate_from_env("TEST")
+        assert result.valid is True
+
+    def test_validate_from_env_missing(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("APP_KEY", required=True))
+        with patch.dict(os.environ, {}, clear=True):
+            result = validator.validate_from_env("TEST")
+        assert result.valid is False
+
+    def test_validate_from_env_specific_keys(self):
+        validator = ConfigValidator("TEST")
+        validator.add_rule(ConfigRule("APP_KEY", required=True))
+        validator.add_rule(ConfigRule("APP_SECRET", required=True))
+        with patch.dict(os.environ, {"TEST_APP_KEY": "key"}):
+            result = validator.validate_from_env("TEST", keys=["APP_KEY"])
+        assert result.valid is True
+
+
+# ── ConnectionPoolMonitor Tests ────────────────────────────
+
+
+class TestConnectionPoolMonitor:
+    """Tests for ConnectionPoolMonitor."""
+
+    def test_default_init(self):
+        monitor = ConnectionPoolMonitor()
+        assert monitor._max_connections == 10
+
+    def test_custom_max_connections(self):
+        monitor = ConnectionPoolMonitor(max_connections=20)
+        assert monitor._max_connections == 20
+
+    def test_record_acquire(self):
+        monitor = ConnectionPoolMonitor()
+        monitor.record_acquire(latency_ms=5.0)
+        metrics = monitor.get_metrics()
+        assert metrics.active_connections == 1
+        assert metrics.total_requests == 1
+        assert metrics.pool_utilization == 0.1
+
+    def test_record_release(self):
+        monitor = ConnectionPoolMonitor()
+        monitor.record_acquire()
+        monitor.record_release()
+        metrics = monitor.get_metrics()
+        assert metrics.active_connections == 0
+
+    def test_record_release_no_negative(self):
+        monitor = ConnectionPoolMonitor()
+        monitor.record_release()
+        metrics = monitor.get_metrics()
+        assert metrics.active_connections == 0
+
+    def test_pool_utilization(self):
+        monitor = ConnectionPoolMonitor(max_connections=10)
+        for _ in range(5):
+            monitor.record_acquire()
+        metrics = monitor.get_metrics()
+        assert metrics.pool_utilization == 0.5
+
+    def test_health_status_healthy(self):
+        monitor = ConnectionPoolMonitor(max_connections=10)
+        monitor.record_acquire()
+        health = monitor.get_health_status()
+        assert health["status"] == "healthy"
+
+    def test_health_status_warning(self):
+        monitor = ConnectionPoolMonitor(max_connections=10)
+        for _ in range(8):
+            monitor.record_acquire()
+        health = monitor.get_health_status()
+        assert health["status"] == "warning"
+
+    def test_health_status_critical(self):
+        monitor = ConnectionPoolMonitor(max_connections=10)
+        for _ in range(10):
+            monitor.record_acquire()
+        health = monitor.get_health_status()
+        assert health["status"] == "critical"
+
+    def test_reset(self):
+        monitor = ConnectionPoolMonitor()
+        monitor.record_acquire()
+        monitor.reset()
+        metrics = monitor.get_metrics()
+        assert metrics.total_requests == 0
+
+
+class TestPoolMetrics:
+    def test_default_values(self):
+        m = PoolMetrics()
+        assert m.max_connections == 10
+
+
+class TestSpan:
+    def test_creation(self):
+        span = Span(trace_id="t1", span_id="s1", name="test")
+        assert span.trace_id == "t1"
+
+    def test_finish(self):
+        span = Span(trace_id="t1", span_id="s1", name="test", start_time=1.0)
+        assert span.is_active is True
+        span.finish()
+        assert span.is_active is False
+
+    def test_to_dict(self):
+        span = Span(trace_id="t1", span_id="s1", name="test", start_time=1.0, end_time=1.1)
+        d = span.to_dict()
+        assert d["trace_id"] == "t1"
+
+
+class TestTraceContext:
+    def test_to_headers(self):
+        ctx = TraceContext(trace_id="t1", span_id="s1")
+        headers = ctx.to_headers()
+        assert headers["X-Trace-Id"] == "t1"
+
+    def test_from_headers(self):
+        ctx = TraceContext.from_headers({"X-Trace-Id": "t1", "X-Span-Id": "s1"})
+        assert ctx.trace_id == "t1"
+
+    def test_from_w3c(self):
+        ctx = TraceContext.from_w3c("00-abc-def-01")
+        assert ctx.trace_id == "abc"
+
+    def test_to_w3c(self):
+        ctx = TraceContext(trace_id="abc", span_id="def")
+        tp, _ = ctx.to_w3c()
+        assert tp == "00-abc-def-01"
+
+    def test_roundtrip(self):
+        original = TraceContext(trace_id="t1", span_id="s1", parent_span_id="p1")
+        headers = original.to_headers()
+        restored = TraceContext.from_headers(headers)
+        assert restored.trace_id == original.trace_id
+
+
+class TestTracer:
+    def test_init(self):
+        tracer = Tracer(service_name="test")
+        assert tracer.service_name == "test"
+
+    def test_start_span(self):
+        tracer = Tracer()
+        span = tracer.start_span("op")
+        assert span.name == "op"
+
+    def test_start_span_with_parent(self):
+        tracer = Tracer()
+        parent = tracer.start_span("parent")
+        child = tracer.start_span("child", parent=parent)
+        assert child.trace_id == parent.trace_id
+
+    def test_finish_span(self):
+        tracer = Tracer()
+        span = tracer.start_span("op")
+        tracer.finish_span(span)
+        assert span not in tracer.get_active_spans()
+
+    def test_get_all_spans(self):
+        tracer = Tracer()
+        tracer.start_span("op1")
+        tracer.start_span("op2")
+        assert len(tracer.get_all_spans()) == 2
+
+    def test_get_current_context(self):
+        tracer = Tracer()
+        span = tracer.start_span("op")
+        ctx = tracer.get_current_context()
+        assert ctx is not None
+        assert ctx.trace_id == span.trace_id
+
+    def test_export_trace(self):
+        tracer = Tracer(service_name="test")
+        tracer.start_span("op")
+        data = tracer.export_trace()
+        assert data["span_count"] == 1
+
+    def test_clear(self):
+        tracer = Tracer()
+        tracer.start_span("op")
+        tracer.clear()
+        assert tracer.get_all_spans() == []
+
+    def test_context_manager(self):
+        with Tracer(service_name="test") as tracer:
+            tracer.start_span("op")
+            assert len(tracer.get_active_spans()) == 1
+        assert len(tracer.get_active_spans()) == 0
+
+
+class TestSpanScope:
+    def test_basic_usage(self):
+        tracer = Tracer()
+        with span_scope(tracer, "my_op") as span:
+            assert span.name == "my_op"
+        assert span.status == "ok"
+
+    def test_error_captured(self):
+        tracer = Tracer()
+        with pytest.raises(ValueError):
+            with span_scope(tracer, "my_op"):
+                raise ValueError("test error")
+
+
+class TestCommerceMCPBasePoolTracer:
+    def test_init_has_pool_monitor(self):
+        client = CommerceMCPBase()
+        assert isinstance(client.pool_monitor, ConnectionPoolMonitor)
+
+    def test_init_has_tracer(self):
+        client = CommerceMCPBase()
+        assert isinstance(client.tracer, Tracer)
+
+    @pytest.mark.asyncio
+    async def test_request_creates_span(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": {"id": 1}}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            await client._request("GET", "/api/test")
+
+        spans = client.tracer.get_all_spans()
+        assert len(spans) == 1
+        assert spans[0].name == "GET /api/test"
+        assert spans[0].status == "ok"
+
+    @pytest.mark.asyncio
+    async def test_health_check_includes_pool(self):
+        client = CommerceMCPBase(app_key="key", app_secret="secret")
+        result = await client.health_check(use_cache=False)
+        assert "pool" in result
+        assert "status" in result["pool"]
+
+    def test_request_tracks_pool_metrics(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        client._get_client()
+        pool_metrics = client.pool_monitor.get_metrics()
+        assert pool_metrics.total_requests >= 1

@@ -114,7 +114,7 @@ class TestOceanEngineFullRequestFlow:
         from mcp_oceanengine.server import get_advertiser_info
 
         with patch("mcp_oceanengine.server._get_client", return_value=oe_client):
-            with patch.object(oe_client, "_get_client", return_value=mock_http):
+            with patch.object(oe_client, "_ensure_client", return_value=mock_http):
                 result = await get_advertiser_info(advertiser_ids="123")
 
         data = json.loads(result)
@@ -135,7 +135,7 @@ class TestOceanEngineFullRequestFlow:
         from mcp_oceanengine.server import get_campaign_report
 
         with patch("mcp_oceanengine.server._get_client", return_value=oe_client):
-            with patch.object(oe_client, "_get_client", return_value=mock_http):
+            with patch.object(oe_client, "_ensure_client", return_value=mock_http):
                 await get_campaign_report(
                     advertiser_id="456",
                     start_date="2024-01-01",
@@ -165,7 +165,7 @@ class TestOceanEngineFullRequestFlow:
         from mcp_oceanengine.server import get_advertiser_info
 
         with patch("mcp_oceanengine.server._get_client", return_value=oe_client):
-            with patch.object(oe_client, "_get_client", return_value=mock_http):
+            with patch.object(oe_client, "_ensure_client", return_value=mock_http):
                 result = await get_advertiser_info(advertiser_ids="999")
 
         data = json.loads(result)
@@ -201,7 +201,7 @@ class TestJDFlow:
         mock_http.is_closed = False
 
         with patch("mcp_jd.server.jd", jd_client):
-            with patch.object(jd_client, "_get_client", return_value=mock_http):
+            with patch.object(jd_client, "_ensure_client", return_value=mock_http):
                 from mcp_jd.server import get_order_list
 
                 result = await get_order_list(
@@ -242,7 +242,7 @@ class TestTaobaoFlow:
         mock_http.is_closed = False
 
         with patch("mcp_taobao.server.taobao", taobao_client):
-            with patch.object(taobao_client, "_get_client", return_value=mock_http):
+            with patch.object(taobao_client, "_ensure_client", return_value=mock_http):
                 from mcp_taobao.server import get_order_list
 
                 result = await get_order_list(
@@ -365,7 +365,7 @@ class TestErrorHandlingFlow:
         mock_http.get.side_effect = httpx.ConnectError("connection refused")
         mock_http.is_closed = False
 
-        with patch.object(client, "_get_client", return_value=mock_http):
+        with patch.object(client, "_ensure_client", return_value=mock_http):
             with pytest.raises(httpx.ConnectError):
                 await client._request("GET", "/test")
 
@@ -416,7 +416,7 @@ class TestRetryMechanismIntegration:
 
         retry_config = RetryConfig(max_retries=3, base_delay=0.01, jitter=False)
 
-        with patch.object(client, "_get_client", return_value=mock_http):
+        with patch.object(client, "_ensure_client", return_value=mock_http):
             with patch("asyncio.sleep", new_callable=AsyncMock):  # skip real sleep
                 result = await client._request("GET", "/test", retry_config=retry_config)
 
@@ -435,7 +435,7 @@ class TestRetryMechanismIntegration:
 
         retry_config = RetryConfig(max_retries=2, base_delay=0.01, jitter=False)
 
-        with patch.object(client, "_get_client", return_value=mock_http):
+        with patch.object(client, "_ensure_client", return_value=mock_http):
             with patch("asyncio.sleep", new_callable=AsyncMock):
                 with pytest.raises(httpx.ReadTimeout):
                     await client._request("GET", "/test", retry_config=retry_config)
@@ -456,7 +456,7 @@ class TestRetryMechanismIntegration:
         retry_config = RetryConfig(max_retries=3, base_delay=0.01)
         # 40001 is not in default retryable_api_codes
 
-        with patch.object(client, "_get_client", return_value=mock_http):
+        with patch.object(client, "_ensure_client", return_value=mock_http):
             with pytest.raises(CommerceAPIError) as exc_info:
                 await client._request("GET", "/test", retry_config=retry_config)
 
@@ -495,7 +495,7 @@ class TestRetryMechanismIntegration:
             retryable_api_codes={90001},
         )
 
-        with patch.object(client, "_get_client", return_value=mock_http):
+        with patch.object(client, "_ensure_client", return_value=mock_http):
             with patch("asyncio.sleep", new_callable=AsyncMock):
                 result = await client._request("GET", "/test", retry_config=retry_config)
 
@@ -590,7 +590,7 @@ class TestRateLimiterIntegration:
         mock_http.get.return_value = MagicMock(json=lambda: {"code": 0}, status_code=200)
         mock_http.is_closed = False
 
-        with patch.object(client, "_get_client", return_value=mock_http):
+        with patch.object(client, "_ensure_client", return_value=mock_http):
             await client._request("GET", "/test")
 
         assert acquire_called is True
@@ -1059,7 +1059,7 @@ class TestEndToEndScenarios:
         mock_http.get = mock_get
 
         with patch("mcp_oceanengine.server._get_client", return_value=client):
-            with patch.object(client, "_get_client", return_value=mock_http):
+            with patch.object(client, "_ensure_client", return_value=mock_http):
                 # Step 1: Get advertiser info
                 info_result = await get_advertiser_info(advertiser_ids="123")
                 info = json.loads(info_result)
@@ -1089,7 +1089,7 @@ class TestEndToEndScenarios:
         mock_http.is_closed = False
         mock_http.head.return_value = MagicMock(status_code=200)
 
-        with patch.object(client, "_get_client", return_value=mock_http):
+        with patch.object(client, "_ensure_client", return_value=mock_http):
             health = await client.health_check()
 
         assert health["configured"] is True
@@ -1102,7 +1102,7 @@ class TestEndToEndScenarios:
             status_code=200,
         )
 
-        with patch.object(client, "_get_client", return_value=mock_http):
+        with patch.object(client, "_ensure_client", return_value=mock_http):
             result = await client._request("GET", "/api/balance")
 
         assert result["code"] == 0
@@ -1160,7 +1160,7 @@ class TestEndToEndScenarios:
 
         retry_config = RetryConfig(max_retries=2, base_delay=0.01, jitter=False)
 
-        with patch.object(client, "_get_client", return_value=mock_http):
+        with patch.object(client, "_ensure_client", return_value=mock_http):
             with patch("asyncio.sleep", new_callable=AsyncMock):
                 result = await client._request("GET", "/api/data", retry_config=retry_config)
 

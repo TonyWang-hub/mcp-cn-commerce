@@ -479,7 +479,7 @@ class TestHealthCheck:
         client.BASE_URL = "http://127.0.0.1:99999"
         mock_client = AsyncMock()
         mock_client.head.side_effect = httpx.ConnectError("refused")
-        with mock_patch.object(client, "_get_client", return_value=mock_client):
+        with mock_patch.object(client, "_ensure_client", return_value=mock_client):
             result = await client.health_check()
         assert result["api_reachable"] is False
         assert "error" in result
@@ -1400,7 +1400,7 @@ class TestRequest:
         mock_client.get.return_value = mock_response
         mock_client.is_closed = False
 
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             result = await client._request("GET", "/api/test")
 
         assert result == {"result": {"id": 1}}
@@ -1416,7 +1416,7 @@ class TestRequest:
         mock_client.post.return_value = mock_response
         mock_client.is_closed = False
 
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             result = await client._request("POST", "/api/test", data={"key": "val"})
 
         assert result == {"result": {"ok": True}}
@@ -1432,7 +1432,7 @@ class TestRequest:
         mock_client.get.return_value = mock_response
         mock_client.is_closed = False
 
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             with pytest.raises(CommerceAPIError) as exc_info:
                 await client._request("GET", "/api/test")
             assert exc_info.value.code == 40001
@@ -1448,7 +1448,7 @@ class TestRequest:
         mock_client.get.return_value = mock_response
         mock_client.is_closed = False
 
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             await client._request("GET", "/api/test", params={"extra": "value"})
 
         # Check that auth params were included
@@ -1469,7 +1469,7 @@ class TestRequest:
         mock_client.get.return_value = mock_response
         mock_client.is_closed = False
 
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             await client._request("GET", "/api/test")
 
         call_kwargs = mock_client.get.call_args
@@ -1496,7 +1496,7 @@ class TestRequest:
         mock_client.is_closed = False
 
         retry_config = RetryConfig(max_retries=2, base_delay=0.01, jitter=False)
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             result = await client._request("GET", "/api/test", retry_config=retry_config)
 
         assert result == {"result": "ok"}
@@ -1510,7 +1510,7 @@ class TestRequest:
         mock_client.is_closed = False
 
         retry_config = RetryConfig(max_retries=3, base_delay=0.01, jitter=False)
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             with pytest.raises(ValueError, match="not retryable"):
                 await client._request("GET", "/api/test", retry_config=retry_config)
 
@@ -1522,7 +1522,7 @@ class TestRequest:
         mock_client.is_closed = False
 
         retry_config = RetryConfig(max_retries=2, base_delay=0.01, jitter=False)
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             with pytest.raises(httpx.ConnectError):
                 await client._request("GET", "/api/test", retry_config=retry_config)
 
@@ -1554,7 +1554,7 @@ class TestRequest:
             jitter=False,
             retryable_api_codes={40001},
         )
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             result = await client._request("GET", "/api/test", retry_config=retry_config)
 
         assert result == {"result": "ok"}
@@ -1785,7 +1785,7 @@ class TestHealthCheckSuccess:
         mock_client = AsyncMock()
         mock_client.head.return_value = mock_response
 
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             result = await client.health_check()
 
         assert result["configured"] is True
@@ -1803,7 +1803,7 @@ class TestHealthCheckSuccess:
         mock_client = AsyncMock()
         mock_client.head.return_value = mock_response
 
-        with patch.object(client, "_get_client", return_value=mock_client):
+        with patch.object(client, "_ensure_client", return_value=mock_client):
             result = await client.health_check()
 
         assert result["api_reachable"] is False

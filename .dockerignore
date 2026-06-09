@@ -1,0 +1,60 @@
+# ─────────────────────────────────────────────────────────────
+# mcp-cn-commerce — Docker Build Context Exclusions
+# ─────────────────────────────────────────────────────────────
+
+# Git
+.git/
+.gitignore
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment (never bake secrets into image)
+.env
+.env.*
+!.env.example
+
+# CI/CD
+.github/
+
+# Documentation (not needed at runtime)
+docs/
+*.md
+!README.md
+
+# Ruff / MyPy cache
+.ruff_cache/
+.mypy_cache/
+
+# Pre-commit
+.pre-commit-config.yaml

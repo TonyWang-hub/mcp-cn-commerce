@@ -87,7 +87,22 @@
 
 ### 安装
 
-#### 从 GitHub Releases 下载（推荐 — 无需注册）
+#### 从 PyPI 安装（推荐）
+
+```bash
+# 安装基础包
+pip install mcp-cn-commerce
+
+# 安装单个平台
+pip install mcp-cn-commerce[doudian]      # 抖店
+pip install mcp-cn-commerce[jd]           # 京东
+pip install mcp-cn-commerce[oceanengine]  # 巨量引擎
+
+# 安装所有平台
+pip install mcp-cn-commerce[all]
+```
+
+#### 从 GitHub Releases 下载
 
 ```bash
 # 下载最新 Release 的 .whl 文件安装
@@ -160,6 +175,66 @@ export JD_ACCESS_TOKEN="你的 Access Token"
 > "京东待处理的退款单有哪些？"
 > "对比巨量引擎上个月和这个月的 ROAS 趋势"
 > "导出今天所有平台的订单汇总"
+
+## 工作流模板 🆕
+
+开箱即用的 AI 工作流模板，**无需 API 凭证即可体验**。模拟数据格式与真实 API 完全一致。
+
+| 模板 | 用途 | 适用角色 | Demo |
+|------|------|----------|------|
+| [电商日报](templates/daily-report/) | 多平台 GMV/订单/退款汇总 | 运营/老板 | [查看 Demo](templates/daily-report/demo-output.md) |
+| [差评预警](templates/bad-review-alert/) | 差评监控 + 原因分析 | 客服/品控 | [查看 Demo](templates/bad-review-alert/demo-output.md) |
+| [客服分类](templates/cs-classify/) | 退款原因分析 + 趋势 | 客服主管 | [查看 Demo](templates/cs-classify/demo-output.md) |
+| [选品分析](templates/product-select/) | 品类热度 + 竞品价格 | 选品经理 | [示例数据](templates/product-select/example-data.json) |
+| [达人匹配](templates/kol-match/) | KOL 匹配 + ROI 预估 | 投放优化师 | [示例数据](templates/kol-match/example-data.json) |
+
+### 📊 日报预览
+
+```
+┌────────┬──────────────┬──────────────┬────────┐
+│ 指标   │ 今日         │ 昨日         │ 环比   │
+├────────┼──────────────┼──────────────┼────────┤
+│ GMV    │ ¥86,965.00   │ ¥88,900.00   │ -2.2%  │
+│ 订单量 │ 312          │ 309          │ +1.0%  │
+│ 客单价 │ ¥278.73      │ ¥287.70      │ -3.1%  │
+│ 退款率 │ 5.1%         │ 4.6%         │ +0.5pp │
+└────────┴──────────────┴──────────────┴────────┘
+
+平台对比
+┌──────────────────────┬──────────────┬──────┬────────┐
+│ 平台                 │ GMV          │ 订单 │ 退款率 │
+├──────────────────────┼──────────────┼──────┼────────┤
+│ 抖店                 │ ¥28,950.00   │ 156  │ 5.1%   │
+│ 京东                 │ ¥45,670.00   │ 89   │ 3.4%   │
+│ 小红书               │ ¥12,345.00   │ 67   │ 7.5% ⚠️│
+└──────────────────────┴──────────────┴──────┴────────┘
+
+⚠️ 异常预警：
+🔴 小红书退款率 7.5% — 超过 5% 阈值
+🔴 库存预警：「夏季新款男士短袖T恤 白色 XL」仅剩 32 件
+```
+
+### 🚨 差评预警预览
+
+```
+原因分布
+  质量问题     ████████████████████  40%
+  色差         ██████████           20%
+  尺码不合适   ██████████           20%
+  做工粗糙     ██████████           20%
+
+逐条分析：
+1. 「洗了一次就掉色」— 抖店 ⭐
+   → 建议：联系买家道歉 + 检查同批次库存
+
+2. 「鞋码偏小，穿着挤脚」— 拼多多 ⭐⭐
+   → 建议：尺码表加注「建议拍大一码」
+
+3. 「颜色跟图片差太多」— 小红书 ⭐⭐
+   → 建议：重新拍摄商品图
+```
+
+全部模板：[`templates/`](templates/) | 接入文档：[`docs/template-guide.md`](docs/template-guide.md)
 
 ## 工具汇总
 
@@ -265,7 +340,6 @@ Monorepo 架构：每个平台是一个独立的 MCP Server，用户按需安装
 
 ```bibtex
 @software{mcp-cn-commerce,
-  author = {Wang, Zhuo},
   title = {mcp-cn-commerce: MCP Servers for Chinese E-Commerce Platforms},
   year = {2026},
   url = {https://github.com/TonyWang-hub/mcp-cn-commerce}

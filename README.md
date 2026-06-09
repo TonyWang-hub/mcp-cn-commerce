@@ -96,7 +96,22 @@ See [Docker documentation](docs/docker.md) for full usage, MCP client configurat
 
 ### Installation
 
-#### From GitHub Releases (recommended — no registration needed)
+#### From PyPI (recommended)
+
+```bash
+# Install base package
+pip install mcp-cn-commerce
+
+# Install single platform
+pip install mcp-cn-commerce[doudian]      # Douyin Shop
+pip install mcp-cn-commerce[jd]           # JD.com
+pip install mcp-cn-commerce[oceanengine]  # Ocean Engine
+
+# Install all platforms
+pip install mcp-cn-commerce[all]
+```
+
+#### From GitHub Releases
 
 ```bash
 # Visit the latest Release and download the .whl file
@@ -193,6 +208,66 @@ mcp-cn-commerce/
 
 Each `servers/<platform>/` is an **independent MCP server**. Users install only what they need.
 
+## Workflow Templates 🆕
+
+Ready-to-use AI workflow templates with realistic Chinese example data. No API credentials needed to try.
+
+| Template | Purpose | Target User | Demo |
+|----------|---------|-------------|------|
+| [Daily Report](templates/daily-report/) | Multi-platform GMV/order/refund summary | Operations / Boss | [View Demo](templates/daily-report/demo-output.md) |
+| [Bad Review Alert](templates/bad-review-alert/) | Negative review monitoring + root cause | CS / QA | [View Demo](templates/bad-review-alert/demo-output.md) |
+| [CS Classify](templates/cs-classify/) | Refund reason analysis + trend | CS Manager | [View Demo](templates/cs-classify/demo-output.md) |
+| [Product Select](templates/product-select/) | Category heat + competitor pricing | Product Manager | [Example Data](templates/product-select/example-data.json) |
+| [KOL Match](templates/kol-match/) | Influencer matching + ROI estimate | Ad Optimizer | [Example Data](templates/kol-match/example-data.json) |
+
+### 📊 Daily Report Preview
+
+```
+┌────────┬──────────────┬──────────────┬────────┐
+│ Metric │ Today        │ Yesterday    │ Change │
+├────────┼──────────────┼──────────────┼────────┤
+│ GMV    │ ¥86,965.00   │ ¥88,900.00   │ -2.2%  │
+│ Orders │ 312          │ 309          │ +1.0%  │
+│ AOV    │ ¥278.73      │ ¥287.70      │ -3.1%  │
+│ Refund │ 5.1%         │ 4.6%         │ +0.5pp │
+└────────┴──────────────┴──────────────┴────────┘
+
+Platform Breakdown
+┌──────────────────────┬──────────────┬──────┬────────┐
+│ Platform             │ GMV          │ Ords │ Refund │
+├──────────────────────┼──────────────┼──────┼────────┤
+│ Douyin Shop          │ ¥28,950.00   │ 156  │ 5.1%   │
+│ JD.com               │ ¥45,670.00   │ 89   │ 3.4%   │
+│ Xiaohongshu          │ ¥12,345.00   │ 67   │ 7.5% ⚠️│
+└──────────────────────┴──────────────┴──────┴────────┘
+
+⚠️ Alerts:
+🔴 Xiaohongshu refund rate 7.5% — exceeds 5% threshold
+🔴 Low stock: "Summer T-Shirt White XL" — 32 units left
+```
+
+### 🚨 Bad Review Alert Preview
+
+```
+Root Cause Distribution
+  Quality Issue   ████████████████████  40% (2)
+  Color Mismatch  ██████████           20% (1)
+  Wrong Size      ██████████           20% (1)
+  Poor Craft      ██████████           20% (1)
+
+Analysis:
+1. "Faded after one wash" — Douyin Shop ⭐
+   → Action: Apologize + resend, check batch quality
+
+2. "Shoes run small" — Pinduoduo ⭐⭐
+   → Action: Add "runs small" note to size chart
+
+3. "Color very different from photos" — Xiaohongshu ⭐⭐
+   → Action: Retake product photos in natural light
+```
+
+See all templates: [`templates/`](templates/)
+
 ## Tools Summary
 
 | Server | Tools | Categories |
@@ -261,16 +336,11 @@ If you use mcp-cn-commerce in your research or project:
 
 ```bibtex
 @software{mcp-cn-commerce,
-  author = {Wang, Zhuo},
   title = {mcp-cn-commerce: MCP Servers for Chinese E-Commerce Platforms},
   year = {2026},
   url = {https://github.com/TonyWang-hub/mcp-cn-commerce}
 }
 ```
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=TonyWang-hub/mcp-cn-commerce&type=Date)](https://star-history.com/#TonyWang-hub/mcp-cn-commerce&Date)
 
 ## License
 

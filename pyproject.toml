@@ -71,6 +71,9 @@ all = [
 ]
 dev = ["pytest>=7.0", "pytest-asyncio", "pytest-cov", "black", "ruff"]
 
+[project.scripts]
+mcp-cn-commerce = "cli:main"
+
 [tool.setuptools.packages.find]
 include = ["shared*"]
 

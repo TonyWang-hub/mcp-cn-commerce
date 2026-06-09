@@ -50,12 +50,10 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "error.batch_empty": "批量请求列表不能为空",
         "error.unknown_platform": "未知平台: {platform}",
         "error.source_dir_not_found": "源码目录未找到: {path}",
-
         # Error messages - API
         "error.api_error": "API 错误: [{code}] {msg}",
         "error.max_retries_exhausted": "{func} 已用尽最大重试次数 ({max_retries})",
         "error.retry_attempt": "重试 {attempt}/{max_retries} {func}，{delay:.2f}s 后: {exc}",
-
         # CLI messages
         "cli.description": "中国电商 MCP 服务器 CLI 工具",
         "cli.start_help": "启动一个或多个 MCP 服务器",
@@ -81,14 +79,12 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "cli.starting_server": "正在启动 {platform} 服务器: {cmd}",
         "cli.stopping_servers": "正在停止所有服务器...",
         "cli.server_stopped": "服务器 {platform} 已被用户停止",
-
         # Health status
         "health.status.ready": "就绪",
         "health.status.importable_no_creds": "可导入但无凭证",
         "health.status.not_ready": "未就绪",
         "health.status.error": "错误",
         "health.status.unknown": "未知",
-
         # Logging
         "log.client_initialized": "客户端已初始化: {platform}",
         "log.missing_config": "{platform} 配置缺失: {vars}",
@@ -100,7 +96,6 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "log.pagination_complete": "分页完成: 共 {total} 条",
         "log.retry_warning": "重试 {attempt}/{max} {func}，{delay:.2f}s 后: {exc}",
         "log.max_retries_exhausted": "{func} 已用尽最大重试次数 ({max})",
-
         # MCP Server descriptions
         "server.oceanengine": "巨量引擎广告平台",
         "server.doudian": "抖店电商平台",
@@ -110,7 +105,6 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "server.kuaishou": "快手电商平台",
         "server.xiaohongshu": "小红书电商平台",
         "server.weixin_store": "微信小店电商平台",
-
         # General
         "general.success": "成功",
         "general.failure": "失败",
@@ -136,12 +130,10 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "error.batch_empty": "Batch request list cannot be empty",
         "error.unknown_platform": "Unknown platform: {platform}",
         "error.source_dir_not_found": "Source directory not found: {path}",
-
         # Error messages - API
         "error.api_error": "API error: [{code}] {msg}",
         "error.max_retries_exhausted": "Max retries ({max_retries}) exhausted for {func}",
         "error.retry_attempt": "Retry {attempt}/{max_retries} for {func} after {delay:.2f}s: {exc}",
-
         # CLI messages
         "cli.description": "CLI tool for Chinese e-commerce MCP servers",
         "cli.start_help": "Start one or more MCP servers",
@@ -167,14 +159,12 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "cli.starting_server": "Starting {platform} server: {cmd}",
         "cli.stopping_servers": "Stopping all servers...",
         "cli.server_stopped": "Server {platform} stopped by user",
-
         # Health status
         "health.status.ready": "Ready",
         "health.status.importable_no_creds": "Importable but no credentials",
         "health.status.not_ready": "Not Ready",
         "health.status.error": "Error",
         "health.status.unknown": "Unknown",
-
         # Logging
         "log.client_initialized": "Client initialized for {platform}",
         "log.missing_config": "Missing config for {platform}: {vars}",
@@ -186,7 +176,6 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "log.pagination_complete": "Pagination complete: {total} total items",
         "log.retry_warning": "Retry {attempt}/{max} for {func} after {delay:.2f}s: {exc}",
         "log.max_retries_exhausted": "Max retries ({max}) exhausted for {func}",
-
         # MCP Server descriptions
         "server.oceanengine": "Ocean Engine advertising platform",
         "server.doudian": "Douyin Shop e-commerce platform",
@@ -196,7 +185,6 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "server.kuaishou": "Kuaishou e-commerce platform",
         "server.xiaohongshu": "Xiaohongshu e-commerce platform",
         "server.weixin_store": "Weixin Store e-commerce platform",
-
         # General
         "general.success": "Success",
         "general.failure": "Failure",

@@ -1008,6 +1008,632 @@ def with_retry(config: RetryConfig | None = None) -> Callable[..., Any]:
     return decorator
 
 
+# ── Request Retry Queue ──────────────────────────────────
+
+
+@dataclass
+class RetryQueueItem:
+    """A single item in the retry queue.
+
+    Attributes:
+        request_id: Unique identifier for this queued request.
+        method: HTTP method ("GET" or "POST").
+        path: API endpoint path.
+        params: Query parameters.
+        data: Request body data.
+        created_at: Timestamp when the item was first queued.
+        retry_count: Number of retry attempts so far.
+        max_retries: Maximum allowed retries for this item.
+        next_retry_at: Timestamp when the next retry should be attempted.
+        last_error: Error message from the most recent failure.
+        status: Current status of the queue item.
+        platform: Platform identifier for logging/tracking.
+    """
+
+    request_id: str = ""
+    method: str = ""
+    path: str = ""
+    params: dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
+    created_at: float = 0.0
+    retry_count: int = 0
+    max_retries: int = 3
+    next_retry_at: float = 0.0
+    last_error: str = ""
+    status: str = "pending"
+    platform: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.request_id:
+            self.request_id = str(uuid.uuid4())
+        if self.created_at == 0.0:
+            self.created_at = time.time()
+
+
+@dataclass
+class RetryQueueConfig:
+    """Configuration for the request retry queue.
+
+    Attributes:
+        max_queue_size: Maximum number of items in the queue.
+        max_retries: Default maximum retry attempts per item.
+        base_delay: Base delay in seconds for exponential backoff.
+        max_delay: Maximum delay cap in seconds.
+        jitter: Whether to add random jitter to retry delays.
+        cleanup_interval: Seconds between cleanup of expired items.
+        item_ttl: Maximum time-to-live for a queue item in seconds.
+        auto_process: Whether to automatically process the queue in background.
+        process_interval: Seconds between automatic queue processing cycles.
+        dedup_window: Time window in seconds for request deduplication.
+            If 0, deduplication is disabled.
+    """
+
+    max_queue_size: int = 1000
+    max_retries: int = 3
+    base_delay: float = 1.0
+    max_delay: float = 60.0
+    jitter: bool = True
+    cleanup_interval: float = 60.0
+    item_ttl: float = 300.0
+    auto_process: bool = False
+    process_interval: float = 5.0
+    dedup_window: float = 30.0
+
+    def compute_delay(self, attempt: int) -> float:
+        """Compute delay for a retry attempt using exponential backoff.
+
+        Args:
+            attempt: Current attempt number (0-indexed).
+
+        Returns:
+            Delay in seconds.
+        """
+        delay = min(self.base_delay * (2**attempt), self.max_delay)
+        if self.jitter:
+            delay = delay * (0.5 + random.random())
+        return delay
+
+
+@dataclass
+class RetryQueueStats:
+    """Statistics for the retry queue.
+
+    Attributes:
+        total_enqueued: Total items ever added to the queue.
+        total_retried: Total retry attempts executed.
+        total_succeeded: Items that eventually succeeded after retry.
+        total_failed: Items that exhausted all retries and failed permanently.
+        total_expired: Items that expired (TTL exceeded) before completion.
+        total_deduplicated: Requests that were deduplicated (not re-enqueued).
+        current_pending: Number of items currently pending retry.
+        current_in_flight: Number of items currently being retried.
+    """
+
+    total_enqueued: int = 0
+    total_retried: int = 0
+    total_succeeded: int = 0
+    total_failed: int = 0
+    total_expired: int = 0
+    total_deduplicated: int = 0
+    current_pending: int = 0
+    current_in_flight: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert stats to a dictionary."""
+        return {
+            "total_enqueued": self.total_enqueued,
+            "total_retried": self.total_retried,
+            "total_succeeded": self.total_succeeded,
+            "total_failed": self.total_failed,
+            "total_expired": self.total_expired,
+            "total_deduplicated": self.total_deduplicated,
+            "current_pending": self.current_pending,
+            "current_in_flight": self.current_in_flight,
+        }
+
+
+class RetryRequestQueue:
+    """Manages a queue of failed requests for automatic retry with deduplication.
+
+    Provides:
+    - Automatic retry scheduling with exponential backoff
+    - Request deduplication within a configurable time window
+    - Queue management (add, remove, process, drain)
+    - Background auto-processing via asyncio task
+    - Statistics tracking
+
+    Usage::
+
+        config = RetryQueueConfig(max_retries=3, dedup_window=30.0)
+        queue = RetryRequestQueue(config)
+
+        # Enqueue a failed request
+        item = await queue.enqueue(method="GET", path="/api/order", params={...})
+
+        # Process the queue (call from your retry handler)
+        results = await queue.process(request_fn)
+    """
+
+    def __init__(self, config: RetryQueueConfig | None = None) -> None:
+        """Initialize the retry request queue.
+
+        Args:
+            config: Queue configuration. Uses defaults if None.
+        """
+        self.config = config or RetryQueueConfig()
+        self.stats = RetryQueueStats()
+        self._queue: list[RetryQueueItem] = []
+        self._in_flight: dict[str, RetryQueueItem] = {}
+        self._dedup_hashes: dict[str, float] = {}
+        self._lock = threading.Lock()
+        self._process_task: asyncio.Task[None] | None = None
+
+    def _compute_request_hash(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None,
+        data: dict[str, Any] | None,
+    ) -> str:
+        """Compute a hash for request deduplication."""
+        key_parts = [
+            method.upper(),
+            path,
+            json.dumps(params or {}, sort_keys=True, ensure_ascii=False),
+            json.dumps(data or {}, sort_keys=True, ensure_ascii=False),
+        ]
+        raw = "|".join(key_parts)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _is_duplicate(self, request_hash: str) -> bool:
+        """Check if a request is a duplicate within the dedup window."""
+        if self.config.dedup_window <= 0:
+            return False
+        now = time.time()
+        last_seen = self._dedup_hashes.get(request_hash)
+        if last_seen is not None and (now - last_seen) < self.config.dedup_window:
+            return True
+        return False
+
+    def _record_hash(self, request_hash: str) -> None:
+        """Record a request hash for deduplication tracking."""
+        self._dedup_hashes[request_hash] = time.time()
+
+    def _cleanup_hashes(self) -> None:
+        """Remove expired dedup hashes."""
+        now = time.time()
+        expired = [
+            h for h, ts in self._dedup_hashes.items()
+            if (now - ts) >= self.config.dedup_window
+        ]
+        for h in expired:
+            del self._dedup_hashes[h]
+
+    async def enqueue(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+        max_retries: int | None = None,
+        platform: str = "",
+        error: str = "",
+        force: bool = False,
+    ) -> RetryQueueItem | None:
+        """Add a failed request to the retry queue.
+
+        If the request is a duplicate within the dedup window and ``force``
+        is False, the request is skipped and dedup stats are incremented.
+        """
+        request_hash = self._compute_request_hash(method, path, params, data)
+
+        if not force and self._is_duplicate(request_hash):
+            with self._lock:
+                self.stats.total_deduplicated += 1
+            logger.debug(f"Request deduplicated: {method} {path}")
+            return None
+
+        with self._lock:
+            if len(self._queue) >= self.config.max_queue_size:
+                raise ValueError(
+                    f"Retry queue full ({self.config.max_queue_size}). "
+                    "Process or drain the queue before adding more items."
+                )
+
+            now = time.time()
+            delay = self.config.compute_delay(0)
+            item = RetryQueueItem(
+                method=method,
+                path=path,
+                params=params or {},
+                data=data or {},
+                created_at=now,
+                max_retries=max_retries or self.config.max_retries,
+                next_retry_at=now + delay,
+                last_error=error,
+                platform=platform,
+            )
+            self._queue.append(item)
+            self._record_hash(request_hash)
+            self.stats.total_enqueued += 1
+            self.stats.current_pending = len(self._queue)
+
+        logger.debug(f"Enqueued retry request: {item.request_id} {method} {path}")
+        return item
+
+    async def dequeue_ready(self) -> list[RetryQueueItem]:
+        """Remove and return all items that are ready for retry."""
+        now = time.time()
+        with self._lock:
+            ready = [item for item in self._queue if item.next_retry_at <= now]
+            self._queue = [item for item in self._queue if item.next_retry_at > now]
+            for item in ready:
+                item.status = "in_flight"
+                self._in_flight[item.request_id] = item
+            self.stats.current_pending = len(self._queue)
+            self.stats.current_in_flight = len(self._in_flight)
+        return ready
+
+    def complete(
+        self,
+        request_id: str,
+        success: bool,
+        error: str = "",
+    ) -> RetryQueueItem | None:
+        """Mark an in-flight request as completed.
+
+        If the request failed and retries remain, it is re-enqueued with
+        an incremented retry count and updated delay.
+        """
+        with self._lock:
+            item = self._in_flight.pop(request_id, None)
+            if item is None:
+                return None
+
+            if success:
+                item.status = "succeeded"
+                self.stats.total_succeeded += 1
+                self.stats.current_in_flight = len(self._in_flight)
+                return item
+
+            item.retry_count += 1
+            self.stats.total_retried += 1
+
+            if item.retry_count >= item.max_retries:
+                item.status = "failed"
+                item.last_error = error
+                self.stats.total_failed += 1
+                self.stats.current_in_flight = len(self._in_flight)
+                return item
+
+            now = time.time()
+            delay = self.config.compute_delay(item.retry_count)
+            item.next_retry_at = now + delay
+            item.last_error = error
+            item.status = "pending"
+            self._queue.append(item)
+            self.stats.current_pending = len(self._queue)
+            self.stats.current_in_flight = len(self._in_flight)
+            return item
+
+    def remove(self, request_id: str) -> bool:
+        """Remove an item from the queue by request ID."""
+        with self._lock:
+            before = len(self._queue)
+            self._queue = [item for item in self._queue if item.request_id != request_id]
+            removed = len(self._queue) < before
+            if removed:
+                self.stats.current_pending = len(self._queue)
+            return removed
+
+    def drain(self) -> list[RetryQueueItem]:
+        """Remove and return all items from the queue."""
+        with self._lock:
+            items = list(self._queue)
+            self._queue.clear()
+            self.stats.current_pending = 0
+            return items
+
+    def cleanup_expired(self) -> int:
+        """Remove items that have exceeded their TTL."""
+        now = time.time()
+        with self._lock:
+            before = len(self._queue)
+            self._queue = [
+                item for item in self._queue
+                if (now - item.created_at) < self.config.item_ttl
+            ]
+            removed = before - len(self._queue)
+            if removed:
+                self.stats.total_expired += removed
+                self.stats.current_pending = len(self._queue)
+            self._cleanup_hashes()
+            return removed
+
+    async def process(
+        self,
+        request_fn: Callable[..., Awaitable[dict[str, Any]]],
+    ) -> list[dict[str, Any]]:
+        """Process all ready items in the queue."""
+        ready = await self.dequeue_ready()
+        results: list[dict[str, Any]] = []
+
+        for item in ready:
+            try:
+                data = await request_fn(
+                    method=item.method,
+                    path=item.path,
+                    params=item.params,
+                    data=item.data,
+                )
+                self.complete(item.request_id, success=True)
+                results.append({
+                    "request_id": item.request_id,
+                    "success": True,
+                    "data": data,
+                })
+            except Exception as exc:
+                completed = self.complete(
+                    item.request_id,
+                    success=False,
+                    error=str(exc),
+                )
+                results.append({
+                    "request_id": item.request_id,
+                    "success": False,
+                    "error": str(exc),
+                    "retry_count": completed.retry_count if completed else 0,
+                    "status": completed.status if completed else "unknown",
+                })
+
+        return results
+
+    async def _auto_process_loop(
+        self,
+        request_fn: Callable[..., Awaitable[dict[str, Any]]],
+    ) -> None:
+        """Background loop for automatic queue processing."""
+        logger.info(f"Retry queue auto-process started (interval={self.config.process_interval}s)")
+        while True:
+            try:
+                self.cleanup_expired()
+                if self._queue:
+                    results = await self.process(request_fn)
+                    succeeded = sum(1 for r in results if r.get("success"))
+                    if results:
+                        logger.info(f"Auto-process: {succeeded}/{len(results)} succeeded")
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.error(f"Retry queue auto-process error: {exc}")
+            await asyncio.sleep(self.config.process_interval)
+
+    def start_auto_process(
+        self,
+        request_fn: Callable[..., Awaitable[dict[str, Any]]],
+    ) -> asyncio.Task[None]:
+        """Start background automatic queue processing."""
+        self.stop_auto_process()
+        self._process_task = asyncio.ensure_future(self._auto_process_loop(request_fn))
+        return self._process_task
+
+    def stop_auto_process(self) -> None:
+        """Stop the background auto-process task."""
+        if self._process_task is not None and not self._process_task.done():
+            self._process_task.cancel()
+            self._process_task = None
+
+    @property
+    def is_auto_processing(self) -> bool:
+        """Whether the auto-process task is active."""
+        return self._process_task is not None and not self._process_task.done()
+
+    @property
+    def pending_count(self) -> int:
+        """Number of items currently pending in the queue."""
+        return len(self._queue)
+
+    @property
+    def in_flight_count(self) -> int:
+        """Number of items currently being retried."""
+        return len(self._in_flight)
+
+    def peek(self) -> list[RetryQueueItem]:
+        """View all pending items without removing them."""
+        with self._lock:
+            return list(self._queue)
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get queue statistics."""
+        with self._lock:
+            return {
+                "stats": self.stats.to_dict(),
+                "queue_size": len(self._queue),
+                "in_flight_count": len(self._in_flight),
+                "dedup_hashes_count": len(self._dedup_hashes),
+                "config": {
+                    "max_queue_size": self.config.max_queue_size,
+                    "max_retries": self.config.max_retries,
+                    "base_delay": self.config.base_delay,
+                    "max_delay": self.config.max_delay,
+                    "dedup_window": self.config.dedup_window,
+                    "item_ttl": self.config.item_ttl,
+                },
+                "auto_processing": self.is_auto_processing,
+            }
+
+    def reset(self) -> None:
+        """Reset all queue state and statistics."""
+        with self._lock:
+            self._queue.clear()
+            self._in_flight.clear()
+            self._dedup_hashes.clear()
+            self.stats = RetryQueueStats()
+
+
+# ── Request Deduplicator ─────────────────────────────────
+
+
+@dataclass
+class DedupStats:
+    """Statistics for request deduplication.
+
+    Attributes:
+        total_requests: Total requests checked for deduplication.
+        total_deduplicated: Requests that were deduplicated.
+        total_unique: Requests that passed dedup (were unique).
+        dedup_window_seconds: Configured dedup window.
+        active_hashes: Number of currently tracked request hashes.
+    """
+
+    total_requests: int = 0
+    total_deduplicated: int = 0
+    total_unique: int = 0
+    dedup_window_seconds: float = 0.0
+    active_hashes: int = 0
+
+    @property
+    def dedup_rate(self) -> float:
+        """Deduplication rate as a fraction."""
+        if self.total_requests == 0:
+            return 0.0
+        return self.total_deduplicated / self.total_requests
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert stats to a dictionary."""
+        return {
+            "total_requests": self.total_requests,
+            "total_deduplicated": self.total_deduplicated,
+            "total_unique": self.total_unique,
+            "dedup_rate": round(self.dedup_rate, 4),
+            "dedup_window_seconds": self.dedup_window_seconds,
+            "active_hashes": self.active_hashes,
+        }
+
+
+class RequestDeduplicator:
+    """Deduplicates identical API requests within a configurable time window.
+
+    Prevents redundant API calls when multiple callers issue the same request
+    concurrently. Uses content-based hashing for identification.
+
+    Usage::
+
+        dedup = RequestDeduplicator(window_seconds=30.0)
+
+        if dedup.check_and_record("GET", "/api/order", params={"id": "123"}):
+            # Duplicate, skip
+            pass
+        else:
+            result = await client._request("GET", "/api/order", params={"id": "123"})
+    """
+
+    def __init__(self, window_seconds: float = 30.0) -> None:
+        """Initialize the deduplicator."""
+        self._window = window_seconds
+        self._hashes: dict[str, float] = {}
+        self._stats = DedupStats(dedup_window_seconds=window_seconds)
+        self._lock = threading.Lock()
+
+    @property
+    def window_seconds(self) -> float:
+        """The configured dedup window in seconds."""
+        return self._window
+
+    @window_seconds.setter
+    def window_seconds(self, value: float) -> None:
+        """Update the dedup window."""
+        self._window = value
+        self._stats.dedup_window_seconds = value
+
+    def compute_key(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> str:
+        """Compute a deduplication key for a request."""
+        key_parts = [
+            method.upper(),
+            path,
+            json.dumps(params or {}, sort_keys=True, ensure_ascii=False),
+            json.dumps(data or {}, sort_keys=True, ensure_ascii=False),
+        ]
+        raw = "|".join(key_parts)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def is_duplicate(self, key: str) -> bool:
+        """Check if a request key is a duplicate within the window."""
+        with self._lock:
+            self._stats.total_requests += 1
+            now = time.time()
+            last_seen = self._hashes.get(key)
+            if last_seen is not None and (now - last_seen) < self._window:
+                self._stats.total_deduplicated += 1
+                return True
+            self._stats.total_unique += 1
+            return False
+
+    def record(self, key: str) -> None:
+        """Record a request key for future deduplication."""
+        with self._lock:
+            self._hashes[key] = time.time()
+
+    def check_and_record(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> bool:
+        """Check for duplicate and record in one atomic operation.
+
+        This is the recommended single-call API for most use cases.
+
+        Returns:
+            True if the request is a duplicate (should be skipped).
+        """
+        key = self.compute_key(method, path, params, data)
+        is_dup = self.is_duplicate(key)
+        if not is_dup:
+            self.record(key)
+        return is_dup
+
+    def cleanup(self) -> int:
+        """Remove expired dedup hashes."""
+        now = time.time()
+        with self._lock:
+            before = len(self._hashes)
+            self._hashes = {
+                h: ts for h, ts in self._hashes.items()
+                if (now - ts) < self._window
+            }
+            removed = before - len(self._hashes)
+            self._stats.active_hashes = len(self._hashes)
+            return removed
+
+    def invalidate(self, key: str | None = None) -> None:
+        """Invalidate dedup entries."""
+        with self._lock:
+            if key is None:
+                self._hashes.clear()
+            else:
+                self._hashes.pop(key, None)
+            self._stats.active_hashes = len(self._hashes)
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get deduplication statistics."""
+        with self._lock:
+            self._stats.active_hashes = len(self._hashes)
+            return self._stats.to_dict()
+
+    def reset_stats(self) -> None:
+        """Reset collected statistics."""
+        with self._lock:
+            self._stats = DedupStats(dedup_window_seconds=self._window)
+
+
 @dataclass
 class ReconnectConfig:
     """Configuration for automatic HTTP client reconnection.

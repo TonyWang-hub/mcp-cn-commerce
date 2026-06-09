@@ -45,6 +45,12 @@ from cn_commerce_base import (
     RequestCompressor,
     RetryableError,
     RetryConfig,
+    DedupStats,
+    RequestDeduplicator,
+    RetryQueueConfig,
+    RetryQueueItem,
+    RetryQueueStats,
+    RetryRequestQueue,
     SensitiveDataFilter,
     SignMethod,
     WarmupResult,
@@ -3059,3 +3065,513 @@ class TestRequestCompressorConcurrency:
         assert errors == []
         stats = compressor.get_stats()
         assert stats["total_requests"] == 200
+
+
+class TestRetryQueueItem:
+    """Tests for RetryQueueItem dataclass."""
+
+    def test_default_values(self):
+        item = RetryQueueItem()
+        assert item.request_id != ""
+        assert item.method == ""
+        assert item.path == ""
+        assert item.params == {}
+        assert item.data == {}
+        assert item.created_at > 0
+        assert item.retry_count == 0
+        assert item.max_retries == 3
+        assert item.status == "pending"
+
+    def test_custom_values(self):
+        item = RetryQueueItem(method="GET", path="/api/order", params={"id": "123"}, max_retries=5, platform="TAOBAO", last_error="timeout")
+        assert item.method == "GET"
+        assert item.path == "/api/order"
+        assert item.params == {"id": "123"}
+        assert item.max_retries == 5
+        assert item.platform == "TAOBAO"
+
+    def test_request_id_auto_generated(self):
+        a = RetryQueueItem()
+        b = RetryQueueItem()
+        assert a.request_id != b.request_id
+
+    def test_created_at_auto_set(self):
+        item = RetryQueueItem()
+        assert item.created_at > 0
+
+    def test_params_default_factory(self):
+        a = RetryQueueItem()
+        b = RetryQueueItem()
+        a.params["key"] = "val"
+        assert "key" not in b.params
+
+
+class TestRetryQueueConfig:
+    """Tests for RetryQueueConfig dataclass."""
+
+    def test_default_values(self):
+        config = RetryQueueConfig()
+        assert config.max_queue_size == 1000
+        assert config.max_retries == 3
+        assert config.base_delay == 1.0
+        assert config.max_delay == 60.0
+        assert config.jitter is True
+        assert config.dedup_window == 30.0
+
+    def test_compute_delay_no_jitter(self):
+        config = RetryQueueConfig(base_delay=1.0, max_delay=60.0, jitter=False)
+        assert config.compute_delay(0) == 1.0
+        assert config.compute_delay(1) == 2.0
+        assert config.compute_delay(2) == 4.0
+
+    def test_compute_delay_with_jitter(self):
+        config = RetryQueueConfig(base_delay=1.0, max_delay=60.0, jitter=True)
+        delay = config.compute_delay(0)
+        assert 0.5 <= delay <= 1.5
+
+    def test_compute_delay_max_cap(self):
+        config = RetryQueueConfig(base_delay=1.0, max_delay=10.0, jitter=False)
+        assert config.compute_delay(10) == 10.0
+
+
+class TestRetryQueueStats:
+    """Tests for RetryQueueStats dataclass."""
+
+    def test_default_values(self):
+        stats = RetryQueueStats()
+        assert stats.total_enqueued == 0
+        assert stats.total_succeeded == 0
+        assert stats.total_failed == 0
+        assert stats.total_deduplicated == 0
+
+    def test_to_dict(self):
+        stats = RetryQueueStats(total_enqueued=10, total_succeeded=5, total_failed=2)
+        d = stats.to_dict()
+        assert d["total_enqueued"] == 10
+        assert d["total_succeeded"] == 5
+        assert d["total_failed"] == 2
+
+
+class TestRetryRequestQueue:
+    """Tests for RetryRequestQueue."""
+
+    def test_init_default(self):
+        queue = RetryRequestQueue()
+        assert queue.pending_count == 0
+        assert queue.in_flight_count == 0
+
+    def test_init_with_config(self):
+        config = RetryQueueConfig(max_retries=5, dedup_window=10.0)
+        queue = RetryRequestQueue(config)
+        assert queue.config.max_retries == 5
+        assert queue.config.dedup_window == 10.0
+
+    @pytest.mark.asyncio
+    async def test_enqueue_basic(self):
+        queue = RetryRequestQueue(RetryQueueConfig(dedup_window=0))
+        item = await queue.enqueue(method="GET", path="/api/test")
+        assert item is not None
+        assert item.method == "GET"
+        assert item.path == "/api/test"
+        assert item.status == "pending"
+        assert queue.pending_count == 1
+
+    @pytest.mark.asyncio
+    async def test_enqueue_with_all_params(self):
+        queue = RetryRequestQueue(RetryQueueConfig(dedup_window=0))
+        item = await queue.enqueue(method="POST", path="/api/order", params={"id": "123"}, data={"status": "paid"}, max_retries=5, platform="TAOBAO", error="connection refused")
+        assert item is not None
+        assert item.method == "POST"
+        assert item.max_retries == 5
+        assert item.platform == "TAOBAO"
+
+    @pytest.mark.asyncio
+    async def test_enqueue_dedup(self):
+        queue = RetryRequestQueue(RetryQueueConfig(dedup_window=30.0))
+        item1 = await queue.enqueue(method="GET", path="/api/test", params={"id": "1"})
+        assert item1 is not None
+        item2 = await queue.enqueue(method="GET", path="/api/test", params={"id": "1"})
+        assert item2 is None
+        assert queue.stats.total_deduplicated == 1
+
+    @pytest.mark.asyncio
+    async def test_enqueue_force_bypass_dedup(self):
+        queue = RetryRequestQueue(RetryQueueConfig(dedup_window=30.0))
+        await queue.enqueue(method="GET", path="/api/test", params={"id": "1"})
+        item2 = await queue.enqueue(method="GET", path="/api/test", params={"id": "1"}, force=True)
+        assert item2 is not None
+        assert queue.stats.total_deduplicated == 0
+
+    @pytest.mark.asyncio
+    async def test_enqueue_dedup_disabled(self):
+        queue = RetryRequestQueue(RetryQueueConfig(dedup_window=0))
+        item1 = await queue.enqueue(method="GET", path="/api/test", params={"id": "1"})
+        item2 = await queue.enqueue(method="GET", path="/api/test", params={"id": "1"})
+        assert item1 is not None
+        assert item2 is not None
+
+    @pytest.mark.asyncio
+    async def test_enqueue_queue_full(self):
+        config = RetryQueueConfig(max_queue_size=2, dedup_window=0)
+        queue = RetryRequestQueue(config)
+        await queue.enqueue(method="GET", path="/a")
+        await queue.enqueue(method="GET", path="/b")
+        with pytest.raises(ValueError, match="full"):
+            await queue.enqueue(method="GET", path="/c")
+
+    @pytest.mark.asyncio
+    async def test_dequeue_ready(self):
+        config = RetryQueueConfig(dedup_window=0)
+        queue = RetryRequestQueue(config)
+        item = await queue.enqueue(method="GET", path="/api/test")
+        item.next_retry_at = 0.0
+        ready = await queue.dequeue_ready()
+        assert len(ready) == 1
+        assert ready[0].status == "in_flight"
+        assert queue.pending_count == 0
+        assert queue.in_flight_count == 1
+
+    @pytest.mark.asyncio
+    async def test_dequeue_ready_empty(self):
+        queue = RetryRequestQueue()
+        ready = await queue.dequeue_ready()
+        assert ready == []
+
+    def test_complete_success(self):
+        queue = RetryRequestQueue()
+        item = RetryQueueItem(request_id="test-1", method="GET", path="/api")
+        queue._in_flight["test-1"] = item
+        queue.stats.current_in_flight = 1
+        result = queue.complete("test-1", success=True)
+        assert result is not None
+        assert result.status == "succeeded"
+        assert queue.stats.total_succeeded == 1
+        assert queue.in_flight_count == 0
+
+    def test_complete_failure_retries_remaining(self):
+        config = RetryQueueConfig(max_retries=3, base_delay=0.01, jitter=False)
+        queue = RetryRequestQueue(config)
+        item = RetryQueueItem(request_id="test-1", method="GET", path="/api")
+        queue._in_flight["test-1"] = item
+        queue.stats.current_in_flight = 1
+        result = queue.complete("test-1", success=False, error="timeout")
+        assert result is not None
+        assert result.status == "pending"
+        assert result.retry_count == 1
+        assert queue.pending_count == 1
+
+    def test_complete_failure_no_retries_remaining(self):
+        config = RetryQueueConfig(max_retries=2)
+        queue = RetryRequestQueue(config)
+        item = RetryQueueItem(request_id="test-1", method="GET", path="/api", max_retries=2)
+        item.retry_count = 1
+        queue._in_flight["test-1"] = item
+        queue.stats.current_in_flight = 1
+        result = queue.complete("test-1", success=False, error="permanent error")
+        assert result is not None
+        assert result.status == "failed"
+        assert queue.stats.total_failed == 1
+
+    def test_complete_unknown_id(self):
+        queue = RetryRequestQueue()
+        result = queue.complete("nonexistent", success=True)
+        assert result is None
+
+    def test_remove(self):
+        config = RetryQueueConfig(dedup_window=0)
+        queue = RetryRequestQueue(config)
+        queue._queue.append(RetryQueueItem(request_id="rm-test"))
+        queue.stats.current_pending = 1
+        assert queue.remove("rm-test") is True
+        assert queue.pending_count == 0
+
+    def test_drain(self):
+        config = RetryQueueConfig(dedup_window=0)
+        queue = RetryRequestQueue(config)
+        for i in range(5):
+            queue._queue.append(RetryQueueItem(request_id=f"item-{i}"))
+        items = queue.drain()
+        assert len(items) == 5
+        assert queue.pending_count == 0
+
+    def test_cleanup_expired(self):
+        import time
+        config = RetryQueueConfig(item_ttl=1.0, dedup_window=0)
+        queue = RetryRequestQueue(config)
+        queue._queue.append(RetryQueueItem(request_id="old", created_at=time.time() - 10.0))
+        queue._queue.append(RetryQueueItem(request_id="new", created_at=time.time()))
+        queue.stats.current_pending = 2
+        removed = queue.cleanup_expired()
+        assert removed == 1
+        assert queue.stats.total_expired == 1
+
+    @pytest.mark.asyncio
+    async def test_process_success(self):
+        config = RetryQueueConfig(dedup_window=0)
+        queue = RetryRequestQueue(config)
+        item = await queue.enqueue(method="GET", path="/api/test")
+        item.next_retry_at = 0.0
+
+        async def mock_fn(method, path, params, data):
+            return {"result": "ok"}
+
+        results = await queue.process(mock_fn)
+        assert len(results) == 1
+        assert results[0]["success"] is True
+        assert results[0]["data"] == {"result": "ok"}
+
+    @pytest.mark.asyncio
+    async def test_process_failure(self):
+        config = RetryQueueConfig(dedup_window=0, max_retries=1)
+        queue = RetryRequestQueue(config)
+        item = await queue.enqueue(method="GET", path="/api/test", max_retries=1)
+        item.next_retry_at = 0.0
+
+        async def mock_fn(method, path, params, data):
+            raise RuntimeError("connection failed")
+
+        results = await queue.process(mock_fn)
+        assert len(results) == 1
+        assert results[0]["success"] is False
+
+    def test_peek(self):
+        config = RetryQueueConfig(dedup_window=0)
+        queue = RetryRequestQueue(config)
+        queue._queue.append(RetryQueueItem(request_id="peek-1"))
+        queue._queue.append(RetryQueueItem(request_id="peek-2"))
+        items = queue.peek()
+        assert len(items) == 2
+
+    def test_get_stats(self):
+        queue = RetryRequestQueue()
+        stats = queue.get_stats()
+        assert "stats" in stats
+        assert "queue_size" in stats
+        assert "config" in stats
+
+    def test_reset(self):
+        import time
+        config = RetryQueueConfig(dedup_window=30.0)
+        queue = RetryRequestQueue(config)
+        queue._queue.append(RetryQueueItem())
+        queue._in_flight["test"] = RetryQueueItem()
+        queue._dedup_hashes["hash"] = time.time()
+        queue.stats.total_enqueued = 10
+        queue.reset()
+        assert queue.pending_count == 0
+        assert queue.stats.total_enqueued == 0
+
+
+class TestRetryRequestQueueConcurrency:
+    """Thread-safety tests for RetryRequestQueue."""
+
+    def test_concurrent_enqueue(self):
+        config = RetryQueueConfig(dedup_window=0, max_queue_size=1000)
+        queue = RetryRequestQueue(config)
+        errors = []
+
+        async def enqueue_batch():
+            try:
+                for i in range(50):
+                    await queue.enqueue(method="GET", path=f"/api/{i}")
+            except Exception as e:
+                errors.append(e)
+
+        async def run():
+            tasks = [enqueue_batch() for _ in range(4)]
+            await asyncio.gather(*tasks)
+
+        asyncio.run(run())
+        assert errors == []
+        assert queue.pending_count == 200
+
+    def test_concurrent_enqueue_dedup(self):
+        config = RetryQueueConfig(dedup_window=30.0, max_queue_size=1000)
+        queue = RetryRequestQueue(config)
+
+        async def enqueue_same():
+            for _ in range(10):
+                await queue.enqueue(method="GET", path="/api/same", params={"id": "1"})
+
+        async def run():
+            await asyncio.gather(enqueue_same(), enqueue_same())
+
+        asyncio.run(run())
+        assert queue.pending_count == 1
+        assert queue.stats.total_deduplicated == 19
+
+
+class TestDedupStats:
+    """Tests for DedupStats dataclass."""
+
+    def test_default_values(self):
+        stats = DedupStats()
+        assert stats.total_requests == 0
+        assert stats.total_deduplicated == 0
+        assert stats.dedup_window_seconds == 0.0
+
+    def test_dedup_rate_no_requests(self):
+        stats = DedupStats()
+        assert stats.dedup_rate == 0.0
+
+    def test_dedup_rate_with_requests(self):
+        stats = DedupStats(total_requests=10, total_deduplicated=3)
+        assert stats.dedup_rate == pytest.approx(0.3)
+
+    def test_to_dict(self):
+        stats = DedupStats(total_requests=100, total_deduplicated=25, total_unique=75, dedup_window_seconds=30.0, active_hashes=10)
+        d = stats.to_dict()
+        assert d["total_requests"] == 100
+        assert d["dedup_rate"] == pytest.approx(0.25)
+
+
+class TestRequestDeduplicator:
+    """Tests for RequestDeduplicator."""
+
+    def test_init_default(self):
+        dedup = RequestDeduplicator()
+        assert dedup.window_seconds == 30.0
+
+    def test_init_custom_window(self):
+        dedup = RequestDeduplicator(window_seconds=60.0)
+        assert dedup.window_seconds == 60.0
+
+    def test_window_setter(self):
+        dedup = RequestDeduplicator(window_seconds=10.0)
+        dedup.window_seconds = 45.0
+        assert dedup.window_seconds == 45.0
+
+    def test_compute_key_deterministic(self):
+        dedup = RequestDeduplicator()
+        key1 = dedup.compute_key("GET", "/api/test", {"id": "1"})
+        key2 = dedup.compute_key("GET", "/api/test", {"id": "1"})
+        assert key1 == key2
+
+    def test_compute_key_different_params(self):
+        dedup = RequestDeduplicator()
+        key1 = dedup.compute_key("GET", "/api/test", {"id": "1"})
+        key2 = dedup.compute_key("GET", "/api/test", {"id": "2"})
+        assert key1 != key2
+
+    def test_compute_key_different_methods(self):
+        dedup = RequestDeduplicator()
+        key1 = dedup.compute_key("GET", "/api/test")
+        key2 = dedup.compute_key("POST", "/api/test")
+        assert key1 != key2
+
+    def test_is_duplicate_first_call(self):
+        dedup = RequestDeduplicator()
+        key = dedup.compute_key("GET", "/api/test")
+        assert dedup.is_duplicate(key) is False
+
+    def test_is_duplicate_within_window(self):
+        dedup = RequestDeduplicator(window_seconds=30.0)
+        key = dedup.compute_key("GET", "/api/test")
+        dedup.record(key)
+        assert dedup.is_duplicate(key) is True
+
+    def test_is_duplicate_outside_window(self):
+        import time
+        dedup = RequestDeduplicator(window_seconds=0.01)
+        key = dedup.compute_key("GET", "/api/test")
+        dedup.record(key)
+        time.sleep(0.02)
+        assert dedup.is_duplicate(key) is False
+
+    def test_check_and_record_unique(self):
+        dedup = RequestDeduplicator(window_seconds=30.0)
+        result = dedup.check_and_record("GET", "/api/test", params={"id": "1"})
+        assert result is False
+
+    def test_check_and_record_duplicate(self):
+        dedup = RequestDeduplicator(window_seconds=30.0)
+        dedup.check_and_record("GET", "/api/test", params={"id": "1"})
+        result = dedup.check_and_record("GET", "/api/test", params={"id": "1"})
+        assert result is True
+
+    def test_cleanup(self):
+        import time
+        dedup = RequestDeduplicator(window_seconds=0.01)
+        dedup.record(dedup.compute_key("GET", "/a"))
+        dedup.record(dedup.compute_key("GET", "/b"))
+        time.sleep(0.02)
+        removed = dedup.cleanup()
+        assert removed == 2
+
+    def test_invalidate_all(self):
+        dedup = RequestDeduplicator()
+        dedup.record(dedup.compute_key("GET", "/a"))
+        dedup.record(dedup.compute_key("GET", "/b"))
+        assert dedup.get_stats()["active_hashes"] == 2
+        dedup.invalidate()
+        assert dedup.get_stats()["active_hashes"] == 0
+
+    def test_get_stats(self):
+        dedup = RequestDeduplicator(window_seconds=15.0)
+        stats = dedup.get_stats()
+        assert stats["dedup_window_seconds"] == 15.0
+
+    def test_reset_stats(self):
+        dedup = RequestDeduplicator()
+        dedup.check_and_record("GET", "/api/test")
+        assert dedup.get_stats()["total_requests"] == 1
+        dedup.reset_stats()
+        assert dedup.get_stats()["total_requests"] == 0
+
+    def test_compute_key_none_params_same_as_empty(self):
+        dedup = RequestDeduplicator()
+        key1 = dedup.compute_key("GET", "/api/test", params=None)
+        key2 = dedup.compute_key("GET", "/api/test", params={})
+        assert key1 == key2
+
+
+class TestRequestDeduplicatorConcurrency:
+    """Thread-safety tests for RequestDeduplicator."""
+
+    def test_concurrent_check_and_record(self):
+        import threading
+        dedup = RequestDeduplicator(window_seconds=30.0)
+        results = []
+        errors = []
+
+        def check_batch(batch_id):
+            try:
+                for i in range(100):
+                    is_dup = dedup.check_and_record("GET", f"/api/batch{batch_id}/{i}")
+                    results.append(is_dup)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=check_batch, args=(idx,)) for idx in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == []
+        assert all(r is False for r in results)
+        assert dedup.get_stats()["total_unique"] == 400
+
+    def test_concurrent_same_request_dedup(self):
+        import threading
+        dedup = RequestDeduplicator(window_seconds=30.0)
+        dup_count = []
+        errors = []
+
+        def check_same():
+            try:
+                for _ in range(100):
+                    is_dup = dedup.check_and_record("GET", "/api/same", params={"id": "1"})
+                    if is_dup:
+                        dup_count.append(1)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=check_same) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == []
+        assert len(dup_count) > 0

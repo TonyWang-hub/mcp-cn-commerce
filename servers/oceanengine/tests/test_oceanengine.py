@@ -71,7 +71,7 @@ requires_creds = pytest.mark.skipif(
 
 def _patch_get_client(mock_client):
     """Context manager that patches _get_client to return *mock_client*."""
-    return patch("mcp_oceanengine.server._get_client", return_value=mock_client)
+    return patch("servers.oceanengine.server._get_client", return_value=mock_client)
 
 
 # ── Unit tests for pure helpers ─────────────────────────────
@@ -1587,7 +1587,7 @@ class TestPaginationCapping:
 
         import importlib
 
-        module = importlib.import_module("mcp_oceanengine.server")
+        module = importlib.import_module("servers.oceanengine.server")
 
         with _patch_get_client(mock_client):
             tool_fn = getattr(module, tool_name)

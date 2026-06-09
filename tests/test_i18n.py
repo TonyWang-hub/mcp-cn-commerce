@@ -30,7 +30,6 @@ from i18n import (
     t,
 )
 
-
 # ── Fixtures ────────────────────────────────────────────────
 
 
@@ -202,9 +201,7 @@ class TestCrossLanguageConsistency:
     def test_same_keys_in_both_languages(self):
         zh_keys = set(get_all_keys("zh"))
         en_keys = set(get_all_keys("en"))
-        assert zh_keys == en_keys, (
-            f"Key mismatch: zh-only={zh_keys - en_keys}, en-only={en_keys - zh_keys}"
-        )
+        assert zh_keys == en_keys, f"Key mismatch: zh-only={zh_keys - en_keys}, en-only={en_keys - zh_keys}"
 
     def test_all_keys_count(self):
         keys = get_all_keys("zh")
@@ -356,8 +353,14 @@ class TestCategoryCoverage:
     def test_all_eight_platforms_translated(self):
         """All 8 platforms should have server description translations."""
         platforms = [
-            "oceanengine", "doudian", "jd", "taobao",
-            "pinduoduo", "kuaishou", "xiaohongshu", "weixin_store",
+            "oceanengine",
+            "doudian",
+            "jd",
+            "taobao",
+            "pinduoduo",
+            "kuaishou",
+            "xiaohongshu",
+            "weixin_store",
         ]
         for lang in SUPPORTED_LANGUAGES:
             for platform in platforms:

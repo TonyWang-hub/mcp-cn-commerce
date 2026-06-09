@@ -25,16 +25,18 @@ logger = logging.getLogger(__name__)
 
 # ── Platform Constants ──────────────────────────────────────
 
-PLATFORMS = frozenset({
-    "oceanengine",
-    "doudian",
-    "jd",
-    "pdd",
-    "kuaishou",
-    "xiaohongshu",
-    "weixin",
-    "taobao",
-})
+PLATFORMS = frozenset(
+    {
+        "oceanengine",
+        "doudian",
+        "jd",
+        "pdd",
+        "kuaishou",
+        "xiaohongshu",
+        "weixin",
+        "taobao",
+    }
+)
 
 
 # ── Unified Data Classes ────────────────────────────────────
@@ -397,10 +399,7 @@ class Normalizer:
     def validate_platform(self, platform: str) -> None:
         """Raise ValueError if platform is not supported."""
         if platform not in PLATFORMS:
-            raise ValueError(
-                f"Unsupported platform '{platform}'. "
-                f"Supported: {', '.join(sorted(PLATFORMS))}"
-            )
+            raise ValueError(f"Unsupported platform '{platform}'. " f"Supported: {', '.join(sorted(PLATFORMS))}")
 
     # ── Order ───────────────────────────────────────────────
 
@@ -447,7 +446,9 @@ class Normalizer:
                 platform,
             ),
             amount_discount=normalize_price(raw.get("discount_amount", raw.get("seller_discount")), platform),
-            amount_shipping=normalize_price(raw.get("post_amount", raw.get("postage", raw.get("freight_price"))), platform),
+            amount_shipping=normalize_price(
+                raw.get("post_amount", raw.get("postage", raw.get("freight_price"))), platform
+            ),
             amount_paid=normalize_price(raw.get("pay_amount", raw.get("payment")), platform),
             buyer_name=str(safe_get(raw, "buyer_info", "name", default=raw.get("receiver_name", ""))),
             buyer_phone=str(safe_get(raw, "buyer_info", "phone", default=raw.get("receiver_phone", ""))),
@@ -460,16 +461,18 @@ class Normalizer:
         """Doudian-specific order normalizer."""
         items_data = safe_get(raw, "product_info", "list", default=[])
         items = []
-        for item in (items_data or []):
-            items.append(OrderItem(
-                product_id=str(item.get("product_id", "")),
-                product_name=str(item.get("product_name", "")),
-                sku_id=str(item.get("sku_id", "")),
-                sku_name=str(item.get("spec_desc", "")),
-                price=normalize_price(item.get("price"), "doudian"),
-                quantity=int(item.get("combo_num", 1)),
-                image_url=str(item.get("img", "")),
-            ))
+        for item in items_data or []:
+            items.append(
+                OrderItem(
+                    product_id=str(item.get("product_id", "")),
+                    product_name=str(item.get("product_name", "")),
+                    sku_id=str(item.get("sku_id", "")),
+                    sku_name=str(item.get("spec_desc", "")),
+                    price=normalize_price(item.get("price"), "doudian"),
+                    quantity=int(item.get("combo_num", 1)),
+                    image_url=str(item.get("img", "")),
+                )
+            )
         return UnifiedOrder(
             order_id=str(raw.get("order_id", "")),
             platform="doudian",
@@ -494,16 +497,18 @@ class Normalizer:
         items_data = raw.get("itemInfoList", [])
         consignee = raw.get("consigneeInfo", {})
         items = []
-        for item in (items_data or []):
-            items.append(OrderItem(
-                product_id=str(item.get("skuId", "")),
-                product_name=str(item.get("skuName", "")),
-                sku_id=str(item.get("outerSkuId", "")),
-                sku_name="",
-                price=normalize_price(item.get("salePrice", item.get("jdPrice")), "jd"),
-                quantity=int(item.get("num", 1)),
-                image_url="",
-            ))
+        for item in items_data or []:
+            items.append(
+                OrderItem(
+                    product_id=str(item.get("skuId", "")),
+                    product_name=str(item.get("skuName", "")),
+                    sku_id=str(item.get("outerSkuId", "")),
+                    sku_name="",
+                    price=normalize_price(item.get("salePrice", item.get("jdPrice")), "jd"),
+                    quantity=int(item.get("num", 1)),
+                    image_url="",
+                )
+            )
         return UnifiedOrder(
             order_id=str(order_info.get("orderId", "")),
             platform="jd",
@@ -529,16 +534,18 @@ class Normalizer:
         delivery = detail.get("delivery_info", {})
         products = detail.get("product_infos", [])
         items = []
-        for p in (products or []):
-            items.append(OrderItem(
-                product_id=str(p.get("product_id", "")),
-                product_name=str(p.get("title", "")),
-                sku_id=str(p.get("sku_id", "")),
-                sku_name="",
-                price=normalize_price(p.get("sale_price"), "weixin"),
-                quantity=int(p.get("product_cnt", 1)),
-                image_url=str(p.get("thumb_img", "")),
-            ))
+        for p in products or []:
+            items.append(
+                OrderItem(
+                    product_id=str(p.get("product_id", "")),
+                    product_name=str(p.get("title", "")),
+                    sku_id=str(p.get("sku_id", "")),
+                    sku_name="",
+                    price=normalize_price(p.get("sale_price"), "weixin"),
+                    quantity=int(p.get("product_cnt", 1)),
+                    image_url=str(p.get("thumb_img", "")),
+                )
+            )
         return UnifiedOrder(
             order_id=str(raw.get("order_id", "")),
             platform="weixin",
@@ -567,16 +574,20 @@ class Normalizer:
             or []
         )
         items = []
-        for it in (items_raw or []):
-            items.append(OrderItem(
-                product_id=str(it.get("product_id", it.get("item_id", it.get("goods_id", it.get("product_id"))))),
-                product_name=str(it.get("product_name", it.get("item_name", it.get("goods_name", it.get("title", ""))))),
-                sku_id=str(it.get("sku_id", "")),
-                sku_name=str(it.get("sku_name", it.get("spec_desc", it.get("spec", "")))),
-                price=normalize_price(it.get("price", it.get("sale_price", it.get("item_price"))), platform),
-                quantity=int(it.get("num", it.get("quantity", it.get("product_cnt", it.get("combo_num", 1))))),
-                image_url=str(it.get("image", it.get("thumb_img", it.get("thumb_url", "")))),
-            ))
+        for it in items_raw or []:
+            items.append(
+                OrderItem(
+                    product_id=str(it.get("product_id", it.get("item_id", it.get("goods_id", it.get("product_id"))))),
+                    product_name=str(
+                        it.get("product_name", it.get("item_name", it.get("goods_name", it.get("title", ""))))
+                    ),
+                    sku_id=str(it.get("sku_id", "")),
+                    sku_name=str(it.get("sku_name", it.get("spec_desc", it.get("spec", "")))),
+                    price=normalize_price(it.get("price", it.get("sale_price", it.get("item_price"))), platform),
+                    quantity=int(it.get("num", it.get("quantity", it.get("product_cnt", it.get("combo_num", 1))))),
+                    image_url=str(it.get("image", it.get("thumb_img", it.get("thumb_url", "")))),
+                )
+            )
         return items
 
     # ── Product ─────────────────────────────────────────────
@@ -608,7 +619,9 @@ class Normalizer:
             product_id=str(raw.get("product_id", raw.get("goods_id", raw.get("item_id", "")))),
             platform=platform,
             name=str(raw.get("product_name", raw.get("goods_name", raw.get("item_name", "")))),
-            status=self._map_product_status(raw.get("product_status", raw.get("goods_status", raw.get("is_onsale"))), platform),
+            status=self._map_product_status(
+                raw.get("product_status", raw.get("goods_status", raw.get("is_onsale"))), platform
+            ),
             category=str(raw.get("category_name", "")),
             price_min=normalize_price(raw.get("min_price", raw.get("min_group_price")), platform),
             price_max=normalize_price(raw.get("max_price", raw.get("market_price")), platform),
@@ -658,13 +671,15 @@ class Normalizer:
         """Extract SKU list from raw product data."""
         skus_raw = raw.get("skus", [])
         result = []
-        for s in (skus_raw or []):
-            result.append(ProductSku(
-                sku_id=str(s.get("sku_id", "")),
-                spec=str(s.get("spec", s.get("spec_desc", ""))),
-                price=normalize_price(s.get("price", s.get("sale_price")), platform),
-                stock=int(s.get("stock", s.get("stock_num", 0))),
-            ))
+        for s in skus_raw or []:
+            result.append(
+                ProductSku(
+                    sku_id=str(s.get("sku_id", "")),
+                    spec=str(s.get("spec", s.get("spec_desc", ""))),
+                    price=normalize_price(s.get("price", s.get("sale_price")), platform),
+                    stock=int(s.get("stock", s.get("stock_num", 0))),
+                )
+            )
         return result
 
     # ── Refund ──────────────────────────────────────────────
@@ -752,7 +767,9 @@ class Normalizer:
                 score_overall = float(scores.get("overall", scores.get("dsr_score", raw.get("dsr_score", 0))))
                 score_product = float(scores.get("product", scores.get("itemScore", raw.get("itemScore", 0))))
                 score_service = float(scores.get("service", scores.get("serviceScore", raw.get("serviceScore", 0))))
-                score_logistics = float(scores.get("logistics", scores.get("logisticsScore", raw.get("logisticsScore", 0))))
+                score_logistics = float(
+                    scores.get("logistics", scores.get("logisticsScore", raw.get("logisticsScore", 0)))
+                )
             else:
                 score_overall = float(raw.get("dsr_score", 0))
                 score_product = float(raw.get("itemScore", 0))

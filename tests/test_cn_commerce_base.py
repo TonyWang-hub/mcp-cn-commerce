@@ -4669,7 +4669,7 @@ class TestRequestEncryptor:
 
     def test_aes_encrypt_decrypt_roundtrip(self):
         """Test AES-256-CBC encrypt/decrypt roundtrip (requires pyaes)."""
-        pyaes = pytest.importorskip("pyaes")
+        pytest.importorskip("pyaes")
         key = "0123456789abcdef" * 4  # 32 bytes
         enc = RequestEncryptor(
             EncryptionConfig(
@@ -4689,7 +4689,7 @@ class TestRequestEncryptor:
 
     def test_aes_different_iv_each_time(self):
         """Each AES encryption should produce different ciphertext (random IV)."""
-        pyaes = pytest.importorskip("pyaes")
+        pytest.importorskip("pyaes")
         key = "aabbccdd" * 8
         enc = RequestEncryptor(
             EncryptionConfig(

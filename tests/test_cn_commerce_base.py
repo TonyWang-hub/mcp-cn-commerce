@@ -2493,9 +2493,7 @@ class TestDeepHealthCheck:
         mock_client = AsyncMock()
         mock_client.head.return_value = mock_response
         with patch.object(client, "_ensure_client", return_value=mock_client):
-            result = await client.deep_health_check(
-                dependencies=["https://dep.example.com"]
-            )
+            result = await client.deep_health_check(dependencies=["https://dep.example.com"])
         assert "https://dep.example.com" in result["dependencies"]
         dep = result["dependencies"]["https://dep.example.com"]
         assert dep["reachable"] is True
@@ -2510,9 +2508,7 @@ class TestDeepHealthCheck:
         mock_client = AsyncMock()
         mock_client.head.return_value = mock_response
         with patch.object(client, "_ensure_client", return_value=mock_client):
-            result = await client.deep_health_check(
-                dependencies=["AUTH_SERVICE"]
-            )
+            result = await client.deep_health_check(dependencies=["AUTH_SERVICE"])
         assert "AUTH_SERVICE" in result["dependencies"]
         dep = result["dependencies"]["AUTH_SERVICE"]
         assert dep["reachable"] is True
@@ -2532,9 +2528,7 @@ class TestDeepHealthCheck:
 
         mock_client.head.side_effect = head_side_effect
         with patch.object(client, "_ensure_client", return_value=mock_client):
-            result = await client.deep_health_check(
-                dependencies=["https://dep.example.com"]
-            )
+            result = await client.deep_health_check(dependencies=["https://dep.example.com"])
         dep = result["dependencies"]["https://dep.example.com"]
         assert dep["reachable"] is False
         assert "error" in dep
@@ -2554,9 +2548,7 @@ class TestDeepHealthCheck:
 
         mock_client.head.side_effect = head_side_effect
         with patch.object(client, "_ensure_client", return_value=mock_client):
-            result = await client.deep_health_check(
-                dependencies=["https://dep.example.com"]
-            )
+            result = await client.deep_health_check(dependencies=["https://dep.example.com"])
         assert result["status"] == "degraded"
 
     @pytest.mark.asyncio
@@ -2664,10 +2656,12 @@ class TestConfigValidator:
 
     def test_add_rules(self):
         validator = ConfigValidator("TEST")
-        validator.add_rules([
-            ConfigRule("APP_KEY"),
-            ConfigRule("APP_SECRET"),
-        ])
+        validator.add_rules(
+            [
+                ConfigRule("APP_KEY"),
+                ConfigRule("APP_SECRET"),
+            ]
+        )
         assert len(validator.get_rules()) == 2
 
     def test_validate_required_present(self):
@@ -2802,16 +2796,20 @@ class TestConfigValidator:
 
     def test_validate_multiple_rules(self):
         validator = ConfigValidator("TEST")
-        validator.add_rules([
-            ConfigRule("APP_KEY", required=True, min_length=8),
-            ConfigRule("APP_SECRET", required=True, min_length=16),
-            ConfigRule("TIMEOUT", required=False, value_type="int", min_value=1, max_value=300),
-        ])
-        result = validator.validate({
-            "APP_KEY": "my_key_123",
-            "APP_SECRET": "my_secret_value_12345678",
-            "TIMEOUT": 30,
-        })
+        validator.add_rules(
+            [
+                ConfigRule("APP_KEY", required=True, min_length=8),
+                ConfigRule("APP_SECRET", required=True, min_length=16),
+                ConfigRule("TIMEOUT", required=False, value_type="int", min_value=1, max_value=300),
+            ]
+        )
+        result = validator.validate(
+            {
+                "APP_KEY": "my_key_123",
+                "APP_SECRET": "my_secret_value_12345678",
+                "TIMEOUT": 30,
+            }
+        )
         assert result.valid is True
 
     def test_validate_from_env_success(self):

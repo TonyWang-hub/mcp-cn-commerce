@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import functools
+import gzip
 import hashlib
 import hmac
 import io
@@ -20,6 +21,7 @@ import re
 import threading
 import time
 import uuid
+import zlib
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -1177,6 +1179,543 @@ class HealthCheckCache:
             }
 
 
+# ── Cache Warmup ───────────────────────────────────────────
+
+
+@dataclass
+class WarmupTask:
+    """A registered cache warmup task.
+
+    Attributes:
+        platform: Platform identifier (e.g. "OCEANENGINE", "TAOBAO").
+        cache_key: Key used to store the warmed data.
+        fetch_fn: Async callable that fetches the data to cache.
+        priority: Lower values are warmed first (default 0).
+        enabled: Whether this task is active.
+    """
+
+    platform: str
+    cache_key: str
+    fetch_fn: Callable[..., Awaitable[Any]]
+    priority: int = 0
+    enabled: bool = True
+
+
+@dataclass
+class WarmupResult:
+    """Result of a single warmup execution.
+
+    Attributes:
+        platform: Platform identifier.
+        cache_key: Cache key that was warmed.
+        success: Whether the warmup succeeded.
+        latency_ms: Duration of the warmup in milliseconds.
+        error: Error message if warmup failed.
+    """
+
+    platform: str = ""
+    cache_key: str = ""
+    success: bool = True
+    latency_ms: float = 0.0
+    error: str = ""
+
+
+class CacheWarmer:
+    """Manages cache warmup tasks for e-commerce platforms.
+
+    Supports three warmup modes:
+    1. **Startup warmup**: Warm all registered tasks at once.
+    2. **Per-platform warmup**: Warm tasks for a specific platform.
+    3. **Scheduled warmup**: Periodically re-warm tasks via an asyncio task.
+
+    Usage::
+
+        warmer = CacheWarmer()
+        warmer.register("OCEANENGINE", "hot_products", fetch_hot_products)
+        warmer.register("TAOBAO", "categories", fetch_categories)
+
+        # Startup warmup
+        results = await warmer.warmup_all()
+
+        # Per-platform
+        results = await warmer.warmup_platform("OCEANENGINE")
+
+        # Scheduled (returns an asyncio.Task)
+        task = warmer.start_scheduled(interval_seconds=300)
+        # ... later ...
+        warmer.stop_scheduled()
+    """
+
+    def __init__(self) -> None:
+        self._tasks: list[WarmupTask] = []
+        self._cache: dict[str, Any] = {}
+        self._cache_timestamps: dict[str, float] = {}
+        self._cache_ttl: dict[str, float] = {}
+        self._scheduled_task: asyncio.Task[None] | None = None
+        self._lock = threading.Lock()
+        self._history: list[WarmupResult] = []
+
+    def register(
+        self,
+        platform: str,
+        cache_key: str,
+        fetch_fn: Callable[..., Awaitable[Any]],
+        priority: int = 0,
+        ttl_seconds: float = 300.0,
+        enabled: bool = True,
+    ) -> None:
+        """Register a warmup task.
+
+        Args:
+            platform: Platform identifier.
+            cache_key: Key for caching the fetched result.
+            fetch_fn: Async callable that returns the data to cache.
+            priority: Execution priority (lower = earlier).
+            ttl_seconds: TTL for the cached data in seconds.
+            enabled: Whether the task is active.
+        """
+        task = WarmupTask(
+            platform=platform,
+            cache_key=cache_key,
+            fetch_fn=fetch_fn,
+            priority=priority,
+            enabled=enabled,
+        )
+        self._tasks.append(task)
+        self._cache_ttl[cache_key] = ttl_seconds
+        self._tasks.sort(key=lambda t: t.priority)
+        logger.debug(f"Registered warmup task: {platform}/{cache_key}")
+
+    def unregister(self, platform: str, cache_key: str) -> bool:
+        """Remove a warmup task.
+
+        Args:
+            platform: Platform identifier.
+            cache_key: Cache key of the task to remove.
+
+        Returns:
+            True if the task was found and removed.
+        """
+        before = len(self._tasks)
+        self._tasks = [t for t in self._tasks if not (t.platform == platform and t.cache_key == cache_key)]
+        removed = len(self._tasks) < before
+        if removed:
+            self._cache_ttl.pop(cache_key, None)
+        return removed
+
+    async def warmup_all(self) -> list[WarmupResult]:
+        """Execute all registered warmup tasks.
+
+        Tasks are executed in priority order. Failed tasks are logged
+        but do not prevent subsequent tasks from running.
+
+        Returns:
+            List of WarmupResult for each task.
+        """
+        results: list[WarmupResult] = []
+        for task in self._tasks:
+            if not task.enabled:
+                continue
+            result = await self._execute_task(task)
+            results.append(result)
+        succeeded = sum(1 for r in results if r.success)
+        logger.info(f"Warmup complete: {succeeded}/{len(results)} succeeded")
+        return results
+
+    async def warmup_platform(self, platform: str) -> list[WarmupResult]:
+        """Execute warmup tasks for a specific platform.
+
+        Args:
+            platform: Platform identifier.
+
+        Returns:
+            List of WarmupResult for matching tasks.
+        """
+        tasks = [t for t in self._tasks if t.platform == platform and t.enabled]
+        results: list[WarmupResult] = []
+        for task in tasks:
+            result = await self._execute_task(task)
+            results.append(result)
+        succeeded = sum(1 for r in results if r.success)
+        logger.info(f"Warmup for {platform}: {succeeded}/{len(results)} succeeded")
+        return results
+
+    async def _execute_task(self, task: WarmupTask) -> WarmupResult:
+        """Execute a single warmup task.
+
+        Args:
+            task: The WarmupTask to execute.
+
+        Returns:
+            WarmupResult with execution details.
+        """
+        start = time.time()
+        try:
+            data = await task.fetch_fn()
+            elapsed_ms = (time.time() - start) * 1000
+            with self._lock:
+                self._cache[task.cache_key] = data
+                self._cache_timestamps[task.cache_key] = time.time()
+            result = WarmupResult(
+                platform=task.platform,
+                cache_key=task.cache_key,
+                success=True,
+                latency_ms=elapsed_ms,
+            )
+            logger.debug(f"Warmed {task.platform}/{task.cache_key} in {elapsed_ms:.1f}ms")
+        except Exception as exc:
+            elapsed_ms = (time.time() - start) * 1000
+            result = WarmupResult(
+                platform=task.platform,
+                cache_key=task.cache_key,
+                success=False,
+                latency_ms=elapsed_ms,
+                error=str(exc),
+            )
+            logger.warning(f"Warmup failed for {task.platform}/{task.cache_key}: {exc}")
+
+        self._history.append(result)
+        return result
+
+    def get_cached(self, cache_key: str) -> Any | None:
+        """Get a value from the warmup cache.
+
+        Args:
+            cache_key: The cache key to look up.
+
+        Returns:
+            Cached value or None if missing/expired.
+        """
+        with self._lock:
+            ts = self._cache_timestamps.get(cache_key)
+            if ts is None:
+                return None
+            ttl = self._cache_ttl.get(cache_key, 300.0)
+            if time.time() - ts > ttl:
+                # Expired
+                return None
+            return self._cache.get(cache_key)
+
+    def set_cached(self, cache_key: str, value: Any, ttl_seconds: float | None = None) -> None:
+        """Manually set a value in the warmup cache.
+
+        Args:
+            cache_key: Cache key.
+            value: Value to store.
+            ttl_seconds: TTL override (uses registered TTL if None).
+        """
+        with self._lock:
+            self._cache[cache_key] = value
+            self._cache_timestamps[cache_key] = time.time()
+            if ttl_seconds is not None:
+                self._cache_ttl[cache_key] = ttl_seconds
+
+    def invalidate(self, cache_key: str | None = None) -> None:
+        """Invalidate warmup cache entries.
+
+        Args:
+            cache_key: Specific key to invalidate, or None to clear all.
+        """
+        with self._lock:
+            if cache_key is None:
+                self._cache.clear()
+                self._cache_timestamps.clear()
+            else:
+                self._cache.pop(cache_key, None)
+                self._cache_timestamps.pop(cache_key, None)
+
+    def start_scheduled(
+        self,
+        interval_seconds: float = 300.0,
+        warmup_platforms: list[str] | None = None,
+    ) -> asyncio.Task[None]:
+        """Start a background task that periodically warms the cache.
+
+        Args:
+            interval_seconds: Seconds between warmup cycles.
+            warmup_platforms: If provided, only warm these platforms.
+                             Otherwise, warm all registered tasks.
+
+        Returns:
+            The asyncio.Task running the scheduled warmup.
+        """
+        self.stop_scheduled()
+
+        async def _warmup_loop() -> None:
+            logger.info(f"Scheduled warmup started (interval={interval_seconds}s)")
+            while True:
+                try:
+                    if warmup_platforms:
+                        for platform in warmup_platforms:
+                            await self.warmup_platform(platform)
+                    else:
+                        await self.warmup_all()
+                except Exception as exc:
+                    logger.error(f"Scheduled warmup error: {exc}")
+                await asyncio.sleep(interval_seconds)
+
+        self._scheduled_task = asyncio.ensure_future(_warmup_loop())
+        return self._scheduled_task
+
+    def stop_scheduled(self) -> None:
+        """Stop the scheduled warmup task if running."""
+        if self._scheduled_task is not None and not self._scheduled_task.done():
+            self._scheduled_task.cancel()
+            self._scheduled_task = None
+            logger.info("Scheduled warmup stopped")
+
+    @property
+    def is_scheduled(self) -> bool:
+        """Whether a scheduled warmup task is active."""
+        return self._scheduled_task is not None and not self._scheduled_task.done()
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get warmup cache statistics.
+
+        Returns:
+            Dict with registered_tasks, cached_keys, and history summary.
+        """
+        with self._lock:
+            now = time.time()
+            valid_keys = [k for k, ts in self._cache_timestamps.items() if now - ts <= self._cache_ttl.get(k, 300.0)]
+            total = len(self._history)
+            succeeded = sum(1 for r in self._history if r.success)
+            return {
+                "registered_tasks": len(self._tasks),
+                "cached_keys": valid_keys,
+                "cached_count": len(valid_keys),
+                "scheduled": self.is_scheduled,
+                "history": {
+                    "total": total,
+                    "succeeded": succeeded,
+                    "failed": total - succeeded,
+                },
+            }
+
+    def get_history(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Get recent warmup history.
+
+        Args:
+            limit: Maximum number of entries to return.
+
+        Returns:
+            List of warmup result dicts.
+        """
+        recent = self._history[-limit:] if limit > 0 else self._history
+        return [
+            {
+                "platform": r.platform,
+                "cache_key": r.cache_key,
+                "success": r.success,
+                "latency_ms": round(r.latency_ms, 2),
+                "error": r.error,
+            }
+            for r in recent
+        ]
+
+
+# ── Request Compression ────────────────────────────────────
+
+
+class CompressionMethod(StrEnum):
+    """Supported request body compression methods.
+
+    Attributes:
+        NONE: No compression.
+        GZIP: gzip compression (RFC 1952).
+        DEFLATE: deflate compression (RFC 1951).
+        AUTO: Automatically choose the best method based on
+              Accept-Encoding headers or default to gzip.
+    """
+
+    NONE = "none"
+    GZIP = "gzip"
+    DEFLATE = "deflate"
+    AUTO = "auto"
+
+
+@dataclass
+class CompressionConfig:
+    """Configuration for request body compression.
+
+    Attributes:
+        method: Compression method to use.
+        min_size_bytes: Minimum body size in bytes to trigger compression.
+            Bodies smaller than this are sent uncompressed.
+        gzip_level: gzip compression level (1-9). Higher = smaller but slower.
+        include_content_encoding: Whether to set the Content-Encoding header.
+    """
+
+    method: CompressionMethod = CompressionMethod.NONE
+    min_size_bytes: int = 1024  # 1 KB
+    gzip_level: int = 6
+    include_content_encoding: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        return {
+            "method": self.method.value,
+            "min_size_bytes": self.min_size_bytes,
+            "gzip_level": self.gzip_level,
+            "include_content_encoding": self.include_content_encoding,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> CompressionConfig:
+        """Deserialize from a dictionary."""
+        return cls(
+            method=CompressionMethod(data.get("method", "none")),
+            min_size_bytes=data.get("min_size_bytes", 1024),
+            gzip_level=data.get("gzip_level", 6),
+            include_content_encoding=data.get("include_content_encoding", True),
+        )
+
+
+class RequestCompressor:
+    """Compresses request bodies for API calls.
+
+    Supports gzip and deflate compression with configurable thresholds.
+    Automatically selects the best compression method when set to AUTO.
+
+    Usage::
+
+        compressor = RequestCompressor(CompressionConfig(method=CompressionMethod.GZIP))
+        body, headers = compressor.compress(b'{"data": "..."}')
+    """
+
+    def __init__(self, config: CompressionConfig | None = None) -> None:
+        """Initialize the compressor.
+
+        Args:
+            config: Compression configuration. Uses defaults if None.
+        """
+        self.config = config or CompressionConfig()
+        self._stats_lock = threading.Lock()
+        self._total_requests = 0
+        self._compressed_requests = 0
+        self._total_original_bytes = 0
+        self._total_compressed_bytes = 0
+
+    def compress(
+        self,
+        body: bytes,
+        accept_encoding: str = "",
+    ) -> tuple[bytes, dict[str, str]]:
+        """Compress a request body.
+
+        Args:
+            body: Raw request body bytes.
+            accept_encoding: The Accept-Encoding header value from the server
+                to determine the best compression method (used with AUTO).
+
+        Returns:
+            Tuple of (compressed_body, extra_headers).
+            If compression is skipped, returns (original_body, {}).
+        """
+        method = self._resolve_method(accept_encoding)
+
+        # Track stats
+        with self._stats_lock:
+            self._total_requests += 1
+            self._total_original_bytes += len(body)
+
+        # Skip compression for small bodies or NONE method
+        if method == CompressionMethod.NONE or len(body) < self.config.min_size_bytes:
+            with self._stats_lock:
+                self._total_compressed_bytes += len(body)
+            return body, {}
+
+        compressed, encoding = self._do_compress(body, method)
+
+        # Only use compression if it actually reduces size
+        if len(compressed) >= len(body):
+            with self._stats_lock:
+                self._total_compressed_bytes += len(body)
+            return body, {}
+
+        headers: dict[str, str] = {}
+        if self.config.include_content_encoding:
+            headers["Content-Encoding"] = encoding
+
+        with self._stats_lock:
+            self._compressed_requests += 1
+            self._total_compressed_bytes += len(compressed)
+
+        logger.debug(
+            f"Compressed {len(body)} -> {len(compressed)} bytes "
+            f"({100 - len(compressed) * 100 // len(body)}% reduction) using {encoding}"
+        )
+        return compressed, headers
+
+    def _resolve_method(self, accept_encoding: str) -> CompressionMethod:
+        """Resolve the actual compression method to use.
+
+        Args:
+            accept_encoding: Accept-Encoding header value.
+
+        Returns:
+            The resolved CompressionMethod (never AUTO).
+        """
+        if self.config.method != CompressionMethod.AUTO:
+            return self.config.method
+
+        # Parse Accept-Encoding to find supported methods
+        supported = {m.strip().lower() for m in accept_encoding.split(",")}
+        if "gzip" in supported or "x-gzip" in supported:
+            return CompressionMethod.GZIP
+        if "deflate" in supported:
+            return CompressionMethod.DEFLATE
+        # Default to gzip when AUTO and nothing specified
+        return CompressionMethod.GZIP
+
+    def _do_compress(self, body: bytes, method: CompressionMethod) -> tuple[bytes, str]:
+        """Perform the actual compression.
+
+        Args:
+            body: Body bytes to compress.
+            method: Compression method (must not be NONE or AUTO).
+
+        Returns:
+            Tuple of (compressed_bytes, encoding_name).
+        """
+        if method == CompressionMethod.GZIP:
+            return gzip.compress(body, compresslevel=self.config.gzip_level), "gzip"
+        elif method == CompressionMethod.DEFLATE:
+            return zlib.compress(body, level=self.config.gzip_level), "deflate"
+        else:
+            return body, ""
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get compression statistics.
+
+        Returns:
+            Dict with compression counts, ratios, and bytes saved.
+        """
+        with self._stats_lock:
+            ratio = 0.0
+            if self._total_original_bytes > 0:
+                ratio = 1.0 - (self._total_compressed_bytes / self._total_original_bytes)
+            return {
+                "total_requests": self._total_requests,
+                "compressed_requests": self._compressed_requests,
+                "compression_rate": (
+                    round(self._compressed_requests / self._total_requests, 4) if self._total_requests > 0 else 0.0
+                ),
+                "total_original_bytes": self._total_original_bytes,
+                "total_compressed_bytes": self._total_compressed_bytes,
+                "bytes_saved": self._total_original_bytes - self._total_compressed_bytes,
+                "avg_compression_ratio": round(ratio, 4),
+            }
+
+    def reset_stats(self) -> None:
+        """Reset all collected statistics."""
+        with self._stats_lock:
+            self._total_requests = 0
+            self._compressed_requests = 0
+            self._total_original_bytes = 0
+            self._total_compressed_bytes = 0
+
+
 class CommerceMCPBase:
     """Base class for Chinese e-commerce platform MCP servers.
 
@@ -1200,6 +1739,7 @@ class CommerceMCPBase:
         app_secret: str = "",
         access_token: str = "",
         reconnect_config: ReconnectConfig | None = None,
+        compression_config: CompressionConfig | None = None,
     ) -> None:
         self.app_key = app_key
         self.app_secret = app_secret
@@ -1208,6 +1748,8 @@ class CommerceMCPBase:
         self.metrics = MetricsCollector()
         self._reconnect_config = reconnect_config or ReconnectConfig()
         self._health_cache = HealthCheckCache(ttl_seconds=30.0)
+        self.cache_warmer = CacheWarmer()
+        self._compressor = RequestCompressor(compression_config)
 
     def _get_client(self) -> httpx.AsyncClient:
         """Get or create an HTTP client with connection pooling.
@@ -1382,7 +1924,22 @@ class CommerceMCPBase:
                 if method == "GET":
                     resp = await client.get(url, params={**attempt_params, **data})
                 else:
-                    resp = await client.post(url, params=attempt_params, json=data)
+                    # Compress POST body if configured
+                    extra_headers: dict[str, str] = {}
+                    if self._compressor.config.method != CompressionMethod.NONE and data:
+                        body_bytes = json.dumps(data, ensure_ascii=False).encode("utf-8")
+                        compressed_body, extra_headers = self._compressor.compress(body_bytes)
+                        if extra_headers:
+                            resp = await client.post(
+                                url,
+                                params=attempt_params,
+                                content=compressed_body,
+                                headers={**extra_headers, "Content-Type": "application/json"},
+                            )
+                        else:
+                            resp = await client.post(url, params=attempt_params, json=data)
+                    else:
+                        resp = await client.post(url, params=attempt_params, json=data)
 
                 result = resp.json()
                 if "error_response" in result:
@@ -1593,6 +2150,42 @@ class CommerceMCPBase:
         )
 
         return result.to_dict()
+
+    # ── Cache Warmup Convenience ────────────────────────────
+
+    async def warmup_cache(self, platforms: list[str] | None = None) -> list[dict[str, Any]]:
+        """Warm cache for specified platforms or all registered tasks.
+
+        Args:
+            platforms: List of platform identifiers. If None, warm all.
+
+        Returns:
+            List of warmup result dicts.
+        """
+        if platforms:
+            results: list[WarmupResult] = []
+            for platform in platforms:
+                results.extend(await self.cache_warmer.warmup_platform(platform))
+        else:
+            results = await self.cache_warmer.warmup_all()
+        return [
+            {
+                "platform": r.platform,
+                "cache_key": r.cache_key,
+                "success": r.success,
+                "latency_ms": round(r.latency_ms, 2),
+                "error": r.error,
+            }
+            for r in results
+        ]
+
+    def get_compression_stats(self) -> dict[str, Any]:
+        """Get request compression statistics.
+
+        Returns:
+            Dict with compression metrics.
+        """
+        return self._compressor.get_stats()
 
     # ── Batch Operations ──────────────────────────────────
 
@@ -2728,6 +3321,613 @@ class ConfigValidator:
                 config[key] = value
 
         return self.validate(config, prefix=f"{env_prefix}_")
+
+
+# ── Load Balancing ─────────────────────────────────────────
+
+
+class LoadBalancingStrategy(StrEnum):
+    """Supported load balancing strategies.
+
+    Attributes:
+        ROUND_ROBIN: Distributes requests sequentially across endpoints.
+        WEIGHTED: Distributes requests based on endpoint weights.
+        LEAST_CONNECTIONS: Routes to the endpoint with fewest active connections.
+    """
+
+    ROUND_ROBIN = "round_robin"
+    WEIGHTED = "weighted"
+    LEAST_CONNECTIONS = "least_connections"
+
+
+@dataclass
+class EndpointNode:
+    """Represents a single endpoint in a load balancing pool.
+
+    Attributes:
+        url: The endpoint URL.
+        weight: Relative weight for weighted load balancing (higher = more traffic).
+        active_connections: Current number of active connections.
+        is_healthy: Whether the endpoint is currently considered healthy.
+        failure_count: Number of consecutive failures.
+        last_failure_time: Timestamp of the last failure (0.0 if never failed).
+        total_requests: Total requests routed to this endpoint.
+        total_failures: Total failures for this endpoint.
+        avg_latency_ms: Rolling average latency in milliseconds.
+    """
+
+    url: str = ""
+    weight: int = 1
+    active_connections: int = 0
+    is_healthy: bool = True
+    failure_count: int = 0
+    last_failure_time: float = 0.0
+    total_requests: int = 0
+    total_failures: int = 0
+    avg_latency_ms: float = 0.0
+
+
+class LoadBalancer:
+    """Distributes requests across multiple endpoints using configurable strategies.
+
+    Supports round-robin, weighted, and least-connections load balancing.
+    Integrates with failover to automatically skip unhealthy endpoints.
+
+    Usage::
+
+        lb = LoadBalancer(LoadBalancingStrategy.WEIGHTED)
+        lb.add_endpoint("https://api1.example.com", weight=3)
+        lb.add_endpoint("https://api2.example.com", weight=1)
+        endpoint = lb.get_endpoint()
+    """
+
+    def __init__(self, strategy: LoadBalancingStrategy = LoadBalancingStrategy.ROUND_ROBIN) -> None:
+        """Initialize the load balancer.
+
+        Args:
+            strategy: The load balancing strategy to use.
+        """
+        self.strategy = strategy
+        self._endpoints: dict[str, EndpointNode] = {}
+        self._round_robin_index: int = 0
+        self._lock = threading.Lock()
+
+    def add_endpoint(self, url: str, weight: int = 1) -> EndpointNode:
+        """Add an endpoint to the pool.
+
+        Args:
+            url: The endpoint URL.
+            weight: Relative weight for weighted load balancing.
+
+        Returns:
+            The created EndpointNode.
+        """
+        with self._lock:
+            if url in self._endpoints:
+                existing = self._endpoints[url]
+                existing.weight = weight
+                return existing
+            node = EndpointNode(url=url, weight=max(1, weight))
+            self._endpoints[url] = node
+            logger.info(f"Load balancer: added endpoint {url} (weight={weight})")
+            return node
+
+    def remove_endpoint(self, url: str) -> bool:
+        """Remove an endpoint from the pool.
+
+        Args:
+            url: The endpoint URL to remove.
+
+        Returns:
+            True if the endpoint was found and removed.
+        """
+        with self._lock:
+            if url in self._endpoints:
+                del self._endpoints[url]
+                logger.info(f"Load balancer: removed endpoint {url}")
+                return True
+            return False
+
+    def mark_healthy(self, url: str) -> None:
+        """Mark an endpoint as healthy.
+
+        Args:
+            url: The endpoint URL.
+        """
+        with self._lock:
+            node = self._endpoints.get(url)
+            if node:
+                was_unhealthy = not node.is_healthy
+                node.is_healthy = True
+                node.failure_count = 0
+                if was_unhealthy:
+                    logger.info(f"Load balancer: endpoint {url} recovered")
+
+    def mark_unhealthy(self, url: str) -> None:
+        """Mark an endpoint as unhealthy.
+
+        Args:
+            url: The endpoint URL.
+        """
+        with self._lock:
+            node = self._endpoints.get(url)
+            if node:
+                node.is_healthy = False
+                node.failure_count += 1
+                node.total_failures += 1
+                node.last_failure_time = time.time()
+                logger.warning(f"Load balancer: endpoint {url} marked unhealthy " f"(failures={node.failure_count})")
+
+    def record_success(self, url: str, latency_ms: float = 0.0) -> None:
+        """Record a successful request to an endpoint.
+
+        Args:
+            url: The endpoint URL.
+            latency_ms: Request latency in milliseconds.
+        """
+        with self._lock:
+            node = self._endpoints.get(url)
+            if node:
+                node.total_requests += 1
+                # Exponential moving average for latency
+                if node.avg_latency_ms == 0.0:
+                    node.avg_latency_ms = latency_ms
+                else:
+                    node.avg_latency_ms = 0.8 * node.avg_latency_ms + 0.2 * latency_ms
+
+    def record_failure(self, url: str) -> None:
+        """Record a failed request to an endpoint.
+
+        Args:
+            url: The endpoint URL.
+        """
+        self.mark_unhealthy(url)
+
+    def _get_healthy_endpoints(self) -> list[EndpointNode]:
+        """Get all healthy endpoints."""
+        return [n for n in self._endpoints.values() if n.is_healthy]
+
+    def get_endpoint(self) -> EndpointNode | None:
+        """Select the next endpoint based on the load balancing strategy.
+
+        Returns:
+            The selected EndpointNode, or None if no healthy endpoints are available.
+        """
+        with self._lock:
+            healthy = self._get_healthy_endpoints()
+            if not healthy:
+                logger.warning("Load balancer: no healthy endpoints available")
+                return None
+
+            if self.strategy == LoadBalancingStrategy.ROUND_ROBIN:
+                return self._round_robin(healthy)
+            elif self.strategy == LoadBalancingStrategy.WEIGHTED:
+                return self._weighted(healthy)
+            elif self.strategy == LoadBalancingStrategy.LEAST_CONNECTIONS:
+                return self._least_connections(healthy)
+            else:
+                return self._round_robin(healthy)
+
+    def _round_robin(self, endpoints: list[EndpointNode]) -> EndpointNode:
+        """Select endpoint using round-robin.
+
+        Args:
+            endpoints: List of healthy endpoints.
+
+        Returns:
+            Selected endpoint.
+        """
+        idx = self._round_robin_index % len(endpoints)
+        self._round_robin_index += 1
+        return endpoints[idx]
+
+    def _weighted(self, endpoints: list[EndpointNode]) -> EndpointNode:
+        """Select endpoint using weighted random selection.
+
+        Args:
+            endpoints: List of healthy endpoints.
+
+        Returns:
+            Selected endpoint.
+        """
+        total_weight = sum(e.weight for e in endpoints)
+        if total_weight <= 0:
+            return endpoints[0]
+
+        r = random.random() * total_weight
+        cumulative = 0.0
+        for endpoint in endpoints:
+            cumulative += endpoint.weight
+            if r <= cumulative:
+                return endpoint
+        return endpoints[-1]
+
+    def _least_connections(self, endpoints: list[EndpointNode]) -> EndpointNode:
+        """Select the endpoint with the fewest active connections.
+
+        Args:
+            endpoints: List of healthy endpoints.
+
+        Returns:
+            Selected endpoint.
+        """
+        return min(endpoints, key=lambda e: e.active_connections)
+
+    def increment_connections(self, url: str) -> None:
+        """Increment active connection count for an endpoint.
+
+        Args:
+            url: The endpoint URL.
+        """
+        with self._lock:
+            node = self._endpoints.get(url)
+            if node:
+                node.active_connections += 1
+
+    def decrement_connections(self, url: str) -> None:
+        """Decrement active connection count for an endpoint.
+
+        Args:
+            url: The endpoint URL.
+        """
+        with self._lock:
+            node = self._endpoints.get(url)
+            if node:
+                node.active_connections = max(0, node.active_connections - 1)
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get load balancer statistics.
+
+        Returns:
+            Dict with strategy, endpoint count, healthy count, and per-endpoint stats.
+        """
+        with self._lock:
+            total = len(self._endpoints)
+            healthy = sum(1 for n in self._endpoints.values() if n.is_healthy)
+            return {
+                "strategy": self.strategy.value,
+                "total_endpoints": total,
+                "healthy_endpoints": healthy,
+                "unhealthy_endpoints": total - healthy,
+                "endpoints": {
+                    url: {
+                        "url": n.url,
+                        "weight": n.weight,
+                        "active_connections": n.active_connections,
+                        "is_healthy": n.is_healthy,
+                        "failure_count": n.failure_count,
+                        "total_requests": n.total_requests,
+                        "total_failures": n.total_failures,
+                        "avg_latency_ms": round(n.avg_latency_ms, 2),
+                    }
+                    for url, n in self._endpoints.items()
+                },
+            }
+
+    @property
+    def endpoint_count(self) -> int:
+        """Number of endpoints in the pool."""
+        return len(self._endpoints)
+
+    @property
+    def healthy_count(self) -> int:
+        """Number of healthy endpoints."""
+        return sum(1 for n in self._endpoints.values() if n.is_healthy)
+
+
+# ── Failover ──────────────────────────────────────────────
+
+
+@dataclass
+class FailoverConfig:
+    """Configuration for the failover mechanism.
+
+    Attributes:
+        max_failures: Number of consecutive failures before marking endpoint unhealthy.
+        recovery_check_interval: Seconds between recovery probe attempts.
+        recovery_timeout: Timeout for recovery probes in seconds.
+        enable_auto_recovery: Whether to automatically attempt recovery of failed endpoints.
+        circuit_breaker_threshold: Failure rate (0.0-1.0) to trip circuit breaker.
+        circuit_breaker_reset_seconds: Seconds before resetting a tripped circuit breaker.
+    """
+
+    max_failures: int = 3
+    recovery_check_interval: float = 30.0
+    recovery_timeout: float = 5.0
+    enable_auto_recovery: bool = True
+    circuit_breaker_threshold: float = 0.5
+    circuit_breaker_reset_seconds: float = 60.0
+
+
+@dataclass
+class CircuitBreakerState:
+    """State of a circuit breaker for an endpoint.
+
+    Attributes:
+        url: The endpoint URL.
+        is_open: Whether the circuit is open (requests blocked).
+        failure_count: Number of failures since last reset.
+        success_count: Number of successes since last reset.
+        last_failure_time: Timestamp of last failure.
+        opened_at: Timestamp when the circuit was opened.
+    """
+
+    url: str = ""
+    is_open: bool = False
+    failure_count: int = 0
+    success_count: int = 0
+    last_failure_time: float = 0.0
+    opened_at: float = 0.0
+
+
+class FailoverManager:
+    """Manages automatic failover and recovery for API endpoints.
+
+    Works with ``LoadBalancer`` to detect failures, mark endpoints unhealthy,
+    and periodically probe them for recovery.
+
+    Features:
+    - Automatic failure detection and endpoint marking
+    - Circuit breaker pattern to prevent cascading failures
+    - Background recovery probing
+    - Configurable thresholds and timeouts
+
+    Usage::
+
+        lb = LoadBalancer()
+        lb.add_endpoint("https://api1.example.com")
+        lb.add_endpoint("https://api2.example.com")
+
+        fm = FailoverManager(load_balancer=lb, config=FailoverConfig(max_failures=3))
+        endpoint = fm.get_healthy_endpoint()
+        fm.report_success("https://api1.example.com")
+        fm.report_failure("https://api1.example.com")
+    """
+
+    def __init__(
+        self,
+        load_balancer: LoadBalancer,
+        config: FailoverConfig | None = None,
+    ) -> None:
+        """Initialize the failover manager.
+
+        Args:
+            load_balancer: The load balancer to manage.
+            config: Failover configuration. Uses defaults if not provided.
+        """
+        self._lb = load_balancer
+        self.config = config or FailoverConfig()
+        self._circuit_breakers: dict[str, CircuitBreakerState] = {}
+        self._lock = threading.Lock()
+        self._recovery_task: asyncio.Task | None = None
+        self._failure_history: list[dict[str, Any]] = []
+
+    def report_success(self, url: str, latency_ms: float = 0.0) -> None:
+        """Report a successful request to an endpoint.
+
+        Resets the failure count and closes the circuit breaker if applicable.
+
+        Args:
+            url: The endpoint URL.
+            latency_ms: Request latency in milliseconds.
+        """
+        with self._lock:
+            self._lb.record_success(url, latency_ms)
+            self._lb.mark_healthy(url)
+
+            # Reset circuit breaker
+            cb = self._circuit_breakers.get(url)
+            if cb:
+                cb.failure_count = 0
+                cb.success_count += 1
+                if cb.is_open:
+                    cb.is_open = False
+                    logger.info(f"Failover: circuit breaker closed for {url}")
+
+    def report_failure(self, url: str, error: str = "") -> None:
+        """Report a failed request to an endpoint.
+
+        Increments the failure count and may mark the endpoint unhealthy
+        or open the circuit breaker.
+
+        Args:
+            url: The endpoint URL.
+            error: Error message for logging.
+        """
+        with self._lock:
+            node = self._lb._endpoints.get(url)
+            if not node:
+                return
+
+            node.failure_count += 1
+            node.total_failures += 1
+            node.last_failure_time = time.time()
+            node.total_requests += 1
+
+            # Record in history
+            self._failure_history.append(
+                {
+                    "url": url,
+                    "error": error,
+                    "timestamp": time.time(),
+                    "failure_count": node.failure_count,
+                }
+            )
+            # Keep history bounded
+            if len(self._failure_history) > 1000:
+                self._failure_history = self._failure_history[-500:]
+
+            # Mark unhealthy if max failures exceeded
+            if node.failure_count >= self.config.max_failures:
+                self._lb.mark_unhealthy(url)
+
+            # Check circuit breaker
+            self._check_circuit_breaker(url)
+
+            logger.warning(f"Failover: failure reported for {url} " f"(count={node.failure_count}, error={error})")
+
+    def _check_circuit_breaker(self, url: str) -> None:
+        """Check and update circuit breaker state.
+
+        Args:
+            url: The endpoint URL.
+        """
+        node = self._lb._endpoints.get(url)
+        if not node:
+            return
+
+        cb = self._circuit_breakers.get(url)
+        if cb is None:
+            cb = CircuitBreakerState(url=url)
+            self._circuit_breakers[url] = cb
+
+        cb.failure_count = node.failure_count
+        cb.last_failure_time = time.time()
+
+        total = cb.failure_count + cb.success_count
+        if total >= 5:  # Need at least 5 requests to evaluate
+            failure_rate = cb.failure_count / total
+            if failure_rate >= self.config.circuit_breaker_threshold and not cb.is_open:
+                cb.is_open = True
+                cb.opened_at = time.time()
+                self._lb.mark_unhealthy(url)
+                logger.warning(f"Failover: circuit breaker OPENED for {url} " f"(failure_rate={failure_rate:.2f})")
+
+    def is_circuit_open(self, url: str) -> bool:
+        """Check if the circuit breaker is open for an endpoint.
+
+        Args:
+            url: The endpoint URL.
+
+        Returns:
+            True if the circuit is open (endpoint should not receive traffic).
+        """
+        with self._lock:
+            cb = self._circuit_breakers.get(url)
+            if cb is None or not cb.is_open:
+                return False
+
+            # Check if circuit breaker should be reset
+            elapsed = time.time() - cb.opened_at
+            if elapsed >= self.config.circuit_breaker_reset_seconds:
+                cb.is_open = False
+                cb.failure_count = 0
+                cb.success_count = 0
+                logger.info(f"Failover: circuit breaker reset for {url}")
+                return False
+
+            return True
+
+    def get_healthy_endpoint(self) -> EndpointNode | None:
+        """Get a healthy endpoint from the load balancer, respecting circuit breakers.
+
+        Returns:
+            A healthy EndpointNode, or None if none available.
+        """
+        with self._lock:
+            # Try up to the number of endpoints to find one without an open circuit
+            for _ in range(self._lb.endpoint_count):
+                endpoint = self._lb.get_endpoint()
+                if endpoint is None:
+                    return None
+                if not self.is_circuit_open(endpoint.url):
+                    return endpoint
+            return None
+
+    async def check_recovery(self, url: str) -> bool:
+        """Probe a failed endpoint to check if it has recovered.
+
+        Args:
+            url: The endpoint URL to probe.
+
+        Returns:
+            True if the endpoint responded successfully.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=self.config.recovery_timeout) as client:
+                resp = await client.head(url)
+                if resp.status_code < 500:
+                    self._lb.mark_healthy(url)
+                    # Reset circuit breaker
+                    with self._lock:
+                        cb = self._circuit_breakers.get(url)
+                        if cb:
+                            cb.is_open = False
+                            cb.failure_count = 0
+                    logger.info(f"Failover: endpoint {url} recovered via probe")
+                    return True
+        except Exception as exc:
+            logger.debug(f"Failover: recovery probe failed for {url}: {exc}")
+        return False
+
+    async def start_recovery_monitor(self) -> None:
+        """Start background task to periodically probe failed endpoints.
+
+        Probes unhealthy endpoints at the configured interval.
+        """
+        if not self.config.enable_auto_recovery:
+            return
+
+        async def _recovery_loop() -> None:
+            while True:
+                try:
+                    await asyncio.sleep(self.config.recovery_check_interval)
+                    unhealthy = [url for url, node in self._lb._endpoints.items() if not node.is_healthy]
+                    for url in unhealthy:
+                        await self.check_recovery(url)
+                except asyncio.CancelledError:
+                    break
+                except Exception as exc:
+                    logger.error(f"Failover: recovery loop error: {exc}")
+
+        self._recovery_task = asyncio.create_task(_recovery_loop())
+        logger.info("Failover: recovery monitor started")
+
+    def stop_recovery_monitor(self) -> None:
+        """Stop the background recovery monitor."""
+        if self._recovery_task and not self._recovery_task.done():
+            self._recovery_task.cancel()
+            self._recovery_task = None
+            logger.info("Failover: recovery monitor stopped")
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get failover manager statistics.
+
+        Returns:
+            Dict with circuit breaker states, failure history, and config.
+        """
+        with self._lock:
+            return {
+                "config": {
+                    "max_failures": self.config.max_failures,
+                    "recovery_check_interval": self.config.recovery_check_interval,
+                    "enable_auto_recovery": self.config.enable_auto_recovery,
+                    "circuit_breaker_threshold": self.config.circuit_breaker_threshold,
+                    "circuit_breaker_reset_seconds": self.config.circuit_breaker_reset_seconds,
+                },
+                "circuit_breakers": {
+                    url: {
+                        "is_open": cb.is_open,
+                        "failure_count": cb.failure_count,
+                        "success_count": cb.success_count,
+                        "opened_at": cb.opened_at,
+                    }
+                    for url, cb in self._circuit_breakers.items()
+                },
+                "recent_failures": self._failure_history[-20:],
+                "total_failure_events": len(self._failure_history),
+                "load_balancer": self._lb.get_stats(),
+            }
+
+    def reset(self) -> None:
+        """Reset all failover state."""
+        with self._lock:
+            self._circuit_breakers.clear()
+            self._failure_history.clear()
+            for node in self._lb._endpoints.values():
+                node.is_healthy = True
+                node.failure_count = 0
+            logger.info("Failover: all state reset")
 
 
 # ── Batch Operations ──────────────────────────────────────

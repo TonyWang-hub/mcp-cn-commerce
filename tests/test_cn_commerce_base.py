@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sys
+import zlib
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -27,8 +28,11 @@ from cn_commerce_base import (
     BatchRequestItem,
     BatchResultItem,
     BatchSummary,
+    CacheWarmer,
     CommerceAPIError,
     CommerceMCPBase,
+    CompressionConfig,
+    CompressionMethod,
     ConfigurableRateLimiter,
     ConfigValidationError,
     EndpointMetrics,
@@ -38,10 +42,13 @@ from cn_commerce_base import (
     RateLimitConfig,
     RateLimiter,
     RateLimitStats,
+    RequestCompressor,
     RetryableError,
     RetryConfig,
     SensitiveDataFilter,
     SignMethod,
+    WarmupResult,
+    WarmupTask,
     format_error_response,
     format_response,
     handle_tool_errors,
@@ -2252,3 +2259,803 @@ class TestConfigurableRateLimiter:
         await limiter.acquire("TEST", "/api/slow")
         await limiter.acquire("TEST", "/api/fast")
         assert limiter.stats.total_requests >= 2
+
+
+# ── WarmupTask Tests ──────────────────────────────────────
+
+
+class TestWarmupTask:
+    """Tests for WarmupTask dataclass."""
+
+    def test_basic_creation(self):
+        async def fetch():
+            return {}
+
+        task = WarmupTask(platform="TEST", cache_key="key1", fetch_fn=fetch)
+        assert task.platform == "TEST"
+        assert task.cache_key == "key1"
+        assert task.priority == 0
+        assert task.enabled is True
+
+    def test_custom_priority(self):
+        async def fetch():
+            return {}
+
+        task = WarmupTask(platform="TEST", cache_key="key1", fetch_fn=fetch, priority=5)
+        assert task.priority == 5
+
+    def test_disabled(self):
+        async def fetch():
+            return {}
+
+        task = WarmupTask(platform="TEST", cache_key="key1", fetch_fn=fetch, enabled=False)
+        assert task.enabled is False
+
+
+# ── WarmupResult Tests ────────────────────────────────────
+
+
+class TestWarmupResult:
+    """Tests for WarmupResult dataclass."""
+
+    def test_default_values(self):
+        r = WarmupResult()
+        assert r.platform == ""
+        assert r.cache_key == ""
+        assert r.success is True
+        assert r.latency_ms == 0.0
+        assert r.error == ""
+
+    def test_with_values(self):
+        r = WarmupResult(
+            platform="TEST",
+            cache_key="key1",
+            success=False,
+            latency_ms=42.5,
+            error="timeout",
+        )
+        assert r.platform == "TEST"
+        assert r.cache_key == "key1"
+        assert r.success is False
+        assert r.latency_ms == 42.5
+        assert r.error == "timeout"
+
+
+# ── CacheWarmer Tests ─────────────────────────────────────
+
+
+class TestCacheWarmer:
+    """Tests for CacheWarmer."""
+
+    def test_register_task(self):
+        warmer = CacheWarmer()
+
+        async def fetch():
+            return {"data": 1}
+
+        warmer.register("TEST", "key1", fetch)
+        stats = warmer.get_stats()
+        assert stats["registered_tasks"] == 1
+
+    def test_register_multiple_tasks(self):
+        warmer = CacheWarmer()
+
+        async def fetch1():
+            return {}
+
+        async def fetch2():
+            return {}
+
+        warmer.register("TEST", "key1", fetch1, priority=1)
+        warmer.register("TEST", "key2", fetch2, priority=0)
+        stats = warmer.get_stats()
+        assert stats["registered_tasks"] == 2
+
+    def test_unregister_task(self):
+        warmer = CacheWarmer()
+
+        async def fetch():
+            return {}
+
+        warmer.register("TEST", "key1", fetch)
+        assert warmer.unregister("TEST", "key1") is True
+        stats = warmer.get_stats()
+        assert stats["registered_tasks"] == 0
+
+    def test_unregister_nonexistent(self):
+        warmer = CacheWarmer()
+        assert warmer.unregister("TEST", "missing") is False
+
+    @pytest.mark.asyncio
+    async def test_warmup_all(self):
+        warmer = CacheWarmer()
+        call_count = 0
+
+        async def fetch():
+            nonlocal call_count
+            call_count += 1
+            return {"id": call_count}
+
+        warmer.register("TEST", "key1", fetch)
+        warmer.register("TEST", "key2", fetch)
+        results = await warmer.warmup_all()
+        assert len(results) == 2
+        assert all(r.success for r in results)
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_warmup_all_skips_disabled(self):
+        warmer = CacheWarmer()
+
+        async def fetch():
+            return {}
+
+        warmer.register("TEST", "key1", fetch, enabled=False)
+        warmer.register("TEST", "key2", fetch, enabled=True)
+        results = await warmer.warmup_all()
+        assert len(results) == 1
+        assert results[0].cache_key == "key2"
+
+    @pytest.mark.asyncio
+    async def test_warmup_all_handles_failure(self):
+        warmer = CacheWarmer()
+
+        async def fetch_ok():
+            return {"ok": True}
+
+        async def fetch_fail():
+            raise ValueError("fetch error")
+
+        warmer.register("TEST", "ok_key", fetch_ok)
+        warmer.register("TEST", "fail_key", fetch_fail)
+        results = await warmer.warmup_all()
+        assert len(results) == 2
+        assert results[0].success is True
+        assert results[1].success is False
+        assert "fetch error" in results[1].error
+
+    @pytest.mark.asyncio
+    async def test_warmup_platform(self):
+        warmer = CacheWarmer()
+
+        async def fetch1():
+            return {"p1": 1}
+
+        async def fetch2():
+            return {"p2": 2}
+
+        warmer.register("P1", "key1", fetch1)
+        warmer.register("P2", "key2", fetch2)
+        results = await warmer.warmup_platform("P1")
+        assert len(results) == 1
+        assert results[0].platform == "P1"
+
+    @pytest.mark.asyncio
+    async def test_warmup_platform_empty(self):
+        warmer = CacheWarmer()
+        results = await warmer.warmup_platform("UNKNOWN")
+        assert len(results) == 0
+
+    @pytest.mark.asyncio
+    async def test_get_cached_after_warmup(self):
+        warmer = CacheWarmer()
+
+        async def fetch():
+            return {"products": [1, 2, 3]}
+
+        warmer.register("TEST", "products", fetch, ttl_seconds=60)
+        await warmer.warmup_all()
+        cached = warmer.get_cached("products")
+        assert cached == {"products": [1, 2, 3]}
+
+    def test_get_cached_miss(self):
+        warmer = CacheWarmer()
+        assert warmer.get_cached("missing") is None
+
+    @pytest.mark.asyncio
+    async def test_get_cached_expired(self):
+        warmer = CacheWarmer()
+
+        async def fetch():
+            return {"data": 1}
+
+        warmer.register("TEST", "key1", fetch, ttl_seconds=0)
+        await warmer.warmup_all()
+        # TTL is 0, so it should be expired immediately
+        # (depending on timing, but practically immediate)
+        import time as _time
+
+        _time.sleep(0.01)
+        assert warmer.get_cached("key1") is None
+
+    def test_set_cached(self):
+        warmer = CacheWarmer()
+        warmer.set_cached("manual_key", {"value": 42}, ttl_seconds=60)
+        assert warmer.get_cached("manual_key") == {"value": 42}
+
+    def test_invalidate_single(self):
+        warmer = CacheWarmer()
+        warmer.set_cached("key1", "val1")
+        warmer.set_cached("key2", "val2")
+        warmer.invalidate("key1")
+        assert warmer.get_cached("key1") is None
+        assert warmer.get_cached("key2") == "val2"
+
+    def test_invalidate_all(self):
+        warmer = CacheWarmer()
+        warmer.set_cached("key1", "val1")
+        warmer.set_cached("key2", "val2")
+        warmer.invalidate()
+        assert warmer.get_cached("key1") is None
+        assert warmer.get_cached("key2") is None
+
+    @pytest.mark.asyncio
+    async def test_warmup_latency_tracked(self):
+        warmer = CacheWarmer()
+
+        async def fetch():
+            import asyncio
+
+            await asyncio.sleep(0.01)
+            return {}
+
+        warmer.register("TEST", "key1", fetch)
+        results = await warmer.warmup_all()
+        assert results[0].latency_ms > 0
+
+    @pytest.mark.asyncio
+    async def test_warmup_history(self):
+        warmer = CacheWarmer()
+
+        async def fetch_ok():
+            return {}
+
+        async def fetch_fail():
+            raise RuntimeError("fail")
+
+        warmer.register("TEST", "ok", fetch_ok)
+        warmer.register("TEST", "fail", fetch_fail)
+        await warmer.warmup_all()
+        history = warmer.get_history()
+        assert len(history) == 2
+        assert history[0]["success"] is True
+        assert history[1]["success"] is False
+
+    @pytest.mark.asyncio
+    async def test_warmup_history_limit(self):
+        warmer = CacheWarmer()
+
+        async def fetch():
+            return {}
+
+        for i in range(10):
+            warmer.register("TEST", f"key{i}", fetch)
+        await warmer.warmup_all()
+        history = warmer.get_history(limit=5)
+        assert len(history) == 5
+
+    @pytest.mark.asyncio
+    async def test_scheduled_warmup_start_stop(self):
+        warmer = CacheWarmer()
+        assert warmer.is_scheduled is False
+
+        async def fetch():
+            return {}
+
+        warmer.register("TEST", "key1", fetch)
+        task = warmer.start_scheduled(interval_seconds=0.1)
+        assert warmer.is_scheduled is True
+        assert task is not None
+
+        warmer.stop_scheduled()
+        # Give a moment for cancellation to propagate
+        import asyncio
+
+        await asyncio.sleep(0.05)
+        assert warmer.is_scheduled is False
+
+    @pytest.mark.asyncio
+    async def test_scheduled_warmup_runs(self):
+        warmer = CacheWarmer()
+        call_count = 0
+
+        async def fetch():
+            nonlocal call_count
+            call_count += 1
+            return {"count": call_count}
+
+        warmer.register("TEST", "key1", fetch)
+        warmer.start_scheduled(interval_seconds=0.05)
+        import asyncio
+
+        await asyncio.sleep(0.2)  # Let it run a few cycles
+        warmer.stop_scheduled()
+        # Should have been called at least twice
+        assert call_count >= 2
+
+    @pytest.mark.asyncio
+    async def test_scheduled_warmup_platforms_filter(self):
+        warmer = CacheWarmer()
+        p1_count = 0
+        p2_count = 0
+
+        async def fetch_p1():
+            nonlocal p1_count
+            p1_count += 1
+            return {}
+
+        async def fetch_p2():
+            nonlocal p2_count
+            p2_count += 1
+            return {}
+
+        warmer.register("P1", "key1", fetch_p1)
+        warmer.register("P2", "key2", fetch_p2)
+        warmer.start_scheduled(interval_seconds=0.05, warmup_platforms=["P1"])
+        import asyncio
+
+        await asyncio.sleep(0.2)
+        warmer.stop_scheduled()
+        assert p1_count >= 2
+        assert p2_count == 0  # P2 should not be warmed
+
+    @pytest.mark.asyncio
+    async def test_warmup_stats_after_execution(self):
+        warmer = CacheWarmer()
+
+        async def fetch():
+            return {}
+
+        warmer.register("TEST", "key1", fetch)
+        await warmer.warmup_all()
+        stats = warmer.get_stats()
+        assert stats["registered_tasks"] == 1
+        assert "key1" in stats["cached_keys"]
+        assert stats["cached_count"] == 1
+        assert stats["history"]["total"] == 1
+        assert stats["history"]["succeeded"] == 1
+
+
+# ── CompressionMethod Tests ───────────────────────────────
+
+
+class TestCompressionMethod:
+    """Tests for CompressionMethod enum."""
+
+    def test_none(self):
+        assert CompressionMethod.NONE == "none"
+
+    def test_gzip(self):
+        assert CompressionMethod.GZIP == "gzip"
+
+    def test_deflate(self):
+        assert CompressionMethod.DEFLATE == "deflate"
+
+    def test_auto(self):
+        assert CompressionMethod.AUTO == "auto"
+
+
+# ── CompressionConfig Tests ───────────────────────────────
+
+
+class TestCompressionConfig:
+    """Tests for CompressionConfig dataclass."""
+
+    def test_default_values(self):
+        cfg = CompressionConfig()
+        assert cfg.method == CompressionMethod.NONE
+        assert cfg.min_size_bytes == 1024
+        assert cfg.gzip_level == 6
+        assert cfg.include_content_encoding is True
+
+    def test_custom_values(self):
+        cfg = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=512,
+            gzip_level=9,
+            include_content_encoding=False,
+        )
+        assert cfg.method == CompressionMethod.GZIP
+        assert cfg.min_size_bytes == 512
+        assert cfg.gzip_level == 9
+        assert cfg.include_content_encoding is False
+
+    def test_to_dict(self):
+        cfg = CompressionConfig(method=CompressionMethod.GZIP)
+        d = cfg.to_dict()
+        assert d["method"] == "gzip"
+        assert d["min_size_bytes"] == 1024
+
+    def test_from_dict(self):
+        data = {
+            "method": "deflate",
+            "min_size_bytes": 2048,
+            "gzip_level": 3,
+            "include_content_encoding": False,
+        }
+        cfg = CompressionConfig.from_dict(data)
+        assert cfg.method == CompressionMethod.DEFLATE
+        assert cfg.min_size_bytes == 2048
+        assert cfg.gzip_level == 3
+        assert cfg.include_content_encoding is False
+
+    def test_roundtrip(self):
+        original = CompressionConfig(method=CompressionMethod.GZIP, min_size_bytes=512)
+        d = original.to_dict()
+        restored = CompressionConfig.from_dict(d)
+        assert restored.method == original.method
+        assert restored.min_size_bytes == original.min_size_bytes
+
+
+# ── RequestCompressor Tests ───────────────────────────────
+
+
+class TestRequestCompressor:
+    """Tests for RequestCompressor."""
+
+    def test_default_no_compression(self):
+        compressor = RequestCompressor()
+        body = b'{"data": "test"}'
+        result, headers = compressor.compress(body)
+        assert result == body
+        assert headers == {}
+
+    def test_gzip_compression(self):
+        config = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=0,
+        )
+        compressor = RequestCompressor(config)
+        body = b'{"data": "' + b"x" * 2000 + b'"}'
+        result, headers = compressor.compress(body)
+        assert len(result) < len(body)
+        assert headers.get("Content-Encoding") == "gzip"
+
+    def test_deflate_compression(self):
+        config = CompressionConfig(
+            method=CompressionMethod.DEFLATE,
+            min_size_bytes=0,
+        )
+        compressor = RequestCompressor(config)
+        body = b'{"data": "' + b"x" * 2000 + b'"}'
+        result, headers = compressor.compress(body)
+        assert len(result) < len(body)
+        assert headers.get("Content-Encoding") == "deflate"
+
+    def test_min_size_threshold(self):
+        config = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=1000,
+        )
+        compressor = RequestCompressor(config)
+        small_body = b"small"
+        result, headers = compressor.compress(small_body)
+        assert result == small_body
+        assert headers == {}
+
+    def test_auto_selects_gzip(self):
+        config = CompressionConfig(method=CompressionMethod.AUTO, min_size_bytes=0)
+        compressor = RequestCompressor(config)
+        body = b'{"data": "' + b"x" * 2000 + b'"}'
+        result, headers = compressor.compress(body)
+        assert headers.get("Content-Encoding") == "gzip"
+
+    def test_auto_with_accept_encoding_gzip(self):
+        config = CompressionConfig(method=CompressionMethod.AUTO, min_size_bytes=0)
+        compressor = RequestCompressor(config)
+        body = b'{"data": "' + b"x" * 2000 + b'"}'
+        result, headers = compressor.compress(body, accept_encoding="gzip, deflate")
+        assert headers.get("Content-Encoding") == "gzip"
+
+    def test_auto_with_accept_encoding_deflate_only(self):
+        config = CompressionConfig(method=CompressionMethod.AUTO, min_size_bytes=0)
+        compressor = RequestCompressor(config)
+        body = b'{"data": "' + b"x" * 2000 + b'"}'
+        result, headers = compressor.compress(body, accept_encoding="deflate")
+        assert headers.get("Content-Encoding") == "deflate"
+
+    def test_no_content_encoding_header_when_disabled(self):
+        config = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=0,
+            include_content_encoding=False,
+        )
+        compressor = RequestCompressor(config)
+        body = b'{"data": "' + b"x" * 2000 + b'"}'
+        result, headers = compressor.compress(body)
+        assert len(result) < len(body)
+        assert "Content-Encoding" not in headers
+
+    def test_compression_actually_works_gzip(self):
+        """Verify gzip-compressed data can be decompressed."""
+        import gzip as gzip_mod
+
+        config = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=0,
+        )
+        compressor = RequestCompressor(config)
+        original = b'{"products": ["a", "b", "c"]}' * 100
+        compressed, _ = compressor.compress(original)
+        decompressed = gzip_mod.decompress(compressed)
+        assert decompressed == original
+
+    def test_compression_actually_works_deflate(self):
+        """Verify deflate-compressed data can be decompressed."""
+        config = CompressionConfig(
+            method=CompressionMethod.DEFLATE,
+            min_size_bytes=0,
+        )
+        compressor = RequestCompressor(config)
+        original = b'{"products": ["a", "b", "c"]}' * 100
+        compressed, _ = compressor.compress(original)
+        decompressed = zlib.decompress(compressed)
+        assert decompressed == original
+
+    def test_stats_tracking(self):
+        config = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=0,
+        )
+        compressor = RequestCompressor(config)
+        compressor.compress(b"x" * 1000)
+        compressor.compress(b"y" * 500)
+        stats = compressor.get_stats()
+        assert stats["total_requests"] == 2
+        assert stats["compressed_requests"] == 2
+        assert stats["total_original_bytes"] == 1500
+        assert stats["bytes_saved"] > 0
+
+    def test_stats_compression_rate(self):
+        config = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=500,  # Skip small bodies
+        )
+        compressor = RequestCompressor(config)
+        compressor.compress(b"small")  # Skipped
+        compressor.compress(b"x" * 1000)  # Compressed
+        stats = compressor.get_stats()
+        assert stats["total_requests"] == 2
+        assert stats["compressed_requests"] == 1
+        assert stats["compression_rate"] == 0.5
+
+    def test_reset_stats(self):
+        config = CompressionConfig(method=CompressionMethod.GZIP, min_size_bytes=0)
+        compressor = RequestCompressor(config)
+        compressor.compress(b"x" * 1000)
+        compressor.reset_stats()
+        stats = compressor.get_stats()
+        assert stats["total_requests"] == 0
+        assert stats["total_original_bytes"] == 0
+
+    def test_empty_body(self):
+        compressor = RequestCompressor()
+        result, headers = compressor.compress(b"")
+        assert result == b""
+        assert headers == {}
+
+
+# ── CommerceMCPBase Compression Integration ───────────────
+
+
+class TestCommerceMCPBaseCompression:
+    """Tests for CommerceMCPBase compression integration."""
+
+    def test_default_no_compression(self):
+        client = CommerceMCPBase()
+        assert client._compressor.config.method == CompressionMethod.NONE
+
+    def test_custom_compression_config(self):
+        config = CompressionConfig(method=CompressionMethod.GZIP)
+        client = CommerceMCPBase(compression_config=config)
+        assert client._compressor.config.method == CompressionMethod.GZIP
+
+    def test_get_compression_stats(self):
+        client = CommerceMCPBase()
+        stats = client.get_compression_stats()
+        assert "total_requests" in stats
+        assert "compressed_requests" in stats
+
+    @pytest.mark.asyncio
+    async def test_post_with_gzip_compression(self):
+        config = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=0,
+        )
+        client = CommerceMCPBase(app_key="k", app_secret="s", compression_config=config)
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": "ok"}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            await client._request("POST", "/api/test", data={"key": "x" * 100})
+
+        # Verify post was called with compressed content
+        call_kwargs = mock_client.post.call_args.kwargs
+        assert "content" in call_kwargs
+        assert call_kwargs["headers"]["Content-Encoding"] == "gzip"
+
+    @pytest.mark.asyncio
+    async def test_post_small_body_not_compressed(self):
+        config = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=10000,  # Very high threshold
+        )
+        client = CommerceMCPBase(app_key="k", app_secret="s", compression_config=config)
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": "ok"}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            await client._request("POST", "/api/test", data={"key": "small"})
+
+        # Verify post was called with json= (not compressed)
+        call_kwargs = mock_client.post.call_args.kwargs
+        assert "json" in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_get_not_compressed(self):
+        config = CompressionConfig(
+            method=CompressionMethod.GZIP,
+            min_size_bytes=0,
+        )
+        client = CommerceMCPBase(app_key="k", app_secret="s", compression_config=config)
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": "ok"}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            await client._request("GET", "/api/test")
+
+        # GET should use normal params, not compression
+        mock_client.get.assert_called_once()
+
+
+# ── CommerceMCPBase CacheWarmer Integration ───────────────
+
+
+class TestCommerceMCPBaseCacheWarmer:
+    """Tests for CommerceMCPBase cache_warmer integration."""
+
+    def test_has_cache_warmer(self):
+        client = CommerceMCPBase()
+        assert isinstance(client.cache_warmer, CacheWarmer)
+
+    @pytest.mark.asyncio
+    async def test_warmup_cache_all(self):
+        client = CommerceMCPBase()
+        call_count = 0
+
+        async def fetch():
+            nonlocal call_count
+            call_count += 1
+            return {"data": call_count}
+
+        client.cache_warmer.register("TEST", "key1", fetch)
+        results = await client.warmup_cache()
+        assert len(results) == 1
+        assert results[0]["success"] is True
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_warmup_cache_specific_platform(self):
+        client = CommerceMCPBase()
+
+        async def fetch_p1():
+            return {"p1": 1}
+
+        async def fetch_p2():
+            return {"p2": 2}
+
+        client.cache_warmer.register("P1", "key1", fetch_p1)
+        client.cache_warmer.register("P2", "key2", fetch_p2)
+        results = await client.warmup_cache(platforms=["P1"])
+        assert len(results) == 1
+        assert results[0]["platform"] == "P1"
+
+    @pytest.mark.asyncio
+    async def test_warmup_cache_returns_dicts(self):
+        """warmup_cache should return JSON-serializable dicts."""
+        client = CommerceMCPBase()
+
+        async def fetch():
+            return {}
+
+        client.cache_warmer.register("TEST", "key1", fetch)
+        results = await client.warmup_cache()
+        assert isinstance(results, list)
+        assert isinstance(results[0], dict)
+        assert "platform" in results[0]
+        assert "cache_key" in results[0]
+        assert "success" in results[0]
+        assert "latency_ms" in results[0]
+        assert "error" in results[0]
+
+
+# ── Concurrency Tests for New Features ────────────────────
+
+
+class TestCacheWarmerConcurrency:
+    """Thread-safety tests for CacheWarmer."""
+
+    def test_concurrent_set_and_get_cached(self):
+        import threading
+
+        warmer = CacheWarmer()
+        errors = []
+
+        def writer():
+            for i in range(100):
+                warmer.set_cached(f"key_{i}", f"value_{i}")
+
+        def reader():
+            for i in range(100):
+                try:
+                    warmer.get_cached(f"key_{i}")
+                except Exception as e:
+                    errors.append(e)
+
+        threads = [threading.Thread(target=writer), threading.Thread(target=reader)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == []
+
+    def test_concurrent_invalidate(self):
+        import threading
+
+        warmer = CacheWarmer()
+
+        def writer():
+            for i in range(50):
+                warmer.set_cached(f"k{i}", f"v{i}")
+
+        def invalidator():
+            for _ in range(50):
+                warmer.invalidate()
+
+        threads = [threading.Thread(target=writer), threading.Thread(target=invalidator)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        # Should not raise
+
+
+class TestRequestCompressorConcurrency:
+    """Thread-safety tests for RequestCompressor."""
+
+    def test_concurrent_compress(self):
+        import threading
+
+        config = CompressionConfig(method=CompressionMethod.GZIP, min_size_bytes=0)
+        compressor = RequestCompressor(config)
+        errors = []
+
+        def compress_batch():
+            try:
+                for _ in range(50):
+                    compressor.compress(b"x" * 500)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=compress_batch) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == []
+        stats = compressor.get_stats()
+        assert stats["total_requests"] == 200

@@ -35,22 +35,21 @@ from cn_commerce_base import (
     CompressionMethod,
     ConfigurableRateLimiter,
     ConfigValidationError,
-    DedupStats,
     EndpointMetrics,
     EndpointRateLimit,
     MetricsCollector,
     PlatformRateLimitConfig,
+    PrioritizedRequest,
+    PriorityQueue,
+    PriorityScheduler,
+    PriorityStats,
     RateLimitConfig,
     RateLimiter,
     RateLimitStats,
     RequestCompressor,
-    RequestDeduplicator,
+    RequestPriority,
     RetryableError,
     RetryConfig,
-    RetryQueueConfig,
-    RetryQueueItem,
-    RetryQueueStats,
-    RetryRequestQueue,
     SensitiveDataFilter,
     SignMethod,
     WarmupResult,
@@ -3067,534 +3066,618 @@ class TestRequestCompressorConcurrency:
         assert stats["total_requests"] == 200
 
 
-class TestRetryQueueItem:
-    """Tests for RetryQueueItem dataclass."""
+# ── RequestPriority Tests ──────────────────────────────────
+
+
+class TestRequestPriority:
+    """Tests for RequestPriority enum."""
+
+    def test_critical_value(self):
+        assert RequestPriority.CRITICAL == "critical"
+
+    def test_high_value(self):
+        assert RequestPriority.HIGH == "high"
+
+    def test_normal_value(self):
+        assert RequestPriority.NORMAL == "normal"
+
+    def test_low_value(self):
+        assert RequestPriority.LOW == "low"
+
+    def test_is_str_enum(self):
+        assert isinstance(RequestPriority.CRITICAL, str)
+
+
+# ── PrioritizedRequest Tests ───────────────────────────────
+
+
+class TestPrioritizedRequest:
+    """Tests for PrioritizedRequest dataclass."""
 
     def test_default_values(self):
-        item = RetryQueueItem()
-        assert item.request_id != ""
-        assert item.method == ""
-        assert item.path == ""
-        assert item.params == {}
-        assert item.data == {}
-        assert item.created_at > 0
-        assert item.retry_count == 0
-        assert item.max_retries == 3
-        assert item.status == "pending"
+        req = PrioritizedRequest()
+        assert req.priority == RequestPriority.NORMAL
+        assert req.method == ""
+        assert req.path == ""
+        assert req.params == {}
+        assert req.data == {}
+        assert req.request_id == ""
+        assert req.platform == ""
 
     def test_custom_values(self):
-        item = RetryQueueItem(
+        req = PrioritizedRequest(
+            priority=RequestPriority.HIGH,
             method="GET",
-            path="/api/order",
-            params={"id": "123"},
-            max_retries=5,
-            platform="TAOBAO",
-            last_error="timeout",
+            path="/api/orders",
+            params={"page": 1},
+            data={"filter": "active"},
+            request_id="req-1",
+            platform="OCEANENGINE",
         )
-        assert item.method == "GET"
-        assert item.path == "/api/order"
-        assert item.params == {"id": "123"}
-        assert item.max_retries == 5
-        assert item.platform == "TAOBAO"
+        assert req.priority == RequestPriority.HIGH
+        assert req.method == "GET"
+        assert req.path == "/api/orders"
+        assert req.params == {"page": 1}
+        assert req.data == {"filter": "active"}
+        assert req.request_id == "req-1"
+        assert req.platform == "OCEANENGINE"
 
-    def test_request_id_auto_generated(self):
-        a = RetryQueueItem()
-        b = RetryQueueItem()
-        assert a.request_id != b.request_id
+    def test_priority_weight_critical(self):
+        req = PrioritizedRequest(priority=RequestPriority.CRITICAL)
+        assert req.priority_weight == 0
+
+    def test_priority_weight_high(self):
+        req = PrioritizedRequest(priority=RequestPriority.HIGH)
+        assert req.priority_weight == 1
+
+    def test_priority_weight_normal(self):
+        req = PrioritizedRequest(priority=RequestPriority.NORMAL)
+        assert req.priority_weight == 2
+
+    def test_priority_weight_low(self):
+        req = PrioritizedRequest(priority=RequestPriority.LOW)
+        assert req.priority_weight == 3
 
     def test_created_at_auto_set(self):
-        item = RetryQueueItem()
-        assert item.created_at > 0
+        req = PrioritizedRequest()
+        assert req.created_at > 0
 
     def test_params_default_factory(self):
-        a = RetryQueueItem()
-        b = RetryQueueItem()
+        a = PrioritizedRequest()
+        b = PrioritizedRequest()
         a.params["key"] = "val"
         assert "key" not in b.params
 
 
-class TestRetryQueueConfig:
-    """Tests for RetryQueueConfig dataclass."""
-
-    def test_default_values(self):
-        config = RetryQueueConfig()
-        assert config.max_queue_size == 1000
-        assert config.max_retries == 3
-        assert config.base_delay == 1.0
-        assert config.max_delay == 60.0
-        assert config.jitter is True
-        assert config.dedup_window == 30.0
-
-    def test_compute_delay_no_jitter(self):
-        config = RetryQueueConfig(base_delay=1.0, max_delay=60.0, jitter=False)
-        assert config.compute_delay(0) == 1.0
-        assert config.compute_delay(1) == 2.0
-        assert config.compute_delay(2) == 4.0
-
-    def test_compute_delay_with_jitter(self):
-        config = RetryQueueConfig(base_delay=1.0, max_delay=60.0, jitter=True)
-        delay = config.compute_delay(0)
-        assert 0.5 <= delay <= 1.5
-
-    def test_compute_delay_max_cap(self):
-        config = RetryQueueConfig(base_delay=1.0, max_delay=10.0, jitter=False)
-        assert config.compute_delay(10) == 10.0
-
-
-class TestRetryQueueStats:
-    """Tests for RetryQueueStats dataclass."""
-
-    def test_default_values(self):
-        stats = RetryQueueStats()
-        assert stats.total_enqueued == 0
-        assert stats.total_succeeded == 0
-        assert stats.total_failed == 0
-        assert stats.total_deduplicated == 0
-
-    def test_to_dict(self):
-        stats = RetryQueueStats(total_enqueued=10, total_succeeded=5, total_failed=2)
-        d = stats.to_dict()
-        assert d["total_enqueued"] == 10
-        assert d["total_succeeded"] == 5
-        assert d["total_failed"] == 2
-
-
-class TestRetryRequestQueue:
-    """Tests for RetryRequestQueue."""
-
-    def test_init_default(self):
-        queue = RetryRequestQueue()
-        assert queue.pending_count == 0
-        assert queue.in_flight_count == 0
-
-    def test_init_with_config(self):
-        config = RetryQueueConfig(max_retries=5, dedup_window=10.0)
-        queue = RetryRequestQueue(config)
-        assert queue.config.max_retries == 5
-        assert queue.config.dedup_window == 10.0
-
-    @pytest.mark.asyncio
-    async def test_enqueue_basic(self):
-        queue = RetryRequestQueue(RetryQueueConfig(dedup_window=0))
-        item = await queue.enqueue(method="GET", path="/api/test")
-        assert item is not None
-        assert item.method == "GET"
-        assert item.path == "/api/test"
-        assert item.status == "pending"
-        assert queue.pending_count == 1
-
-    @pytest.mark.asyncio
-    async def test_enqueue_with_all_params(self):
-        queue = RetryRequestQueue(RetryQueueConfig(dedup_window=0))
-        item = await queue.enqueue(
-            method="POST",
-            path="/api/order",
-            params={"id": "123"},
-            data={"status": "paid"},
-            max_retries=5,
-            platform="TAOBAO",
-            error="connection refused",
-        )
-        assert item is not None
-        assert item.method == "POST"
-        assert item.max_retries == 5
-        assert item.platform == "TAOBAO"
-
-    @pytest.mark.asyncio
-    async def test_enqueue_dedup(self):
-        queue = RetryRequestQueue(RetryQueueConfig(dedup_window=30.0))
-        item1 = await queue.enqueue(method="GET", path="/api/test", params={"id": "1"})
-        assert item1 is not None
-        item2 = await queue.enqueue(method="GET", path="/api/test", params={"id": "1"})
-        assert item2 is None
-        assert queue.stats.total_deduplicated == 1
-
-    @pytest.mark.asyncio
-    async def test_enqueue_force_bypass_dedup(self):
-        queue = RetryRequestQueue(RetryQueueConfig(dedup_window=30.0))
-        await queue.enqueue(method="GET", path="/api/test", params={"id": "1"})
-        item2 = await queue.enqueue(method="GET", path="/api/test", params={"id": "1"}, force=True)
-        assert item2 is not None
-        assert queue.stats.total_deduplicated == 0
-
-    @pytest.mark.asyncio
-    async def test_enqueue_dedup_disabled(self):
-        queue = RetryRequestQueue(RetryQueueConfig(dedup_window=0))
-        item1 = await queue.enqueue(method="GET", path="/api/test", params={"id": "1"})
-        item2 = await queue.enqueue(method="GET", path="/api/test", params={"id": "1"})
-        assert item1 is not None
-        assert item2 is not None
-
-    @pytest.mark.asyncio
-    async def test_enqueue_queue_full(self):
-        config = RetryQueueConfig(max_queue_size=2, dedup_window=0)
-        queue = RetryRequestQueue(config)
-        await queue.enqueue(method="GET", path="/a")
-        await queue.enqueue(method="GET", path="/b")
-        with pytest.raises(ValueError, match="full"):
-            await queue.enqueue(method="GET", path="/c")
-
-    @pytest.mark.asyncio
-    async def test_dequeue_ready(self):
-        config = RetryQueueConfig(dedup_window=0)
-        queue = RetryRequestQueue(config)
-        item = await queue.enqueue(method="GET", path="/api/test")
-        item.next_retry_at = 0.0
-        ready = await queue.dequeue_ready()
-        assert len(ready) == 1
-        assert ready[0].status == "in_flight"
-        assert queue.pending_count == 0
-        assert queue.in_flight_count == 1
-
-    @pytest.mark.asyncio
-    async def test_dequeue_ready_empty(self):
-        queue = RetryRequestQueue()
-        ready = await queue.dequeue_ready()
-        assert ready == []
-
-    def test_complete_success(self):
-        queue = RetryRequestQueue()
-        item = RetryQueueItem(request_id="test-1", method="GET", path="/api")
-        queue._in_flight["test-1"] = item
-        queue.stats.current_in_flight = 1
-        result = queue.complete("test-1", success=True)
-        assert result is not None
-        assert result.status == "succeeded"
-        assert queue.stats.total_succeeded == 1
-        assert queue.in_flight_count == 0
-
-    def test_complete_failure_retries_remaining(self):
-        config = RetryQueueConfig(max_retries=3, base_delay=0.01, jitter=False)
-        queue = RetryRequestQueue(config)
-        item = RetryQueueItem(request_id="test-1", method="GET", path="/api")
-        queue._in_flight["test-1"] = item
-        queue.stats.current_in_flight = 1
-        result = queue.complete("test-1", success=False, error="timeout")
-        assert result is not None
-        assert result.status == "pending"
-        assert result.retry_count == 1
-        assert queue.pending_count == 1
-
-    def test_complete_failure_no_retries_remaining(self):
-        config = RetryQueueConfig(max_retries=2)
-        queue = RetryRequestQueue(config)
-        item = RetryQueueItem(request_id="test-1", method="GET", path="/api", max_retries=2)
-        item.retry_count = 1
-        queue._in_flight["test-1"] = item
-        queue.stats.current_in_flight = 1
-        result = queue.complete("test-1", success=False, error="permanent error")
-        assert result is not None
-        assert result.status == "failed"
-        assert queue.stats.total_failed == 1
-
-    def test_complete_unknown_id(self):
-        queue = RetryRequestQueue()
-        result = queue.complete("nonexistent", success=True)
-        assert result is None
-
-    def test_remove(self):
-        config = RetryQueueConfig(dedup_window=0)
-        queue = RetryRequestQueue(config)
-        queue._queue.append(RetryQueueItem(request_id="rm-test"))
-        queue.stats.current_pending = 1
-        assert queue.remove("rm-test") is True
-        assert queue.pending_count == 0
-
-    def test_drain(self):
-        config = RetryQueueConfig(dedup_window=0)
-        queue = RetryRequestQueue(config)
-        for i in range(5):
-            queue._queue.append(RetryQueueItem(request_id=f"item-{i}"))
-        items = queue.drain()
-        assert len(items) == 5
-        assert queue.pending_count == 0
-
-    def test_cleanup_expired(self):
-        import time
-
-        config = RetryQueueConfig(item_ttl=1.0, dedup_window=0)
-        queue = RetryRequestQueue(config)
-        queue._queue.append(RetryQueueItem(request_id="old", created_at=time.time() - 10.0))
-        queue._queue.append(RetryQueueItem(request_id="new", created_at=time.time()))
-        queue.stats.current_pending = 2
-        removed = queue.cleanup_expired()
-        assert removed == 1
-        assert queue.stats.total_expired == 1
-
-    @pytest.mark.asyncio
-    async def test_process_success(self):
-        config = RetryQueueConfig(dedup_window=0)
-        queue = RetryRequestQueue(config)
-        item = await queue.enqueue(method="GET", path="/api/test")
-        item.next_retry_at = 0.0
-
-        async def mock_fn(method, path, params, data):
-            return {"result": "ok"}
-
-        results = await queue.process(mock_fn)
-        assert len(results) == 1
-        assert results[0]["success"] is True
-        assert results[0]["data"] == {"result": "ok"}
-
-    @pytest.mark.asyncio
-    async def test_process_failure(self):
-        config = RetryQueueConfig(dedup_window=0, max_retries=1)
-        queue = RetryRequestQueue(config)
-        item = await queue.enqueue(method="GET", path="/api/test", max_retries=1)
-        item.next_retry_at = 0.0
-
-        async def mock_fn(method, path, params, data):
-            raise RuntimeError("connection failed")
-
-        results = await queue.process(mock_fn)
-        assert len(results) == 1
-        assert results[0]["success"] is False
-
-    def test_peek(self):
-        config = RetryQueueConfig(dedup_window=0)
-        queue = RetryRequestQueue(config)
-        queue._queue.append(RetryQueueItem(request_id="peek-1"))
-        queue._queue.append(RetryQueueItem(request_id="peek-2"))
-        items = queue.peek()
-        assert len(items) == 2
-
-    def test_get_stats(self):
-        queue = RetryRequestQueue()
-        stats = queue.get_stats()
-        assert "stats" in stats
-        assert "queue_size" in stats
-        assert "config" in stats
-
-    def test_reset(self):
-        import time
-
-        config = RetryQueueConfig(dedup_window=30.0)
-        queue = RetryRequestQueue(config)
-        queue._queue.append(RetryQueueItem())
-        queue._in_flight["test"] = RetryQueueItem()
-        queue._dedup_hashes["hash"] = time.time()
-        queue.stats.total_enqueued = 10
-        queue.reset()
-        assert queue.pending_count == 0
-        assert queue.stats.total_enqueued == 0
-
-
-class TestRetryRequestQueueConcurrency:
-    """Thread-safety tests for RetryRequestQueue."""
-
-    def test_concurrent_enqueue(self):
-        config = RetryQueueConfig(dedup_window=0, max_queue_size=1000)
-        queue = RetryRequestQueue(config)
-        errors = []
-
-        async def enqueue_batch():
-            try:
-                for i in range(50):
-                    await queue.enqueue(method="GET", path=f"/api/{i}")
-            except Exception as e:
-                errors.append(e)
-
-        async def run():
-            tasks = [enqueue_batch() for _ in range(4)]
-            await asyncio.gather(*tasks)
-
-        asyncio.run(run())
-        assert errors == []
-        assert queue.pending_count == 200
-
-    def test_concurrent_enqueue_dedup(self):
-        config = RetryQueueConfig(dedup_window=30.0, max_queue_size=1000)
-        queue = RetryRequestQueue(config)
-
-        async def enqueue_same():
-            for _ in range(10):
-                await queue.enqueue(method="GET", path="/api/same", params={"id": "1"})
-
-        async def run():
-            await asyncio.gather(enqueue_same(), enqueue_same())
-
-        asyncio.run(run())
-        assert queue.pending_count == 1
-        assert queue.stats.total_deduplicated == 19
-
-
-class TestDedupStats:
-    """Tests for DedupStats dataclass."""
-
-    def test_default_values(self):
-        stats = DedupStats()
-        assert stats.total_requests == 0
-        assert stats.total_deduplicated == 0
-        assert stats.dedup_window_seconds == 0.0
-
-    def test_dedup_rate_no_requests(self):
-        stats = DedupStats()
-        assert stats.dedup_rate == 0.0
-
-    def test_dedup_rate_with_requests(self):
-        stats = DedupStats(total_requests=10, total_deduplicated=3)
-        assert stats.dedup_rate == pytest.approx(0.3)
-
-    def test_to_dict(self):
-        stats = DedupStats(
-            total_requests=100, total_deduplicated=25, total_unique=75, dedup_window_seconds=30.0, active_hashes=10
-        )
-        d = stats.to_dict()
-        assert d["total_requests"] == 100
-        assert d["dedup_rate"] == pytest.approx(0.25)
-
-
-class TestRequestDeduplicator:
-    """Tests for RequestDeduplicator."""
-
-    def test_init_default(self):
-        dedup = RequestDeduplicator()
-        assert dedup.window_seconds == 30.0
-
-    def test_init_custom_window(self):
-        dedup = RequestDeduplicator(window_seconds=60.0)
-        assert dedup.window_seconds == 60.0
-
-    def test_window_setter(self):
-        dedup = RequestDeduplicator(window_seconds=10.0)
-        dedup.window_seconds = 45.0
-        assert dedup.window_seconds == 45.0
-
-    def test_compute_key_deterministic(self):
-        dedup = RequestDeduplicator()
-        key1 = dedup.compute_key("GET", "/api/test", {"id": "1"})
-        key2 = dedup.compute_key("GET", "/api/test", {"id": "1"})
-        assert key1 == key2
-
-    def test_compute_key_different_params(self):
-        dedup = RequestDeduplicator()
-        key1 = dedup.compute_key("GET", "/api/test", {"id": "1"})
-        key2 = dedup.compute_key("GET", "/api/test", {"id": "2"})
-        assert key1 != key2
-
-    def test_compute_key_different_methods(self):
-        dedup = RequestDeduplicator()
-        key1 = dedup.compute_key("GET", "/api/test")
-        key2 = dedup.compute_key("POST", "/api/test")
-        assert key1 != key2
-
-    def test_is_duplicate_first_call(self):
-        dedup = RequestDeduplicator()
-        key = dedup.compute_key("GET", "/api/test")
-        assert dedup.is_duplicate(key) is False
-
-    def test_is_duplicate_within_window(self):
-        dedup = RequestDeduplicator(window_seconds=30.0)
-        key = dedup.compute_key("GET", "/api/test")
-        dedup.record(key)
-        assert dedup.is_duplicate(key) is True
-
-    def test_is_duplicate_outside_window(self):
-        import time
-
-        dedup = RequestDeduplicator(window_seconds=0.01)
-        key = dedup.compute_key("GET", "/api/test")
-        dedup.record(key)
-        time.sleep(0.02)
-        assert dedup.is_duplicate(key) is False
-
-    def test_check_and_record_unique(self):
-        dedup = RequestDeduplicator(window_seconds=30.0)
-        result = dedup.check_and_record("GET", "/api/test", params={"id": "1"})
-        assert result is False
-
-    def test_check_and_record_duplicate(self):
-        dedup = RequestDeduplicator(window_seconds=30.0)
-        dedup.check_and_record("GET", "/api/test", params={"id": "1"})
-        result = dedup.check_and_record("GET", "/api/test", params={"id": "1"})
-        assert result is True
-
-    def test_cleanup(self):
-        import time
-
-        dedup = RequestDeduplicator(window_seconds=0.01)
-        dedup.record(dedup.compute_key("GET", "/a"))
-        dedup.record(dedup.compute_key("GET", "/b"))
-        time.sleep(0.02)
-        removed = dedup.cleanup()
-        assert removed == 2
-
-    def test_invalidate_all(self):
-        dedup = RequestDeduplicator()
-        dedup.record(dedup.compute_key("GET", "/a"))
-        dedup.record(dedup.compute_key("GET", "/b"))
-        assert dedup.get_stats()["active_hashes"] == 2
-        dedup.invalidate()
-        assert dedup.get_stats()["active_hashes"] == 0
-
-    def test_get_stats(self):
-        dedup = RequestDeduplicator(window_seconds=15.0)
-        stats = dedup.get_stats()
-        assert stats["dedup_window_seconds"] == 15.0
-
-    def test_reset_stats(self):
-        dedup = RequestDeduplicator()
-        dedup.check_and_record("GET", "/api/test")
-        assert dedup.get_stats()["total_requests"] == 1
-        dedup.reset_stats()
-        assert dedup.get_stats()["total_requests"] == 0
-
-    def test_compute_key_none_params_same_as_empty(self):
-        dedup = RequestDeduplicator()
-        key1 = dedup.compute_key("GET", "/api/test", params=None)
-        key2 = dedup.compute_key("GET", "/api/test", params={})
-        assert key1 == key2
-
-
-class TestRequestDeduplicatorConcurrency:
-    """Thread-safety tests for RequestDeduplicator."""
-
-    def test_concurrent_check_and_record(self):
+# ── PriorityQueue Tests ────────────────────────────────────
+
+
+class TestPriorityQueue:
+    """Tests for PriorityQueue."""
+
+    def test_enqueue_dequeue_order(self):
+        pq = PriorityQueue()
+        low = PrioritizedRequest(priority=RequestPriority.LOW, path="/low")
+        high = PrioritizedRequest(priority=RequestPriority.HIGH, path="/high")
+        normal = PrioritizedRequest(priority=RequestPriority.NORMAL, path="/normal")
+        critical = PrioritizedRequest(priority=RequestPriority.CRITICAL, path="/critical")
+
+        pq.enqueue(low)
+        pq.enqueue(high)
+        pq.enqueue(normal)
+        pq.enqueue(critical)
+
+        assert pq.dequeue().path == "/critical"
+        assert pq.dequeue().path == "/high"
+        assert pq.dequeue().path == "/normal"
+        assert pq.dequeue().path == "/low"
+
+    def test_fifo_within_same_priority(self):
+        pq = PriorityQueue()
+        r1 = PrioritizedRequest(priority=RequestPriority.NORMAL, path="/first", created_at=1.0)
+        r2 = PrioritizedRequest(priority=RequestPriority.NORMAL, path="/second", created_at=2.0)
+        r3 = PrioritizedRequest(priority=RequestPriority.NORMAL, path="/third", created_at=3.0)
+
+        pq.enqueue(r1)
+        pq.enqueue(r2)
+        pq.enqueue(r3)
+
+        assert pq.dequeue().path == "/first"
+        assert pq.dequeue().path == "/second"
+        assert pq.dequeue().path == "/third"
+
+    def test_empty_queue_returns_none(self):
+        pq = PriorityQueue()
+        assert pq.dequeue() is None
+
+    def test_peek_does_not_remove(self):
+        pq = PriorityQueue()
+        req = PrioritizedRequest(priority=RequestPriority.HIGH, path="/test")
+        pq.enqueue(req)
+        peeked = pq.peek()
+        assert peeked is not None
+        assert peeked.path == "/test"
+        assert pq.size == 1
+        pq.dequeue()
+
+    def test_peek_empty_returns_none(self):
+        pq = PriorityQueue()
+        assert pq.peek() is None
+
+    def test_size(self):
+        pq = PriorityQueue()
+        assert pq.size == 0
+        pq.enqueue(PrioritizedRequest(path="/a"))
+        assert pq.size == 1
+        pq.enqueue(PrioritizedRequest(path="/b"))
+        assert pq.size == 2
+        pq.dequeue()
+        assert pq.size == 1
+
+    def test_is_empty(self):
+        pq = PriorityQueue()
+        assert pq.is_empty is True
+        pq.enqueue(PrioritizedRequest(path="/a"))
+        assert pq.is_empty is False
+        pq.dequeue()
+        assert pq.is_empty is True
+
+    def test_max_size_enforced(self):
+        pq = PriorityQueue(max_size=2)
+        pq.enqueue(PrioritizedRequest(path="/a"))
+        pq.enqueue(PrioritizedRequest(path="/b"))
+        with pytest.raises(RuntimeError, match="full"):
+            pq.enqueue(PrioritizedRequest(path="/c"))
+
+    def test_clear(self):
+        pq = PriorityQueue()
+        pq.enqueue(PrioritizedRequest(path="/a"))
+        pq.enqueue(PrioritizedRequest(path="/b"))
+        pq.clear()
+        assert pq.size == 0
+        assert pq.is_empty is True
+        assert pq.dequeue() is None
+
+    def test_get_priority_distribution(self):
+        pq = PriorityQueue()
+        pq.enqueue(PrioritizedRequest(priority=RequestPriority.HIGH, path="/h"))
+        pq.enqueue(PrioritizedRequest(priority=RequestPriority.HIGH, path="/h2"))
+        pq.enqueue(PrioritizedRequest(priority=RequestPriority.LOW, path="/l"))
+        pq.enqueue(PrioritizedRequest(priority=RequestPriority.NORMAL, path="/n"))
+        dist = pq.get_priority_distribution()
+        assert dist["high"] == 2
+        assert dist["low"] == 1
+        assert dist["normal"] == 1
+        assert "critical" not in dist
+
+
+class TestPriorityQueueConcurrency:
+    """Thread-safety tests for PriorityQueue."""
+
+    def test_concurrent_enqueue_dequeue(self):
         import threading
 
-        dedup = RequestDeduplicator(window_seconds=30.0)
-        results = []
+        pq = PriorityQueue()
+        dequeued = []
         errors = []
 
-        def check_batch(batch_id):
+        def producer():
             try:
                 for i in range(100):
-                    is_dup = dedup.check_and_record("GET", f"/api/batch{batch_id}/{i}")
-                    results.append(is_dup)
+                    pq.enqueue(PrioritizedRequest(priority=RequestPriority.NORMAL, path=f"/{i}"))
             except Exception as e:
                 errors.append(e)
 
-        threads = [threading.Thread(target=check_batch, args=(idx,)) for idx in range(4)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert errors == []
-        assert all(r is False for r in results)
-        assert dedup.get_stats()["total_unique"] == 400
-
-    def test_concurrent_same_request_dedup(self):
-        import threading
-
-        dedup = RequestDeduplicator(window_seconds=30.0)
-        dup_count = []
-        errors = []
-
-        def check_same():
+        def consumer():
             try:
                 for _ in range(100):
-                    is_dup = dedup.check_and_record("GET", "/api/same", params={"id": "1"})
-                    if is_dup:
-                        dup_count.append(1)
+                    req = pq.dequeue()
+                    if req is not None:
+                        dequeued.append(req)
             except Exception as e:
                 errors.append(e)
 
-        threads = [threading.Thread(target=check_same) for _ in range(4)]
+        t1 = threading.Thread(target=producer)
+        t2 = threading.Thread(target=consumer)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        assert errors == []
+
+    def test_concurrent_multiple_priorities(self):
+        import threading
+
+        pq = PriorityQueue()
+
+        def enqueue_batch(priority, count):
+            for i in range(count):
+                pq.enqueue(PrioritizedRequest(priority=priority, path=f"/{priority.value}_{i}"))
+
+        threads = [
+            threading.Thread(target=enqueue_batch, args=(RequestPriority.CRITICAL, 50)),
+            threading.Thread(target=enqueue_batch, args=(RequestPriority.HIGH, 50)),
+            threading.Thread(target=enqueue_batch, args=(RequestPriority.NORMAL, 50)),
+            threading.Thread(target=enqueue_batch, args=(RequestPriority.LOW, 50)),
+        ]
         for t in threads:
             t.start()
         for t in threads:
             t.join()
 
-        assert errors == []
-        assert len(dup_count) > 0
+        assert pq.size == 200
+        results = []
+        while not pq.is_empty:
+            results.append(pq.dequeue())
+
+        critical = [r for r in results if r.priority == RequestPriority.CRITICAL]
+        high = [r for r in results if r.priority == RequestPriority.HIGH]
+        normal = [r for r in results if r.priority == RequestPriority.NORMAL]
+        low = [r for r in results if r.priority == RequestPriority.LOW]
+        assert len(critical) == 50
+        assert len(high) == 50
+        assert len(normal) == 50
+        assert len(low) == 50
+
+
+# ── PriorityStats Tests ────────────────────────────────────
+
+
+class TestPriorityStats:
+    """Tests for PriorityStats dataclass."""
+
+    def test_default_values(self):
+        stats = PriorityStats()
+        assert stats.total_dispatched == 0
+        assert stats.by_priority == {}
+        assert stats.total_delayed == 0
+        assert stats.total_reordered == 0
+
+    def test_record_dispatch(self):
+        stats = PriorityStats()
+        stats.record_dispatch("high", queue_time_ms=50.0)
+        assert stats.total_dispatched == 1
+        assert stats.by_priority["high"] == 1
+        assert stats.total_delayed == 1
+        assert stats.max_queue_time_ms == 50.0
+
+    def test_record_dispatch_zero_queue_time(self):
+        stats = PriorityStats()
+        stats.record_dispatch("normal", queue_time_ms=0.0)
+        assert stats.total_dispatched == 1
+        assert stats.total_delayed == 0
+
+    def test_record_dispatch_reordered(self):
+        stats = PriorityStats()
+        stats.record_dispatch("critical", queue_time_ms=10.0, reordered=True)
+        assert stats.total_reordered == 1
+
+    def test_avg_queue_time_ms(self):
+        stats = PriorityStats()
+        assert stats.avg_queue_time_ms == 0.0
+        stats.record_dispatch("high", queue_time_ms=100.0)
+        stats.record_dispatch("high", queue_time_ms=200.0)
+        assert stats.avg_queue_time_ms == pytest.approx(150.0)
+
+    def test_max_queue_time_ms(self):
+        stats = PriorityStats()
+        stats.record_dispatch("high", queue_time_ms=50.0)
+        stats.record_dispatch("high", queue_time_ms=200.0)
+        stats.record_dispatch("high", queue_time_ms=100.0)
+        assert stats.max_queue_time_ms == 200.0
+
+    def test_get_summary(self):
+        stats = PriorityStats()
+        stats.record_dispatch("high", queue_time_ms=50.0)
+        stats.record_dispatch("low", queue_time_ms=100.0, reordered=True)
+        summary = stats.get_summary()
+        assert summary["total_dispatched"] == 2
+        assert summary["by_priority"]["high"] == 1
+        assert summary["by_priority"]["low"] == 1
+        assert summary["total_delayed"] == 2
+        assert summary["total_reordered"] == 1
+
+    def test_reset(self):
+        stats = PriorityStats()
+        stats.record_dispatch("high", queue_time_ms=50.0, reordered=True)
+        stats.reset()
+        assert stats.total_dispatched == 0
+        assert stats.by_priority == {}
+        assert stats.total_delayed == 0
+        assert stats.total_reordered == 0
+
+    def test_multiple_priorities_tracked(self):
+        stats = PriorityStats()
+        stats.record_dispatch("critical", 10.0)
+        stats.record_dispatch("high", 20.0)
+        stats.record_dispatch("normal", 30.0)
+        stats.record_dispatch("low", 40.0)
+        assert stats.by_priority["critical"] == 1
+        assert stats.by_priority["high"] == 1
+        assert stats.by_priority["normal"] == 1
+        assert stats.by_priority["low"] == 1
+
+
+# ── PriorityScheduler Tests ────────────────────────────────
+
+
+class TestPriorityScheduler:
+    """Tests for PriorityScheduler."""
+
+    def test_init(self):
+        scheduler = PriorityScheduler()
+        assert scheduler.queue_size == 0
+        assert scheduler.queue_empty is True
+
+    def test_init_with_rate_limiter(self):
+        limiter = ConfigurableRateLimiter()
+        scheduler = PriorityScheduler(rate_limiter=limiter)
+        assert scheduler._rate_limiter is limiter
+
+    def test_enqueue_dequeue(self):
+        scheduler = PriorityScheduler()
+        req = PrioritizedRequest(priority=RequestPriority.HIGH, path="/test")
+        scheduler.enqueue(req)
+        assert scheduler.queue_size == 1
+        dequeued = scheduler.dequeue()
+        assert dequeued is not None
+        assert dequeued.path == "/test"
+
+    @pytest.mark.asyncio
+    async def test_schedule_and_execute(self):
+        scheduler = PriorityScheduler()
+        req = PrioritizedRequest(
+            priority=RequestPriority.HIGH,
+            method="GET",
+            path="/api/orders",
+            params={"page": 1},
+        )
+
+        async def mock_execute(r):
+            return {"result": "ok", "path": r.path}
+
+        result = await scheduler.schedule_and_execute(req, mock_execute)
+        assert result["result"] == "ok"
+        assert result["path"] == "/api/orders"
+        assert scheduler.stats.total_dispatched == 1
+
+    @pytest.mark.asyncio
+    async def test_schedule_with_rate_limiter(self):
+        limiter = ConfigurableRateLimiter(RateLimitConfig(enabled=False))
+        scheduler = PriorityScheduler(rate_limiter=limiter)
+        req = PrioritizedRequest(
+            priority=RequestPriority.NORMAL,
+            method="GET",
+            path="/api/test",
+            platform="TEST",
+        )
+
+        async def mock_execute(r):
+            return {"ok": True}
+
+        result = await scheduler.schedule_and_execute(req, mock_execute)
+        assert result["ok"] is True
+
+    def test_get_queue_distribution(self):
+        scheduler = PriorityScheduler()
+        scheduler.enqueue(PrioritizedRequest(priority=RequestPriority.HIGH, path="/h"))
+        scheduler.enqueue(PrioritizedRequest(priority=RequestPriority.LOW, path="/l"))
+        scheduler.enqueue(PrioritizedRequest(priority=RequestPriority.HIGH, path="/h2"))
+        dist = scheduler.get_queue_distribution()
+        assert dist["high"] == 2
+        assert dist["low"] == 1
+
+    def test_get_stats_summary(self):
+        scheduler = PriorityScheduler()
+        summary = scheduler.get_stats_summary()
+        assert "queue_size" in summary
+        assert "queue_distribution" in summary
+        assert "stats" in summary
+
+    def test_reset_stats(self):
+        scheduler = PriorityScheduler()
+        scheduler.stats.record_dispatch("high", 100.0)
+        scheduler.reset_stats()
+        assert scheduler.stats.total_dispatched == 0
+
+    def test_clear_queue(self):
+        scheduler = PriorityScheduler()
+        scheduler.enqueue(PrioritizedRequest(path="/a"))
+        scheduler.enqueue(PrioritizedRequest(path="/b"))
+        scheduler.clear_queue()
+        assert scheduler.queue_size == 0
+
+
+# ── Dynamic Rate Limiting Tests ────────────────────────────
+
+
+class TestDynamicRateLimiting:
+    """Tests for ConfigurableRateLimiter dynamic adjustment methods."""
+
+    def test_set_platform_rps_existing(self):
+        config = RateLimitConfig(
+            platforms={"TEST": PlatformRateLimitConfig(platform="TEST", default_requests_per_second=10.0)},
+        )
+        limiter = ConfigurableRateLimiter(config)
+        limiter.set_platform_rps("TEST", 25.0)
+        assert limiter.config.platforms["TEST"].default_requests_per_second == 25.0
+
+    def test_set_platform_rps_creates_platform(self):
+        limiter = ConfigurableRateLimiter()
+        limiter.set_platform_rps("NEW", 5.0)
+        assert "NEW" in limiter.config.platforms
+        assert limiter.config.platforms["NEW"].default_requests_per_second == 5.0
+
+    def test_set_endpoint_rps(self):
+        config = RateLimitConfig(
+            platforms={"TEST": PlatformRateLimitConfig(platform="TEST", default_requests_per_second=10.0)},
+        )
+        limiter = ConfigurableRateLimiter(config)
+        limiter.set_endpoint_rps("TEST", "/api/slow", 1.0)
+        assert limiter.config.platforms["TEST"].endpoints["/api/slow"].requests_per_second == 1.0
+
+    def test_enable_platform(self):
+        config = RateLimitConfig(
+            platforms={"TEST": PlatformRateLimitConfig(platform="TEST", enabled=False)},
+        )
+        limiter = ConfigurableRateLimiter(config)
+        limiter.enable_platform("TEST")
+        assert limiter.config.platforms["TEST"].enabled is True
+
+    def test_disable_platform(self):
+        config = RateLimitConfig(
+            platforms={"TEST": PlatformRateLimitConfig(platform="TEST", enabled=True)},
+        )
+        limiter = ConfigurableRateLimiter(config)
+        limiter.disable_platform("TEST")
+        assert limiter.config.platforms["TEST"].enabled is False
+
+    def test_enable_disable_nonexistent_platform(self):
+        limiter = ConfigurableRateLimiter()
+        limiter.enable_platform("UNKNOWN")
+        limiter.disable_platform("UNKNOWN")
+
+    def test_auto_adjust_scale_down(self):
+        config = RateLimitConfig(
+            platforms={
+                "TEST": PlatformRateLimitConfig(
+                    platform="TEST",
+                    default_requests_per_second=10.0,
+                    endpoints={"/api/slow": EndpointRateLimit(endpoint="/api/slow", requests_per_second=10.0)},
+                ),
+            },
+        )
+        limiter = ConfigurableRateLimiter(config)
+        for _ in range(8):
+            limiter.stats.record_request("TEST", "/api/slow")
+        for _ in range(5):
+            limiter.stats.record_throttle("TEST", "/api/slow", 100.0)
+
+        adjustments = limiter.auto_adjust_from_stats(throttle_threshold=0.3)
+        assert "TEST:/api/slow" in adjustments["endpoints"]
+        adj = adjustments["endpoints"]["TEST:/api/slow"]
+        assert adj["action"] == "scale_down"
+        assert adj["new_rps"] < 10.0
+
+    def test_auto_adjust_scale_up(self):
+        config = RateLimitConfig(
+            platforms={
+                "TEST": PlatformRateLimitConfig(
+                    platform="TEST",
+                    default_requests_per_second=10.0,
+                    endpoints={"/api/fast": EndpointRateLimit(endpoint="/api/fast", requests_per_second=10.0)},
+                ),
+            },
+        )
+        limiter = ConfigurableRateLimiter(config)
+        for _ in range(30):
+            limiter.stats.record_request("TEST", "/api/fast")
+
+        adjustments = limiter.auto_adjust_from_stats(throttle_threshold=0.3)
+        if "TEST:/api/fast" in adjustments["endpoints"]:
+            adj = adjustments["endpoints"]["TEST:/api/fast"]
+            assert adj["action"] == "scale_up"
+            assert adj["new_rps"] > 10.0
+
+    def test_auto_adjust_insufficient_data(self):
+        limiter = ConfigurableRateLimiter()
+        for _ in range(3):
+            limiter.stats.record_request("TEST", "/api/test")
+        adjustments = limiter.auto_adjust_from_stats()
+        assert adjustments["endpoints"] == {}
+
+
+# ── CommerceMCPBase Priority Integration Tests ─────────────
+
+
+class TestCommerceMCPBasePriority:
+    """Tests for CommerceMCPBase priority and rate limit integration."""
+
+    def test_has_priority_scheduler(self):
+        client = CommerceMCPBase()
+        assert isinstance(client._priority_scheduler, PriorityScheduler)
+
+    def test_has_configurable_limiter(self):
+        client = CommerceMCPBase()
+        assert isinstance(client._configurable_limiter, ConfigurableRateLimiter)
+
+    def test_priority_scheduler_property(self):
+        client = CommerceMCPBase()
+        assert client.priority_scheduler is client._priority_scheduler
+
+    def test_configurable_limiter_property(self):
+        client = CommerceMCPBase()
+        assert client.configurable_limiter is client._configurable_limiter
+
+    def test_custom_rate_limit_config(self):
+        config = RateLimitConfig(default_requests_per_second=5.0)
+        client = CommerceMCPBase(rate_limit_config=config)
+        assert client._configurable_limiter.config.default_requests_per_second == 5.0
+
+    def test_get_priority_stats(self):
+        client = CommerceMCPBase()
+        stats = client.get_priority_stats()
+        assert "queue_size" in stats
+        assert "queue_distribution" in stats
+        assert "stats" in stats
+
+    def test_get_rate_limit_stats(self):
+        client = CommerceMCPBase()
+        stats = client.get_rate_limit_stats()
+        assert "config" in stats
+        assert "stats" in stats
+
+    def test_auto_adjust_rate_limits(self):
+        client = CommerceMCPBase()
+        result = client.auto_adjust_rate_limits()
+        assert "platforms" in result
+        assert "endpoints" in result
+
+    @pytest.mark.asyncio
+    async def test_prioritized_request_basic(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": {"id": 1}}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client.prioritized_request("GET", "/api/test", priority=RequestPriority.HIGH)
+        assert result == {"result": {"id": 1}}
+
+    @pytest.mark.asyncio
+    async def test_prioritized_request_with_params(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": "ok"}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client.prioritized_request(
+                "GET",
+                "/api/orders",
+                priority=RequestPriority.CRITICAL,
+                params={"order_id": "12345"},
+            )
+        assert result == {"result": "ok"}
+
+    @pytest.mark.asyncio
+    async def test_prioritized_request_tracks_stats(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": "ok"}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            await client.prioritized_request("GET", "/api/test", priority=RequestPriority.HIGH)
+        stats = client.get_priority_stats()
+        assert stats["stats"]["total_dispatched"] == 1
+        assert stats["stats"]["by_priority"]["high"] == 1

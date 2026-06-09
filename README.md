@@ -22,9 +22,11 @@
 - [Why This Project](#why-this-project)
 - [Supported Platforms](#platforms)
 - [Quick Start](#quick-start)
+  - [Docker](#docker-recommended--no-local-python-setup)
 - [Architecture](#architecture)
 - [Tools Reference](#tools-per-server)
 - [Security](#security)
+- [Docker](docs/docker.md) - Docker 部署与配置
 - [Examples](docs/examples.md) - 使用示例和场景
 - [FAQ](README_zh.md#常见问题)
 - [Contributing](CONTRIBUTING.md)
@@ -76,6 +78,21 @@ This is the **first open-source MCP server suite for Chinese e-commerce business
 > **358 tests** across all 8 servers. CI runs on Python 3.11, 3.12, 3.13.
 
 ## Quick Start
+
+### Docker (recommended — no local Python setup)
+
+```bash
+# Build the image
+docker build -t mcp-cn-commerce .
+
+# Run tests
+docker run --rm mcp-cn-commerce make test
+
+# Run a platform server (Ocean Engine example)
+docker run --rm -i --env-file .env mcp-cn-commerce mcp-cn-oceanengine
+```
+
+See [Docker documentation](docs/docker.md) for full usage, MCP client configuration, and Docker Compose shortcuts.
 
 ### Installation
 
@@ -167,6 +184,9 @@ mcp-cn-commerce/
 │   ├── pinduoduo/    13 tools        ├── kuaishou/   12 tools
 │   ├── xiaohongshu/  12 tools        └── weixin-store/ 11 tools
 ├── docs/platforms.md                 # 8-platform API comparison & auth matrix
+├── docs/docker.md                    # Docker deployment guide
+├── Dockerfile                        # Multi-platform MCP server image
+├── docker-compose.yml                # Local development shortcuts
 ├── README.md / README_zh.md          # English / 简体中文
 └── LICENSE                           # MIT
 ```

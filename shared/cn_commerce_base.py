@@ -30,384 +30,6 @@ from typing import Any
 
 import httpx
 
-# ── Connection Pool Monitoring ───────────────────────────
-
-
-@dataclass
-class PoolMetrics:
-    """Metrics snapshot for an HTTP connection pool.
-
-    Attributes:
-        total_connections: Total number of connections in the pool.
-        active_connections: Number of connections currently in use.
-        idle_connections: Number of idle connections waiting for reuse.
-        pool_utilization: Fraction of pool capacity in use (0.0 to 1.0).
-        max_connections: Configured maximum number of connections.
-        wait_queue_size: Number of requests waiting for a connection.
-        avg_wait_time_ms: Average time spent waiting for a connection.
-        total_requests: Total requests served through this pool.
-    """
-
-    total_connections: int = 0
-    active_connections: int = 0
-    idle_connections: int = 0
-    pool_utilization: float = 0.0
-    max_connections: int = 10
-    wait_queue_size: int = 0
-    avg_wait_time_ms: float = 0.0
-    total_requests: int = 0
-
-
-class ConnectionPoolMonitor:
-    """Monitor and track HTTP connection pool health.
-
-    Provides observability into connection pool usage patterns,
-    helping identify capacity issues and optimize pool sizing.
-
-    Usage:
-        monitor = ConnectionPoolMonitor(max_connections=10)
-        monitor.record_acquire(latency_ms=5.2)
-        metrics = monitor.get_metrics()
-    """
-
-    def __init__(self, max_connections: int = 10) -> None:
-        self._max_connections = max_connections
-        self._lock = threading.Lock()
-        self._active_count: int = 0
-        self._total_requests: int = 0
-        self._total_wait_ms: float = 0.0
-        self._acquire_count: int = 0
-        self._peak_active: int = 0
-
-    def record_acquire(self, latency_ms: float = 0.0) -> None:
-        """Record a connection acquisition.
-
-        Args:
-            latency_ms: Time spent waiting for a connection.
-        """
-        with self._lock:
-            self._active_count += 1
-            self._total_requests += 1
-            self._acquire_count += 1
-            self._total_wait_ms += latency_ms
-            self._peak_active = max(self._peak_active, self._active_count)
-
-    def record_release(self) -> None:
-        """Record a connection release back to the pool."""
-        with self._lock:
-            self._active_count = max(0, self._active_count - 1)
-
-    def get_metrics(self) -> PoolMetrics:
-        """Get current pool metrics snapshot."""
-        with self._lock:
-            utilization = self._active_count / self._max_connections if self._max_connections > 0 else 0.0
-            avg_wait = self._total_wait_ms / self._acquire_count if self._acquire_count > 0 else 0.0
-            return PoolMetrics(
-                total_connections=self._active_count,
-                active_connections=self._active_count,
-                idle_connections=max(0, self._max_connections - self._active_count),
-                pool_utilization=round(utilization, 4),
-                max_connections=self._max_connections,
-                wait_queue_size=0,
-                avg_wait_time_ms=round(avg_wait, 2),
-                total_requests=self._total_requests,
-            )
-
-    def get_health_status(self) -> dict[str, Any]:
-        """Get pool health status with recommendations."""
-        metrics = self.get_metrics()
-        status = "healthy"
-        warning = None
-        if metrics.pool_utilization > 0.9:
-            status = "critical"
-            warning = "Connection pool near capacity (>90%). Consider increasing max_connections."
-        elif metrics.pool_utilization > 0.7:
-            status = "warning"
-            warning = "Connection pool utilization high (>70%). Monitor for saturation."
-        return {
-            "status": status,
-            "utilization": metrics.pool_utilization,
-            "peak_active": self._peak_active,
-            "total_requests": metrics.total_requests,
-            "avg_wait_time_ms": metrics.avg_wait_time_ms,
-            "warning": warning,
-        }
-
-    def reset(self) -> None:
-        """Reset all collected metrics."""
-        with self._lock:
-            self._active_count = 0
-            self._total_requests = 0
-            self._total_wait_ms = 0.0
-            self._acquire_count = 0
-            self._peak_active = 0
-
-
-# ── Distributed Tracing ──────────────────────────────────
-
-
-@dataclass
-class SpanEvent:
-    """An event within a span."""
-
-    name: str = ""
-    timestamp: float = 0.0
-    attributes: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class Span:
-    """A single unit of work in a distributed trace."""
-
-    trace_id: str = ""
-    span_id: str = ""
-    parent_id: str | None = None
-    name: str = ""
-    start_time: float = 0.0
-    end_time: float = 0.0
-    status: str = "unset"
-    attributes: dict[str, Any] = field(default_factory=dict)
-    events: list[SpanEvent] = field(default_factory=list)
-
-    def set_attribute(self, key: str, value: Any) -> None:
-        """Add or update a span attribute."""
-        self.attributes[key] = value
-
-    def add_event(self, name: str, attributes: dict[str, Any] | None = None) -> None:
-        """Add a timed event to this span."""
-        self.events.append(SpanEvent(name=name, timestamp=time.time(), attributes=attributes or {}))
-
-    def set_status(self, status: str) -> None:
-        """Set the span status."""
-        self.status = status
-
-    def finish(self) -> None:
-        """Mark the span as finished."""
-        if self.end_time == 0.0:
-            self.end_time = time.time()
-
-    @property
-    def duration_ms(self) -> float:
-        """Duration of the span in milliseconds."""
-        if self.end_time == 0.0:
-            return (time.time() - self.start_time) * 1000
-        return (self.end_time - self.start_time) * 1000
-
-    @property
-    def is_active(self) -> bool:
-        """Whether this span is still active."""
-        return self.end_time == 0.0
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert span to a dictionary."""
-        return {
-            "trace_id": self.trace_id,
-            "span_id": self.span_id,
-            "parent_id": self.parent_id,
-            "name": self.name,
-            "start_time": self.start_time,
-            "end_time": self.end_time,
-            "duration_ms": round(self.duration_ms, 2),
-            "status": self.status,
-            "attributes": self.attributes,
-            "events": [{"name": e.name, "timestamp": e.timestamp, "attributes": e.attributes} for e in self.events],
-        }
-
-
-@dataclass
-class TraceContext:
-    """Context for propagating trace information across service boundaries."""
-
-    trace_id: str = ""
-    span_id: str = ""
-    parent_span_id: str | None = None
-    baggage: dict[str, str] = field(default_factory=dict)
-
-    def to_headers(self) -> dict[str, str]:
-        """Convert trace context to HTTP headers."""
-        headers: dict[str, str] = {"X-Trace-Id": self.trace_id, "X-Span-Id": self.span_id}
-        if self.parent_span_id:
-            headers["X-Parent-Span-Id"] = self.parent_span_id
-        if self.baggage:
-            headers["X-Trace-Baggage"] = ";".join(f"{k}={v}" for k, v in sorted(self.baggage.items()))
-        return headers
-
-    @classmethod
-    def from_headers(cls, headers: dict[str, str]) -> TraceContext:
-        """Extract trace context from HTTP headers."""
-        baggage: dict[str, str] = {}
-        baggage_str = headers.get("X-Trace-Baggage", "")
-        if baggage_str:
-            for pair in baggage_str.split(";"):
-                if "=" in pair:
-                    k, v = pair.split("=", 1)
-                    baggage[k.strip()] = v.strip()
-        return cls(
-            trace_id=headers.get("X-Trace-Id", ""),
-            span_id=headers.get("X-Span-Id", ""),
-            parent_span_id=headers.get("X-Parent-Span-Id"),
-            baggage=baggage,
-        )
-
-    @classmethod
-    def from_w3c(cls, traceparent: str, tracestate: str = "") -> TraceContext:
-        """Parse W3C Trace Context headers."""
-        parts = traceparent.split("-")
-        trace_id = parts[1] if len(parts) > 1 else ""
-        span_id = parts[2] if len(parts) > 2 else ""
-        baggage: dict[str, str] = {}
-        if tracestate:
-            for pair in tracestate.split(","):
-                if "=" in pair:
-                    k, v = pair.split("=", 1)
-                    baggage[k.strip()] = v.strip()
-        return cls(trace_id=trace_id, span_id=span_id, baggage=baggage)
-
-    def to_w3c(self) -> tuple[str, str]:
-        """Convert to W3C Trace Context header values."""
-        traceparent = f"00-{self.trace_id}-{self.span_id}-01"
-        tracestate = ",".join(f"{k}={v}" for k, v in sorted(self.baggage.items()))
-        return traceparent, tracestate
-
-
-class Tracer:
-    """Distributed tracer for tracking requests across services."""
-
-    def __init__(self, service_name: str = "") -> None:
-        self.service_name = service_name
-        self._lock = threading.Lock()
-        self._spans: list[Span] = []
-        self._active_spans: list[Span] = []
-        self._current_context: TraceContext | None = None
-
-    def _generate_id(self) -> str:
-        return uuid.uuid4().hex
-
-    def start_span(self, name: str, parent: Span | None = None, attributes: dict[str, Any] | None = None) -> Span:
-        """Start a new span."""
-        trace_id = parent.trace_id if parent else self._generate_id()
-        parent_id = parent.span_id if parent else None
-        span = Span(
-            trace_id=trace_id,
-            span_id=self._generate_id(),
-            parent_id=parent_id,
-            name=name,
-            start_time=time.time(),
-            attributes=attributes or {},
-        )
-        if self.service_name:
-            span.set_attribute("service.name", self.service_name)
-        with self._lock:
-            self._spans.append(span)
-            self._active_spans.append(span)
-        return span
-
-    def finish_span(self, span: Span) -> None:
-        """Finish a span."""
-        span.finish()
-        with self._lock:
-            if span in self._active_spans:
-                self._active_spans.remove(span)
-
-    def get_current_context(self) -> TraceContext | None:
-        """Get the current trace context."""
-        with self._lock:
-            if self._active_spans:
-                span = self._active_spans[-1]
-                return TraceContext(trace_id=span.trace_id, span_id=span.span_id, parent_span_id=span.parent_id)
-            return self._current_context
-
-    def set_current_context(self, context: TraceContext) -> None:
-        self._current_context = context
-
-    def inject_headers(self, headers: dict[str, str]) -> dict[str, str]:
-        """Inject trace context into HTTP headers."""
-        context = self.get_current_context()
-        if context:
-            headers.update(context.to_headers())
-        return headers
-
-    def extract_context(self, headers: dict[str, str]) -> TraceContext:
-        """Extract trace context from HTTP headers."""
-        context = TraceContext.from_headers(headers)
-        self.set_current_context(context)
-        return context
-
-    def get_all_spans(self) -> list[Span]:
-        with self._lock:
-            return list(self._spans)
-
-    def get_active_spans(self) -> list[Span]:
-        with self._lock:
-            return list(self._active_spans)
-
-    def get_trace_summary(self) -> dict[str, Any]:
-        with self._lock:
-            spans = self._spans
-            if not spans:
-                return {"trace_id": "", "span_count": 0, "duration_ms": 0.0, "status": "no_trace"}
-            root = spans[0]
-            has_error = any(s.status == "error" for s in spans)
-            return {
-                "trace_id": root.trace_id,
-                "span_count": len(spans),
-                "active_span_count": len(self._active_spans),
-                "total_duration_ms": round(sum(s.duration_ms for s in spans), 2),
-                "root_span": root.name,
-                "status": "error" if has_error else "ok",
-                "service_name": self.service_name,
-            }
-
-    def export_trace(self) -> dict[str, Any]:
-        with self._lock:
-            return {
-                "trace_id": self._spans[0].trace_id if self._spans else "",
-                "service_name": self.service_name,
-                "span_count": len(self._spans),
-                "spans": [s.to_dict() for s in self._spans],
-            }
-
-    def clear(self) -> None:
-        with self._lock:
-            self._spans.clear()
-            self._active_spans.clear()
-            self._current_context = None
-
-    def __enter__(self) -> Tracer:
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        for span in self.get_active_spans():
-            self.finish_span(span)
-
-
-class SpanScope:
-    """Context manager for automatic span lifecycle management."""
-
-    def __init__(
-        self, tracer: Tracer, name: str, parent: Span | None = None, attributes: dict[str, Any] | None = None
-    ) -> None:
-        self.tracer = tracer
-        self.name = name
-        self.parent = parent
-        self.attributes = attributes
-        self.span: Span | None = None
-
-    def __enter__(self) -> Span:
-        self.span = self.tracer.start_span(self.name, parent=self.parent, attributes=self.attributes)
-        return self.span
-
-    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any) -> None:
-        if self.span:
-            if exc_type:
-                self.span.set_status("error")
-                self.span.set_attribute("error.type", exc_type.__name__)
-                self.span.set_attribute("error.message", str(exc_val))
-            else:
-                self.span.set_status("ok")
-            self.tracer.finish_span(self.span)
-
-
 # ── Security: Sensitive Data Masking ─────────────────────
 
 # Patterns for sensitive fields that should be masked in logs
@@ -1448,7 +1070,6 @@ class HealthCheckResult:
     latency_ms: float = 0.0
     dependencies: dict[str, Any] = field(default_factory=dict)
     metrics: dict[str, Any] = field(default_factory=dict)
-    pool: dict[str, Any] = field(default_factory=dict)
     error: str = ""
     cached: bool = False
     timestamp: str = ""
@@ -1459,7 +1080,7 @@ class HealthCheckResult:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert result to a dictionary for JSON serialization."""
-        result = {
+        return {
             "status": self.status,
             "configured": self.configured,
             "has_token": self.has_token,
@@ -1467,12 +1088,10 @@ class HealthCheckResult:
             "latency_ms": round(self.latency_ms, 2),
             "dependencies": self.dependencies,
             "metrics": self.metrics,
-            "pool": self.pool,
             "error": self.error,
             "cached": self.cached,
             "timestamp": self.timestamp,
         }
-        return result
 
 
 class HealthCheckCache:
@@ -1589,17 +1208,21 @@ class CommerceMCPBase:
         self.metrics = MetricsCollector()
         self._reconnect_config = reconnect_config or ReconnectConfig()
         self._health_cache = HealthCheckCache(ttl_seconds=30.0)
-        self.pool_monitor = ConnectionPoolMonitor(max_connections=10)
-        self.tracer = Tracer(service_name=self.__class__.__name__)
 
     def _get_client(self) -> httpx.AsyncClient:
-        """Get or create an HTTP client with connection pooling."""
+        """Get or create an HTTP client with connection pooling.
+
+        If the client has been closed or is ``None``, a new one is created.
+        """
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 timeout=30,
-                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5, keepalive_expiry=30),
+                limits=httpx.Limits(
+                    max_connections=10,
+                    max_keepalive_connections=5,
+                    keepalive_expiry=30,
+                ),
             )
-            self.pool_monitor.record_acquire()
         return self._client
 
     async def _ensure_client(self) -> httpx.AsyncClient:
@@ -1740,12 +1363,6 @@ class CommerceMCPBase:
         last_exc: Exception | None = None
         max_attempts = (retry_config.max_retries + 1) if retry_config else 1
 
-        # Create tracing span for this request
-        span = self.tracer.start_span(
-            f"{method} {path}",
-            attributes={"http.method": method, "http.url": f"{self.BASE_URL}{path}"},
-        )
-
         for attempt in range(max_attempts):
             try:
                 # Rate limiting
@@ -1772,14 +1389,8 @@ class CommerceMCPBase:
                     error_code = result["error_response"].get("code", -1)
                     error_msg = result["error_response"].get("msg", "unknown")
                     logger.warning(f"API error: [{error_code}] {error_msg}")
-                    span.set_status("error")
-                    span.set_attribute("error.code", error_code)
-                    self.tracer.finish_span(span)
                     raise CommerceAPIError(code=error_code, msg=error_msg)
 
-                span.set_attribute("http.status_code", resp.status_code)
-                span.set_status("ok")
-                self.tracer.finish_span(span)
                 logger.debug(f"Response: {resp.status_code}")
                 return result
 
@@ -1787,20 +1398,13 @@ class CommerceMCPBase:
                 last_exc = exc
                 # If no retry config or not retryable, re-raise immediately
                 if not retry_config or not retry_config.should_retry_exception(exc):
-                    span.set_status("error")
-                    span.set_attribute("error.type", type(exc).__name__)
-                    self.tracer.finish_span(span)
                     raise
 
                 # If this was the last attempt, re-raise
                 if attempt == max_attempts - 1:
                     logger.error(f"Max retries ({retry_config.max_retries}) exhausted for {path}")
-                    span.set_status("error")
-                    span.set_attribute("error.type", type(exc).__name__)
-                    self.tracer.finish_span(span)
                     raise
 
-                span.add_event("retry", {"attempt": attempt + 1})
                 delay = retry_config.compute_delay(attempt)
                 logger.warning(
                     f"Retry {attempt + 1}/{retry_config.max_retries} for {path} " f"after {delay:.2f}s: {exc}"
@@ -1909,7 +1513,6 @@ class CommerceMCPBase:
             api_reachable=api_reachable,
             latency_ms=latency,
             metrics=self.metrics.get_summary(),
-            pool=self.pool_monitor.get_health_status(),
             error=error_msg,
         )
 
@@ -3123,14 +2726,6 @@ class ConfigValidator:
             value = os.environ.get(env_name, "")
             if value:
                 config[key] = value
-
-        # If specific keys were requested, create a temp validator with only those rules
-        if keys is not None:
-            temp = ConfigValidator(self.platform)
-            for key in keys:
-                if key in self._rules:
-                    temp._rules[key] = self._rules[key]
-            return temp.validate(config, prefix=f"{env_prefix}_")
 
         return self.validate(config, prefix=f"{env_prefix}_")
 

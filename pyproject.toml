@@ -167,12 +167,18 @@ disable = [
     "R0914",  # too-many-local-variables
     "R0917",  # too-many-positional-arguments
     "R0801",  # duplicate-code
+    "R1732",  # consider-using-with
+    "W0108",  # unnecessary-lambda
+    "W0404",  # reimported
     "W0511",  # fixme
+    "W0613",  # unused-argument
     "W0621",  # redefined-outer-name
     "W0622",  # redefined-builtin
     "W0707",  # raise-missing-from
     "W0718",  # broad-exception-caught
     "W1203",  # logging-fstring-interpolation
+    "W1510",  # subprocess-run-check
+    "W1514",  # unspecified-encoding
     "E0401",  # import-error (handled by mypy)
     "W0212",  # protected-access
     "R0904",  # too-many-public-methods

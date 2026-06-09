@@ -1147,11 +1147,11 @@ class TestEndToEndScenarios:
         assert result["data"] == "recovered"
         assert call_count == 2
 
-        # Record success in metrics
-        client.metrics.record_request("/api/data", latency_ms=50.0, success=True)
+        # _request now records metrics live: the failed first attempt plus the
+        # successful retry => 2 requests, 1 of them an error.
         summary = client.metrics.get_summary()
-        assert summary["global"]["total_requests"] == 1
-        assert summary["global"]["total_errors"] == 0
+        assert summary["global"]["total_requests"] == 2
+        assert summary["global"]["total_errors"] == 1
 
 
 # ====================================================================

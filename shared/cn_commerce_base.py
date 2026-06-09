@@ -291,6 +291,462 @@ class RateLimiter:
         self.last_request_time = time.time()
 
 
+# ── Rate Limiting Configuration ────────────────────────────
+
+
+@dataclass
+class EndpointRateLimit:
+    """Rate limit configuration for a specific API endpoint.
+
+    Attributes:
+        endpoint: The API endpoint path (e.g., "/api/order/search").
+        requests_per_second: Maximum requests per second for this endpoint.
+        burst_size: Maximum burst size (number of requests allowed in a burst).
+        cooldown_seconds: Seconds to wait after hitting the limit before resuming.
+    """
+
+    endpoint: str
+    requests_per_second: float = 10.0
+    burst_size: int = 1
+    cooldown_seconds: float = 0.0
+
+
+@dataclass
+class PlatformRateLimitConfig:
+    """Rate limit configuration for a specific platform.
+
+    Attributes:
+        platform: Platform name (e.g., "OCEANENGINE", "TAOBAO").
+        default_requests_per_second: Default rate limit for all endpoints on this platform.
+        endpoints: Per-endpoint rate limit overrides.
+        burst_size: Default burst size for the platform.
+        enabled: Whether rate limiting is enabled for this platform.
+    """
+
+    platform: str
+    default_requests_per_second: float = 10.0
+    endpoints: dict[str, EndpointRateLimit] = field(default_factory=dict)
+    burst_size: int = 1
+    enabled: bool = True
+
+    def get_endpoint_limit(self, endpoint: str) -> EndpointRateLimit:
+        """Get the rate limit for a specific endpoint.
+
+        Falls back to the platform default if no endpoint-specific config exists.
+
+        Args:
+            endpoint: The API endpoint path.
+
+        Returns:
+            EndpointRateLimit for the given endpoint.
+        """
+        if endpoint in self.endpoints:
+            return self.endpoints[endpoint]
+        return EndpointRateLimit(
+            endpoint=endpoint,
+            requests_per_second=self.default_requests_per_second,
+            burst_size=self.burst_size,
+        )
+
+
+@dataclass
+class RateLimitStats:
+    """Statistics and monitoring data for rate limiting.
+
+    Attributes:
+        total_requests: Total number of requests processed.
+        total_throttled: Number of requests that were throttled (had to wait).
+        total_wait_time_ms: Cumulative time spent waiting for rate limits.
+        platform_stats: Per-platform statistics.
+        endpoint_stats: Per-endpoint statistics.
+        last_throttled_at: Timestamp of the last throttling event.
+    """
+
+    total_requests: int = 0
+    total_throttled: int = 0
+    total_wait_time_ms: float = 0.0
+    platform_stats: dict[str, dict[str, Any]] = field(default_factory=dict)
+    endpoint_stats: dict[str, dict[str, Any]] = field(default_factory=dict)
+    last_throttled_at: float = 0.0
+
+    @property
+    def throttle_rate(self) -> float:
+        """Fraction of requests that were throttled (0.0 to 1.0)."""
+        if self.total_requests == 0:
+            return 0.0
+        return self.total_throttled / self.total_requests
+
+    @property
+    def avg_wait_time_ms(self) -> float:
+        """Average wait time per throttled request in milliseconds."""
+        if self.total_throttled == 0:
+            return 0.0
+        return self.total_wait_time_ms / self.total_throttled
+
+    def record_throttle(self, platform: str, endpoint: str, wait_ms: float) -> None:
+        """Record a throttling event.
+
+        Args:
+            platform: Platform name.
+            endpoint: Endpoint path.
+            wait_ms: Time waited in milliseconds.
+        """
+        self.total_requests += 1
+        self.total_throttled += 1
+        self.total_wait_time_ms += wait_ms
+        self.last_throttled_at = time.time()
+
+        # Platform stats
+        if platform not in self.platform_stats:
+            self.platform_stats[platform] = {"requests": 0, "throttled": 0, "wait_ms": 0.0}
+        self.platform_stats[platform]["requests"] += 1
+        self.platform_stats[platform]["throttled"] += 1
+        self.platform_stats[platform]["wait_ms"] += wait_ms
+
+        # Endpoint stats
+        key = f"{platform}:{endpoint}"
+        if key not in self.endpoint_stats:
+            self.endpoint_stats[key] = {"requests": 0, "throttled": 0, "wait_ms": 0.0}
+        self.endpoint_stats[key]["requests"] += 1
+        self.endpoint_stats[key]["throttled"] += 1
+        self.endpoint_stats[key]["wait_ms"] += wait_ms
+
+    def record_request(self, platform: str, endpoint: str) -> None:
+        """Record a non-throttled request.
+
+        Args:
+            platform: Platform name.
+            endpoint: Endpoint path.
+        """
+        self.total_requests += 1
+
+        if platform not in self.platform_stats:
+            self.platform_stats[platform] = {"requests": 0, "throttled": 0, "wait_ms": 0.0}
+        self.platform_stats[platform]["requests"] += 1
+
+        key = f"{platform}:{endpoint}"
+        if key not in self.endpoint_stats:
+            self.endpoint_stats[key] = {"requests": 0, "throttled": 0, "wait_ms": 0.0}
+        self.endpoint_stats[key]["requests"] += 1
+
+    def get_summary(self) -> dict[str, Any]:
+        """Get a JSON-serializable summary of rate limit statistics.
+
+        Returns:
+            Dict with global and per-platform/endpoint breakdowns.
+        """
+        return {
+            "global": {
+                "total_requests": self.total_requests,
+                "total_throttled": self.total_throttled,
+                "throttle_rate": round(self.throttle_rate, 4),
+                "total_wait_time_ms": round(self.total_wait_time_ms, 2),
+                "avg_wait_time_ms": round(self.avg_wait_time_ms, 2),
+            },
+            "platforms": {
+                p: {
+                    "requests": s["requests"],
+                    "throttled": s["throttled"],
+                    "throttle_rate": round(s["throttled"] / s["requests"], 4) if s["requests"] > 0 else 0.0,
+                    "wait_time_ms": round(s["wait_ms"], 2),
+                }
+                for p, s in self.platform_stats.items()
+            },
+            "endpoints": {
+                e: {
+                    "requests": s["requests"],
+                    "throttled": s["throttled"],
+                    "throttle_rate": round(s["throttled"] / s["requests"], 4) if s["requests"] > 0 else 0.0,
+                    "wait_time_ms": round(s["wait_ms"], 2),
+                }
+                for e, s in self.endpoint_stats.items()
+            },
+        }
+
+    def reset(self) -> None:
+        """Reset all collected statistics."""
+        self.total_requests = 0
+        self.total_throttled = 0
+        self.total_wait_time_ms = 0.0
+        self.platform_stats.clear()
+        self.endpoint_stats.clear()
+        self.last_throttled_at = 0.0
+
+
+class ConfigurableRateLimiter:
+    """Advanced rate limiter with per-platform and per-endpoint configuration.
+
+    Supports:
+    - Per-platform rate limits
+    - Per-endpoint rate limits within a platform
+    - Dynamic adjustment of rate limits at runtime
+    - Burst control
+    - Statistics and monitoring
+
+    Usage::
+
+        config = RateLimitConfig(
+            platforms={
+                "OCEANENGINE": PlatformRateLimitConfig(
+                    platform="OCEANENGINE",
+                    default_requests_per_second=5.0,
+                    endpoints={
+                        "/api/order/search": EndpointRateLimit(
+                            endpoint="/api/order/search",
+                            requests_per_second=2.0,
+                        ),
+                    },
+                ),
+            },
+        )
+        limiter = ConfigurableRateLimiter(config)
+        await limiter.acquire("OCEANENGINE", "/api/order/search")
+    """
+
+    def __init__(self, config: "RateLimitConfig | None" = None) -> None:
+        """Initialize the configurable rate limiter.
+
+        Args:
+            config: Rate limit configuration. Uses defaults if not provided.
+        """
+        self._config = config or RateLimitConfig()
+        self._stats = RateLimitStats()
+        self._limiters: dict[str, RateLimiter] = {}
+        self._lock = threading.Lock()
+
+    @property
+    def stats(self) -> RateLimitStats:
+        """Get the rate limit statistics collector."""
+        return self._stats
+
+    @property
+    def config(self) -> "RateLimitConfig":
+        """Get the current rate limit configuration."""
+        return self._config
+
+    def _get_limiter_key(self, platform: str, endpoint: str) -> str:
+        """Generate a cache key for a platform+endpoint limiter."""
+        return f"{platform}:{endpoint}"
+
+    def _get_or_create_limiter(self, platform: str, endpoint: str) -> RateLimiter:
+        """Get or create a RateLimiter for the given platform+endpoint.
+
+        Args:
+            platform: Platform name.
+            endpoint: Endpoint path.
+
+        Returns:
+            A RateLimiter instance configured for the given platform+endpoint.
+        """
+        key = self._get_limiter_key(platform, endpoint)
+        with self._lock:
+            if key not in self._limiters:
+                platform_config = self._config.get_platform_config(platform)
+                if not platform_config.enabled:
+                    # No rate limiting for this platform
+                    self._limiters[key] = RateLimiter(requests_per_second=float("inf"))
+                else:
+                    ep_limit = platform_config.get_endpoint_limit(endpoint)
+                    self._limiters[key] = RateLimiter(
+                        requests_per_second=ep_limit.requests_per_second
+                    )
+            return self._limiters[key]
+
+    async def acquire(self, platform: str, endpoint: str) -> None:
+        """Acquire a rate limit slot for the given platform and endpoint.
+
+        Will wait if necessary to respect the configured rate limit.
+        Records statistics for monitoring.
+
+        Args:
+            platform: Platform name.
+            endpoint: API endpoint path.
+        """
+        platform_config = self._config.get_platform_config(platform)
+        if not platform_config.enabled:
+            self._stats.record_request(platform, endpoint)
+            return
+
+        limiter = self._get_or_create_limiter(platform, endpoint)
+        start = time.time()
+        await limiter.acquire()
+        elapsed_ms = (time.time() - start) * 1000
+
+        if elapsed_ms > 1.0:  # Only count meaningful waits
+            self._stats.record_throttle(platform, endpoint, elapsed_ms)
+        else:
+            self._stats.record_request(platform, endpoint)
+
+    def update_platform_config(self, platform: str, config: PlatformRateLimitConfig) -> None:
+        """Dynamically update the rate limit configuration for a platform.
+
+        Clears cached limiters for the affected platform so they will be
+        recreated with the new configuration on next use.
+
+        Args:
+            platform: Platform name to update.
+            config: New platform rate limit configuration.
+        """
+        self._config.platforms[platform] = config
+        # Clear cached limiters for this platform
+        with self._lock:
+            keys_to_remove = [k for k in self._limiters if k.startswith(f"{platform}:")]
+            for key in keys_to_remove:
+                del self._limiters[key]
+        logger.info(f"Rate limit config updated for platform: {platform}")
+
+    def update_endpoint_limit(
+        self,
+        platform: str,
+        endpoint: str,
+        requests_per_second: float,
+        burst_size: int = 1,
+    ) -> None:
+        """Dynamically update the rate limit for a specific endpoint.
+
+        Creates the platform config if it doesn't exist.
+
+        Args:
+            platform: Platform name.
+            endpoint: Endpoint path.
+            requests_per_second: New rate limit.
+            burst_size: New burst size.
+        """
+        if platform not in self._config.platforms:
+            self._config.platforms[platform] = PlatformRateLimitConfig(platform=platform)
+        platform_config = self._config.platforms[platform]
+        platform_config.endpoints[endpoint] = EndpointRateLimit(
+            endpoint=endpoint,
+            requests_per_second=requests_per_second,
+            burst_size=burst_size,
+        )
+        # Clear the cached limiter for this specific endpoint
+        key = self._get_limiter_key(platform, endpoint)
+        with self._lock:
+            self._limiters.pop(key, None)
+        logger.info(f"Rate limit updated: {platform}:{endpoint} -> {requests_per_second} rps")
+
+    def get_stats_summary(self) -> dict[str, Any]:
+        """Get a summary of rate limiting statistics.
+
+        Returns:
+            Dict with configuration and statistics.
+        """
+        return {
+            "config": self._config.to_dict(),
+            "stats": self._stats.get_summary(),
+        }
+
+    def reset_stats(self) -> None:
+        """Reset all rate limiting statistics."""
+        self._stats.reset()
+
+
+@dataclass
+class RateLimitConfig:
+    """Top-level rate limit configuration.
+
+    Manages per-platform rate limit settings and provides defaults.
+
+    Attributes:
+        platforms: Per-platform rate limit configurations.
+        default_requests_per_second: Global default rate limit.
+        default_burst_size: Global default burst size.
+        enabled: Global toggle for rate limiting.
+    """
+
+    platforms: dict[str, PlatformRateLimitConfig] = field(default_factory=dict)
+    default_requests_per_second: float = 10.0
+    default_burst_size: int = 1
+    enabled: bool = True
+
+    def get_platform_config(self, platform: str) -> PlatformRateLimitConfig:
+        """Get the rate limit config for a platform.
+
+        Returns the platform-specific config if it exists, otherwise
+        creates a default config for the platform.
+
+        Args:
+            platform: Platform name.
+
+        Returns:
+            PlatformRateLimitConfig for the given platform.
+        """
+        if platform in self.platforms:
+            return self.platforms[platform]
+        return PlatformRateLimitConfig(
+            platform=platform,
+            default_requests_per_second=self.default_requests_per_second,
+            burst_size=self.default_burst_size,
+            enabled=self.enabled,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert config to a JSON-serializable dictionary.
+
+        Returns:
+            Dictionary representation of the configuration.
+        """
+        return {
+            "enabled": self.enabled,
+            "default_requests_per_second": self.default_requests_per_second,
+            "default_burst_size": self.default_burst_size,
+            "platforms": {
+                name: {
+                    "platform": p.platform,
+                    "default_requests_per_second": p.default_requests_per_second,
+                    "burst_size": p.burst_size,
+                    "enabled": p.enabled,
+                    "endpoints": {
+                        ep: {
+                            "endpoint": e.endpoint,
+                            "requests_per_second": e.requests_per_second,
+                            "burst_size": e.burst_size,
+                            "cooldown_seconds": e.cooldown_seconds,
+                        }
+                        for ep, e in p.endpoints.items()
+                    },
+                }
+                for name, p in self.platforms.items()
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RateLimitConfig":
+        """Create a RateLimitConfig from a dictionary.
+
+        Args:
+            data: Dictionary with configuration values.
+
+        Returns:
+            A new RateLimitConfig instance.
+        """
+        platforms: dict[str, PlatformRateLimitConfig] = {}
+        for name, p_data in data.get("platforms", {}).items():
+            endpoints: dict[str, EndpointRateLimit] = {}
+            for ep, e_data in p_data.get("endpoints", {}).items():
+                endpoints[ep] = EndpointRateLimit(
+                    endpoint=e_data.get("endpoint", ep),
+                    requests_per_second=e_data.get("requests_per_second", 10.0),
+                    burst_size=e_data.get("burst_size", 1),
+                    cooldown_seconds=e_data.get("cooldown_seconds", 0.0),
+                )
+            platforms[name] = PlatformRateLimitConfig(
+                platform=p_data.get("platform", name),
+                default_requests_per_second=p_data.get("default_requests_per_second", 10.0),
+                endpoints=endpoints,
+                burst_size=p_data.get("burst_size", 1),
+                enabled=p_data.get("enabled", True),
+            )
+
+        return cls(
+            platforms=platforms,
+            default_requests_per_second=data.get("default_requests_per_second", 10.0),
+            default_burst_size=data.get("default_burst_size", 1),
+            enabled=data.get("enabled", True),
+        )
+
+
 # ── Metrics ────────────────────────────────────────────────
 
 
@@ -1883,3 +2339,631 @@ class DataExporter:
             return json.dumps(data, ensure_ascii=False, indent=2, default=str)
         else:
             raise ValueError("export_to_string does not support Excel format")
+
+
+# ── API Versioning ────────────────────────────────────────
+
+
+class VersionStatus(StrEnum):
+    """Lifecycle status of an API version.
+
+    Attributes:
+        ACTIVE: The version is fully supported and recommended for use.
+        DEPRECATED: The version still works but will be removed in a future release.
+        SUNSET: The version is no longer available; requests are rejected.
+    """
+
+    ACTIVE = "active"
+    DEPRECATED = "deprecated"
+    SUNSET = "sunset"
+
+
+@dataclass(order=True, frozen=True)
+class APIVersion:
+    """Represents a semantic API version.
+
+    Supports comparison operators so versions can be sorted and compared.
+
+    Attributes:
+        major: Major version number (breaking changes).
+        minor: Minor version number (backwards-compatible features).
+        patch: Patch version number (backwards-compatible fixes).
+    """
+
+    major: int
+    minor: int = 0
+    patch: int = 0
+
+    def __str__(self) -> str:
+        if self.patch:
+            return f"{self.major}.{self.minor}.{self.patch}"
+        if self.minor:
+            return f"{self.major}.{self.minor}"
+        return str(self.major)
+
+    @classmethod
+    def parse(cls, version_str: str) -> APIVersion:
+        """Parse a version string like '2', '2.1', or '2.1.3' into an APIVersion.
+
+        Args:
+            version_str: Version string to parse.
+
+        Returns:
+            An APIVersion instance.
+
+        Raises:
+            ValueError: If the version string is invalid.
+        """
+        if not version_str or not version_str.strip():
+            raise ValueError("Version string cannot be empty")
+        parts = version_str.strip().split(".")
+        if len(parts) > 3:
+            raise ValueError(f"Invalid version string '{version_str}': too many segments")
+        try:
+            nums = [int(p) for p in parts]
+        except ValueError:
+            raise ValueError(f"Invalid version string '{version_str}': non-numeric segment")
+        if any(n < 0 for n in nums):
+            raise ValueError(f"Invalid version string '{version_str}': negative segment")
+        # Pad to 3 components
+        while len(nums) < 3:
+            nums.append(0)
+        return cls(major=nums[0], minor=nums[1], patch=nums[2])
+
+    @property
+    def is_stable(self) -> bool:
+        """Check if this is a stable release (major >= 1)."""
+        return self.major >= 1
+
+    def is_compatible_with(self, other: APIVersion) -> bool:
+        """Check if this version is backwards-compatible with another.
+
+        Two versions are compatible if they share the same major version.
+
+        Args:
+            other: The version to compare against.
+
+        Returns:
+            True if both versions share the same major number.
+        """
+        return self.major == other.major
+
+
+@dataclass
+class VersionedEndpoint:
+    """Maps an API endpoint path to its versioned handlers.
+
+    Attributes:
+        path: The endpoint path (e.g., '/orders/list').
+        handlers: Dict mapping APIVersion to the handler function.
+        default_version: The default version to use when none is specified.
+    """
+
+    path: str
+    handlers: dict[APIVersion, Callable[..., Any]] = field(default_factory=dict)
+    default_version: APIVersion | None = None
+
+    def add_version(self, version: APIVersion, handler: Callable[..., Any]) -> None:
+        """Register a handler for a specific version.
+
+        Args:
+            version: The API version.
+            handler: The callable that handles requests for this version.
+        """
+        self.handlers[version] = handler
+        if self.default_version is None or version > self.default_version:
+            self.default_version = version
+
+    def get_handler(self, version: APIVersion) -> Callable[..., Any] | None:
+        """Get the handler for a specific version.
+
+        Args:
+            version: The requested API version.
+
+        Returns:
+            The handler if found, None otherwise.
+        """
+        return self.handlers.get(version)
+
+    def get_best_match(self, requested: APIVersion) -> tuple[APIVersion, Callable[..., Any]] | None:
+        """Find the best matching version for a request.
+
+        Returns the highest version that is <= requested and shares the same
+        major version. Returns None if no compatible version exists.
+
+        Args:
+            requested: The version requested by the client.
+
+        Returns:
+            Tuple of (version, handler) or None.
+        """
+        candidates = [
+            (v, h) for v, h in self.handlers.items()
+            if v <= requested and v.is_compatible_with(requested)
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda x: x[0])
+
+    @property
+    def supported_versions(self) -> list[APIVersion]:
+        """List all supported versions, sorted ascending."""
+        return sorted(self.handlers.keys())
+
+
+class APIVersionError(Exception):
+    """Raised when a version-related error occurs.
+
+    Attributes:
+        code: Error code for programmatic handling.
+        message: Human-readable error description.
+        supported_versions: List of available versions (if applicable).
+    """
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        supported_versions: list[APIVersion] | None = None,
+    ) -> None:
+        self.code = code
+        self.message = message
+        self.supported_versions = supported_versions or []
+        super().__init__(f"[{code}] {message}")
+
+
+class APIVersionRegistry:
+    """Central registry for API versions, endpoints, and their lifecycle status.
+
+    Manages version registration, status tracking, and deprecation policies.
+
+    Usage:
+        registry = APIVersionRegistry()
+        registry.register_version(APIVersion(1), status=VersionStatus.ACTIVE)
+        registry.register_version(APIVersion(2), status=VersionStatus.ACTIVE)
+        registry.register_endpoint(VersionedEndpoint(path="/orders", handlers={...}))
+    """
+
+    def __init__(self) -> None:
+        self._versions: dict[APIVersion, VersionStatus] = {}
+        self._endpoints: dict[str, VersionedEndpoint] = {}
+        self._sunset_dates: dict[APIVersion, str] = {}
+        self._deprecation_messages: dict[APIVersion, str] = {}
+        self._default_version: APIVersion | None = None
+
+    def register_version(
+        self,
+        version: APIVersion,
+        status: VersionStatus = VersionStatus.ACTIVE,
+        sunset_date: str = "",
+        deprecation_message: str = "",
+    ) -> None:
+        """Register an API version with its lifecycle status.
+
+        Args:
+            version: The API version to register.
+            status: Current lifecycle status.
+            sunset_date: ISO 8601 date when the version will be sunset (for deprecated).
+            deprecation_message: Custom deprecation message.
+        """
+        self._versions[version] = status
+        if sunset_date:
+            self._sunset_dates[version] = sunset_date
+        if deprecation_message:
+            self._deprecation_messages[version] = deprecation_message
+        # Auto-set default to the latest active version
+        if status == VersionStatus.ACTIVE:
+            if self._default_version is None or version > self._default_version:
+                self._default_version = version
+
+    def get_version_status(self, version: APIVersion) -> VersionStatus | None:
+        """Get the lifecycle status of a version.
+
+        Args:
+            version: The API version to query.
+
+        Returns:
+            The VersionStatus, or None if not registered.
+        """
+        return self._versions.get(version)
+
+    def set_version_status(self, version: APIVersion, status: VersionStatus) -> None:
+        """Update the lifecycle status of a registered version.
+
+        Args:
+            version: The API version to update.
+            status: New status.
+
+        Raises:
+            APIVersionError: If the version is not registered.
+        """
+        if version not in self._versions:
+            raise APIVersionError("VERSION_NOT_FOUND", f"Version {version} is not registered")
+        self._versions[version] = status
+        # Recalculate default if needed
+        if status != VersionStatus.ACTIVE and self._default_version == version:
+            active = [v for v, s in self._versions.items() if s == VersionStatus.ACTIVE]
+            self._default_version = max(active) if active else None
+
+    def register_endpoint(self, endpoint: VersionedEndpoint) -> None:
+        """Register a versioned endpoint.
+
+        Args:
+            endpoint: The VersionedEndpoint to register.
+        """
+        self._endpoints[endpoint.path] = endpoint
+
+    def get_endpoint(self, path: str) -> VersionedEndpoint | None:
+        """Get a registered endpoint by path.
+
+        Args:
+            path: The endpoint path.
+
+        Returns:
+            The VersionedEndpoint if found, None otherwise.
+        """
+        return self._endpoints.get(path)
+
+    @property
+    def default_version(self) -> APIVersion | None:
+        """The default API version (latest active)."""
+        return self._default_version
+
+    @property
+    def active_versions(self) -> list[APIVersion]:
+        """List all active versions, sorted ascending."""
+        return sorted(v for v, s in self._versions.items() if s == VersionStatus.ACTIVE)
+
+    @property
+    def deprecated_versions(self) -> list[APIVersion]:
+        """List all deprecated versions, sorted ascending."""
+        return sorted(v for v, s in self._versions.items() if s == VersionStatus.DEPRECATED)
+
+    @property
+    def sunset_versions(self) -> list[APIVersion]:
+        """List all sunset versions, sorted ascending."""
+        return sorted(v for v, s in self._versions.items() if s == VersionStatus.SUNSET)
+
+    def get_all_versions(self) -> dict[APIVersion, VersionStatus]:
+        """Get all registered versions with their statuses."""
+        return dict(self._versions)
+
+    def get_deprecation_info(self, version: APIVersion) -> dict[str, Any] | None:
+        """Get deprecation information for a version.
+
+        Args:
+            version: The API version to query.
+
+        Returns:
+            Dict with deprecation info if deprecated, None otherwise.
+        """
+        status = self._versions.get(version)
+        if status != VersionStatus.DEPRECATED:
+            return None
+        info: dict[str, Any] = {
+            "version": str(version),
+            "status": status.value,
+            "message": self._deprecation_messages.get(
+                version,
+                f"API version {version} is deprecated. Please upgrade to {self._default_version}.",
+            ),
+        }
+        if version in self._sunset_dates:
+            info["sunset_date"] = self._sunset_dates[version]
+        if self._default_version:
+            info["recommended_version"] = str(self._default_version)
+        return info
+
+
+class VersionNegotiator:
+    """Negotiates the best API version between client request and server capabilities.
+
+    Supports multiple negotiation strategies:
+    - Explicit version in request header or parameter
+    - Content-Type versioning (e.g., application/vnd.api+json;version=2)
+    - URL path versioning (e.g., /v2/orders)
+    - Accept header quality-value preferences
+
+    Usage:
+        negotiator = VersionNegotiator(registry)
+        version, warnings = negotiator.negotiate(headers={'X-API-Version': '2'})
+    """
+
+    # Common header/param names for version specification
+    VERSION_HEADER = "X-API-Version"
+    VERSION_PARAM = "api_version"
+    ACCEPT_HEADER = "Accept"
+
+    def __init__(self, registry: APIVersionRegistry) -> None:
+        """Initialize with an API version registry.
+
+        Args:
+            registry: The registry containing available versions.
+        """
+        self._registry = registry
+
+    def negotiate(
+        self,
+        headers: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
+        url_path: str = "",
+    ) -> tuple[APIVersion, list[str]]:
+        """Negotiate the best API version from a request.
+
+        Resolution order:
+        1. URL path prefix (/v2/...)
+        2. X-API-Version header
+        3. api_version query parameter
+        4. Accept header version parameter
+        5. Default version from registry
+
+        Args:
+            headers: Request headers dict.
+            params: Request query parameters dict.
+            url_path: The request URL path.
+
+        Returns:
+            Tuple of (negotiated_version, list_of_warnings).
+
+        Raises:
+            APIVersionError: If the requested version is sunset or not found.
+        """
+        headers = headers or {}
+        params = params or {}
+        warnings: list[str] = []
+
+        # 1. Try URL path versioning (/v2/orders)
+        path_version = self._extract_path_version(url_path)
+        if path_version is not None:
+            return self._resolve_version(path_version, warnings)
+
+        # 2. Try header
+        header_version_str = headers.get(self.VERSION_HEADER, "")
+        if header_version_str:
+            return self._resolve_version_str(header_version_str, warnings)
+
+        # 3. Try query parameter
+        param_version_str = params.get(self.VERSION_PARAM, "")
+        if param_version_str:
+            return self._resolve_version_str(param_version_str, warnings)
+
+        # 4. Try Accept header
+        accept_version = self._extract_accept_version(headers.get(self.ACCEPT_HEADER, ""))
+        if accept_version is not None:
+            return self._resolve_version(accept_version, warnings)
+
+        # 5. Use default
+        default = self._registry.default_version
+        if default is None:
+            raise APIVersionError("NO_VERSIONS", "No API versions are registered")
+        return default, warnings
+
+    def _extract_path_version(self, url_path: str) -> APIVersion | None:
+        """Extract version from URL path like /v2/orders.
+
+        Args:
+            url_path: The request URL path.
+
+        Returns:
+            Extracted APIVersion or None.
+        """
+        if not url_path:
+            return None
+        match = re.match(r"^/v(\d+)(?:\.(\d+))?(?:\.(\d+))?/", url_path)
+        if match:
+            major = int(match.group(1))
+            minor = int(match.group(2)) if match.group(2) else 0
+            patch = int(match.group(3)) if match.group(3) else 0
+            return APIVersion(major, minor, patch)
+        return None
+
+    def _extract_accept_version(self, accept: str) -> APIVersion | None:
+        """Extract version from Accept header like 'application/vnd.api+json;version=2'.
+
+        Args:
+            accept: The Accept header value.
+
+        Returns:
+            Extracted APIVersion or None.
+        """
+        if not accept:
+            return None
+        match = re.search(r"version=(\d+(?:\.\d+(?:\.\d+)?)?)", accept)
+        if match:
+            try:
+                return APIVersion.parse(match.group(1))
+            except ValueError:
+                return None
+        return None
+
+    def _resolve_version_str(
+        self,
+        version_str: str,
+        warnings: list[str],
+    ) -> tuple[APIVersion, list[str]]:
+        """Resolve a version string to an APIVersion with validation.
+
+        Args:
+            version_str: Version string to parse and resolve.
+            warnings: List to append warnings to.
+
+        Returns:
+            Tuple of (resolved_version, warnings).
+
+        Raises:
+            APIVersionError: If the version string is invalid or version is sunset.
+        """
+        try:
+            version = APIVersion.parse(version_str)
+        except ValueError as e:
+            raise APIVersionError("INVALID_VERSION", str(e))
+        return self._resolve_version(version, warnings)
+
+    def _resolve_version(
+        self,
+        requested: APIVersion,
+        warnings: list[str],
+    ) -> tuple[APIVersion, list[str]]:
+        """Resolve a requested version against the registry.
+
+        Args:
+            requested: The requested APIVersion.
+            warnings: List to append warnings to.
+
+        Returns:
+            Tuple of (resolved_version, warnings).
+
+        Raises:
+            APIVersionError: If the version is sunset or not found.
+        """
+        status = self._registry.get_version_status(requested)
+
+        if status is None:
+            # Version not registered; try best-match
+            active = self._registry.active_versions
+            if not active:
+                raise APIVersionError(
+                    "NO_VERSIONS",
+                    "No API versions are registered",
+                )
+            # Find closest compatible version
+            compatible = [v for v in active if v.is_compatible_with(requested)]
+            if compatible:
+                best = max(compatible)
+                warnings.append(
+                    f"Version {requested} is not available. "
+                    f"Using compatible version {best}."
+                )
+                return best, warnings
+            raise APIVersionError(
+                "VERSION_NOT_FOUND",
+                f"API version {requested} is not available. "
+                f"Available versions: {', '.join(str(v) for v in active)}",
+                supported_versions=active,
+            )
+
+        if status == VersionStatus.SUNSET:
+            raise APIVersionError(
+                "VERSION_SUNSET",
+                f"API version {requested} has been sunset and is no longer available.",
+                supported_versions=self._registry.active_versions,
+            )
+
+        if status == VersionStatus.DEPRECATED:
+            deprecation = self._registry.get_deprecation_info(requested)
+            if deprecation:
+                warnings.append(deprecation["message"])
+                if "sunset_date" in deprecation:
+                    warnings.append(f"This version will be sunset on {deprecation['sunset_date']}.")
+            else:
+                warnings.append(
+                    f"API version {requested} is deprecated. "
+                    f"Please upgrade to {self._registry.default_version}."
+                )
+
+        return requested, warnings
+
+
+class DeprecationWarningManager:
+    """Manages and formats deprecation warnings for API responses.
+
+    Collects deprecation warnings and produces standardized response headers
+    and log messages.
+
+    Usage:
+        manager = DeprecationWarningManager()
+        manager.add_warning("Version 1 is deprecated")
+        headers = manager.get_response_headers()
+    """
+
+    HEADER_DEPRECATED = "X-API-Deprecated"
+    HEADER_SUNSET = "X-API-Sunset"
+    HEADER_UPGRADE = "X-API-Upgrade"
+
+    def __init__(self) -> None:
+        self._warnings: list[str] = []
+        self._deprecation_info: dict[str, Any] = {}
+
+    def add_warning(self, message: str) -> None:
+        """Add a deprecation warning message.
+
+        Args:
+            message: The warning message.
+        """
+        self._warnings.append(message)
+
+    def set_deprecation_info(
+        self,
+        version: APIVersion,
+        sunset_date: str = "",
+        recommended_version: APIVersion | None = None,
+    ) -> None:
+        """Set structured deprecation information.
+
+        Args:
+            version: The deprecated version.
+            sunset_date: ISO 8601 sunset date.
+            recommended_version: The recommended upgrade version.
+        """
+        self._deprecation_info = {
+            "version": str(version),
+            "sunset_date": sunset_date,
+            "recommended_version": str(recommended_version) if recommended_version else None,
+        }
+
+    @property
+    def has_warnings(self) -> bool:
+        """Check if any deprecation warnings exist."""
+        return len(self._warnings) > 0
+
+    @property
+    def warnings(self) -> list[str]:
+        """Get all collected warnings."""
+        return list(self._warnings)
+
+    def get_response_headers(self) -> dict[str, str]:
+        """Generate HTTP response headers for deprecation warnings.
+
+        Returns:
+            Dict of header name to header value.
+        """
+        headers: dict[str, str] = {}
+        if not self._warnings:
+            return headers
+
+        headers[self.HEADER_DEPRECATED] = "true"
+
+        info = self._deprecation_info
+        if info.get("sunset_date"):
+            headers[self.HEADER_SUNSET] = info["sunset_date"]
+        if info.get("recommended_version"):
+            headers[self.HEADER_UPGRADE] = info["recommended_version"]
+
+        return headers
+
+    def get_log_message(self) -> str:
+        """Generate a log-friendly deprecation message.
+
+        Returns:
+            Formatted warning string, or empty string if no warnings.
+        """
+        if not self._warnings:
+            return ""
+        return " | ".join(self._warnings)
+
+    def clear(self) -> None:
+        """Clear all collected warnings."""
+        self._warnings.clear()
+        self._deprecation_info.clear()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Export warnings as a JSON-serializable dict.
+
+        Returns:
+            Dict with ``has_warnings``, ``warnings``, and ``deprecation_info`` keys.
+        """
+        return {
+            "has_warnings": self.has_warnings,
+            "warnings": self._warnings,
+            "deprecation_info": self._deprecation_info,
+        }

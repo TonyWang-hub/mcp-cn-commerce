@@ -886,7 +886,7 @@ class PriorityQueue:
     """
 
     def __init__(self, max_size: int = 10000) -> None:
-        import heapq
+
         self._heap: list[tuple[int, float, int, PrioritizedRequest]] = []
         self._counter = 0
         self._max_size = max_size
@@ -896,6 +896,7 @@ class PriorityQueue:
     def enqueue(self, request: PrioritizedRequest) -> None:
         """Add a request to the queue.  Raises RuntimeError when full."""
         import heapq
+
         with self._lock:
             if self._size >= self._max_size:
                 raise RuntimeError(f"Priority queue full (max_size={self._max_size})")
@@ -906,6 +907,7 @@ class PriorityQueue:
     def dequeue(self) -> PrioritizedRequest | None:
         """Remove and return the highest-priority request."""
         import heapq
+
         with self._lock:
             if not self._heap:
                 return None

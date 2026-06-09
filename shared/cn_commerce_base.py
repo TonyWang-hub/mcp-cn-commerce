@@ -786,6 +786,167 @@ class CommerceMCPBase:
             result["error"] = str(exc)
         return result
 
+    # ── Batch Operations ──────────────────────────────────
+
+    @staticmethod
+    def _batch_aggregate(
+        results: list[BatchResultItem],
+        total_latency_ms: float,
+    ) -> BatchSummary:
+        """Aggregate individual batch results into a summary.
+
+        Args:
+            results: List of individual result items.
+            total_latency_ms: Wall-clock time for the entire batch.
+
+        Returns:
+            A BatchSummary with counts and error breakdown.
+        """
+        succeeded = sum(1 for r in results if r.success)
+        failed = len(results) - succeeded
+        error_summary: dict[str, int] = {}
+        for r in results:
+            if r.error is not None:
+                key = type(r.error).__name__
+                error_summary[key] = error_summary.get(key, 0) + 1
+        return BatchSummary(
+            total=len(results),
+            succeeded=succeeded,
+            failed=failed,
+            results=results,
+            total_latency_ms=total_latency_ms,
+            error_summary=error_summary,
+        )
+
+    async def _batch_request(
+        self,
+        requests: list[BatchRequestItem],
+        max_concurrency: int = 5,
+        fail_fast: bool = False,
+    ) -> BatchSummary:
+        """Execute multiple API requests concurrently.
+
+        Args:
+            requests: List of batch request items to execute.
+            max_concurrency: Maximum concurrent requests (clamped to 1-20).
+            fail_fast: If True, stop submitting new requests after the first error.
+
+        Returns:
+            A BatchSummary with all individual results.
+
+        Raises:
+            ValueError: If the request list is empty.
+        """
+        if not requests:
+            raise ValueError("Request list cannot be empty")
+
+        max_concurrency = max(1, min(max_concurrency, 20))
+        semaphore = asyncio.Semaphore(max_concurrency)
+        batch_start = time.time()
+        results: list[BatchResultItem] = []
+        cancelled = asyncio.Event()
+
+        async def _execute_one(item: BatchRequestItem) -> BatchResultItem:
+            if fail_fast and cancelled.is_set():
+                return BatchResultItem(
+                    request_id=item.request_id,
+                    success=False,
+                    error=RuntimeError("Cancelled due to fail_fast"),
+                )
+            async with semaphore:
+                start = time.time()
+                try:
+                    data = await self._request(
+                        method=item.method,
+                        path=item.path,
+                        params=dict(item.params),
+                        data=dict(item.data),
+                    )
+                    elapsed = (time.time() - start) * 1000
+                    return BatchResultItem(
+                        request_id=item.request_id,
+                        success=True,
+                        data=data,
+                        latency_ms=elapsed,
+                    )
+                except Exception as exc:
+                    elapsed = (time.time() - start) * 1000
+                    if fail_fast:
+                        cancelled.set()
+                    return BatchResultItem(
+                        request_id=item.request_id,
+                        success=False,
+                        error=exc,
+                        latency_ms=elapsed,
+                    )
+
+        tasks = [_execute_one(item) for item in requests]
+        results = list(await asyncio.gather(*tasks))
+        total_latency = (time.time() - batch_start) * 1000
+        return self._batch_aggregate(results, total_latency_ms=total_latency)
+
+
+# ── Batch Operations ──────────────────────────────────────
+
+
+@dataclass
+class BatchRequestItem:
+    """A single request within a batch operation.
+
+    Attributes:
+        method: HTTP method ("GET" or "POST").
+        path: API endpoint path.
+        params: Query parameters.
+        data: Request body data.
+        request_id: Caller-assigned identifier for correlation.
+    """
+
+    method: str = ""
+    path: str = ""
+    params: dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
+    request_id: str = ""
+
+
+@dataclass
+class BatchResultItem:
+    """Result of a single request within a batch.
+
+    Attributes:
+        request_id: Matches the request_id from BatchRequestItem.
+        success: Whether the request succeeded.
+        data: Response data (None on failure).
+        error: The exception that caused the failure (None on success).
+        latency_ms: Request duration in milliseconds.
+    """
+
+    request_id: str = ""
+    success: bool = True
+    data: Any = None
+    error: Exception | None = None
+    latency_ms: float = 0.0
+
+
+@dataclass
+class BatchSummary:
+    """Aggregated summary of a batch operation.
+
+    Attributes:
+        total: Total number of requests.
+        succeeded: Number of successful requests.
+        failed: Number of failed requests.
+        results: Individual result items.
+        total_latency_ms: Wall-clock time for the entire batch.
+        error_summary: Count of errors grouped by exception type name.
+    """
+
+    total: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    results: list[BatchResultItem] = field(default_factory=list)
+    total_latency_ms: float = 0.0
+    error_summary: dict[str, int] = field(default_factory=dict)
+
 
 class CommerceAPIError(Exception):
     """Normalized API error across all platforms."""

@@ -31,8 +31,8 @@ if not hasattr(_orig_server_cls, "tool"):
 
 
 # Now safe to import the module under test.
-import mcp_doudian.server as _srv  # noqa: E402 — the module itself (for patching)
-from mcp_doudian.server import (  # noqa: E402
+import servers.doudian.server as _srv  # noqa: E402 — the module itself (for patching)
+from servers.doudian.server import (  # noqa: E402
     ConfigError,
     DouDianAPIError,
     _safe_get,
@@ -657,7 +657,7 @@ class TestConfigErrorHandling:
         """_get_client raises ConfigError listing every missing variable."""
         with patch.dict(os.environ, {}, clear=True):
             # Reset singleton cache
-            import mcp_doudian.server as srv
+            import servers.doudian.server as srv
 
             srv._client = None
 
@@ -680,7 +680,7 @@ class TestConfigErrorHandling:
             # DOUDIAN_ACCESS_TOKEN intentionally omitted
         }
         with patch.dict(os.environ, partial, clear=True):
-            import mcp_doudian.server as srv
+            import servers.doudian.server as srv
 
             srv._client = None
 
@@ -698,7 +698,7 @@ class TestConfigErrorHandling:
     async def test_config_error_caught_in_tool_get_order_list(self):
         """When env vars are missing, tools catch ConfigError gracefully."""
         with patch.dict(os.environ, {}, clear=True):
-            import mcp_doudian.server as srv
+            import servers.doudian.server as srv
 
             srv._client = None
 
@@ -712,7 +712,7 @@ class TestConfigErrorHandling:
     async def test_config_error_caught_in_tool_get_shop_info(self):
         """ConfigError is caught in get_shop_info too."""
         with patch.dict(os.environ, {}, clear=True):
-            import mcp_doudian.server as srv
+            import servers.doudian.server as srv
 
             srv._client = None
 
@@ -725,7 +725,7 @@ class TestConfigErrorHandling:
     async def test_config_error_caught_in_tool_get_product_list(self):
         """ConfigError is caught in get_product_list."""
         with patch.dict(os.environ, {}, clear=True):
-            import mcp_doudian.server as srv
+            import servers.doudian.server as srv
 
             srv._client = None
 
@@ -738,7 +738,7 @@ class TestConfigErrorHandling:
     async def test_config_error_caught_in_tool_get_refund_list(self):
         """ConfigError is caught in get_refund_list."""
         with patch.dict(os.environ, {}, clear=True):
-            import mcp_doudian.server as srv
+            import servers.doudian.server as srv
 
             srv._client = None
 
@@ -2134,7 +2134,7 @@ class TestNewToolsConfigErrorHandling:
     @pytest.mark.asyncio
     async def test_config_error_in_get_logistics_tracking(self):
         with patch.dict(os.environ, {}, clear=True):
-            import mcp_doudian.server as srv
+            import servers.doudian.server as srv
 
             srv._client = None
             result = await get_logistics_tracking(order_id="ORD-001")
@@ -2144,7 +2144,7 @@ class TestNewToolsConfigErrorHandling:
     @pytest.mark.asyncio
     async def test_config_error_in_get_review_detail(self):
         with patch.dict(os.environ, {}, clear=True):
-            import mcp_doudian.server as srv
+            import servers.doudian.server as srv
 
             srv._client = None
             result = await get_review_detail(review_id="C-001")
@@ -2154,7 +2154,7 @@ class TestNewToolsConfigErrorHandling:
     @pytest.mark.asyncio
     async def test_config_error_in_list_live_rooms(self):
         with patch.dict(os.environ, {}, clear=True):
-            import mcp_doudian.server as srv
+            import servers.doudian.server as srv
 
             srv._client = None
             result = await list_live_rooms()
@@ -2164,7 +2164,7 @@ class TestNewToolsConfigErrorHandling:
     @pytest.mark.asyncio
     async def test_config_error_in_get_shop_score(self):
         with patch.dict(os.environ, {}, clear=True):
-            import mcp_doudian.server as srv
+            import servers.doudian.server as srv
 
             srv._client = None
             result = await get_shop_score()

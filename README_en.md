@@ -99,17 +99,11 @@ See [Docker documentation](docs/docker.md) for full usage, MCP client configurat
 #### From PyPI (recommended)
 
 ```bash
-# Install base package
+# One install, all 8 platforms included
 pip install mcp-cn-commerce
-
-# Install single platform
-pip install mcp-cn-commerce[doudian]      # Douyin Shop
-pip install mcp-cn-commerce[jd]           # JD.com
-pip install mcp-cn-commerce[oceanengine]  # Ocean Engine
-
-# Install all platforms
-pip install mcp-cn-commerce[all]
 ```
+
+All platform servers are bundled. Choose which to use via your MCP client configuration.
 
 #### From GitHub Releases
 
@@ -193,11 +187,11 @@ mcp-cn-commerce/
 ├── .github/workflows/test.yml       # CI: pytest on push (3.11/3.12/3.13)
 ├── shared/                           # Shared auth/signing/pagination
 │   └── cn_commerce_base.py           # CommerceMCPBase — extend for new platforms
-├── servers/
-│   ├── oceanengine/  22 tools        ├── doudian/    24 tools
-│   ├── jd/           19 tools        ├── taobao/     17 tools
-│   ├── pinduoduo/    17 tools        ├── kuaishou/   16 tools
-│   ├── xiaohongshu/  17 tools        └── weixin-store/ 15 tools
+├── servers/                          # All platform servers (single package, start as needed)
+│   ├── oceanengine/server.py         ├── doudian/server.py
+│   ├── jd/server.py                  ├── taobao/server.py
+│   ├── pinduoduo/server.py           ├── kuaishou/server.py
+│   ├── xiaohongshu/server.py         └── weixin_store/server.py
 ├── docs/platforms.md                 # 8-platform API comparison & auth matrix
 ├── docs/docker.md                    # Docker deployment guide
 ├── Dockerfile                        # Multi-platform MCP server image
@@ -206,7 +200,7 @@ mcp-cn-commerce/
 └── LICENSE                           # MIT
 ```
 
-Each `servers/<platform>/` is an **independent MCP server**. Users install only what they need.
+Single-package architecture: `pip install mcp-cn-commerce` installs all 8 platform servers at once. Choose which to use via your MCP client configuration.
 
 ## Workflow Templates 🆕
 
@@ -279,7 +273,7 @@ See all templates: [`templates/`](templates/)
 | pinduoduo | 17 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Affiliate |
 | kuaishou | 16 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing |
 | xiaohongshu | 17 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Inventory, Finance |
-| weixin-store | 15 | Orders, Products, Refunds, Logistics, Shop, Marketing, Supply Chain, Categories |
+| weixin_store | 15 | Orders, Products, Refunds, Logistics, Shop, Marketing, Supply Chain, Categories |
 | **Total** | **147** | Platform tools + 4 shared operational tools each |
 
 Every server also exposes **4 cross-platform operational tools** (counted above): `get_metrics`
@@ -287,7 +281,7 @@ Every server also exposes **4 cross-platform operational tools** (counted above)
 `get_alerts` (alert-rule evaluation against live metrics), and `export_data` (export records
 to CSV/JSON). Request tracing and metrics are collected automatically on every call.
 
-For full tool details, see the source code in each `servers/<platform>/src/` directory.
+For full tool details, see the source code in each `servers/<platform>/server.py` file.
 | `get_product_list` | Product catalog with pricing and stock | `/product/list` |
 | `get_shop_info` | Merchant shop information | `/shop/info` |
 

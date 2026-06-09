@@ -14,7 +14,7 @@ os.environ.setdefault("PINDUODUO_CLIENT_ID", "test_client_id")
 os.environ.setdefault("PINDUODUO_CLIENT_SECRET", "test_client_secret")
 os.environ.setdefault("PINDUODUO_ACCESS_TOKEN", "test_access_token")
 
-from mcp_pinduoduo.server import (
+from servers.pinduoduo.server import (
     get_logistics_tracking,
     get_order_detail,
     get_order_list,
@@ -30,7 +30,6 @@ from mcp_pinduoduo.server import (
     search_affiliate_goods,
     search_products,
 )
-
 from shared.cn_commerce_base import CommerceAPIError
 
 # ── Helpers ─────────────────────────────────────────────────────────────────

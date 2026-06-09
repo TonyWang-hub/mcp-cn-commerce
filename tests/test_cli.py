@@ -32,7 +32,7 @@ class TestVersion:
     """Tests for version info."""
 
     def test_version_string(self):
-        assert __version__ == "0.1.0"
+        assert __version__ == "0.1.1"
 
     def test_version_from_parser(self, capsys):
         parser = build_parser()
@@ -40,7 +40,7 @@ class TestVersion:
             parser.parse_args(["--version"])
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
-        assert "0.1.0" in captured.out
+        assert "0.1.1" in captured.out
 
 
 # ── Server Registry Tests ─────────────────────────────────
@@ -50,7 +50,7 @@ class TestServerRegistry:
     """Tests for the server registry."""
 
     def test_all_eight_platforms_registered(self):
-        expected = {"oceanengine", "doudian", "jd", "taobao", "pinduoduo", "kuaishou", "xiaohongshu", "weixin-store"}
+        expected = {"oceanengine", "doudian", "jd", "taobao", "pinduoduo", "kuaishou", "xiaohongshu", "weixin_store"}
         assert set(SERVER_REGISTRY.keys()) == expected
 
     def test_each_entry_has_required_keys(self):
@@ -61,7 +61,7 @@ class TestServerRegistry:
 
     def test_modules_follow_naming_convention(self):
         for name, info in SERVER_REGISTRY.items():
-            assert info["module"].startswith("mcp_"), f"{name} module should start with 'mcp_'"
+            assert info["module"].startswith("servers."), f"{name} module should start with 'servers.'"
             assert info["module"].endswith(".server"), f"{name} module should end with '.server'"
 
 
@@ -76,10 +76,10 @@ class TestGetSrcPath:
         assert p.name == "src"
         assert "oceanengine" in str(p)
 
-    def test_all_platforms_have_src_dir(self):
+    def test_all_platforms_have_server_file(self):
         for platform in SERVER_REGISTRY:
-            p = get_src_path(platform)
-            assert p.is_dir(), f"src dir not found for {platform}: {p}"
+            p = get_src_path(platform).parent / "server.py"
+            assert p.is_file(), f"server.py not found for {platform}: {p}"
 
 
 class TestBuildPythonpath:
@@ -89,14 +89,9 @@ class TestBuildPythonpath:
         pp = build_pythonpath(["oceanengine"])
         assert "shared" in pp
 
-    def test_includes_platform_src(self):
-        pp = build_pythonpath(["oceanengine"])
-        assert "oceanengine" in pp
-
     def test_multiple_platforms(self):
         pp = build_pythonpath(["oceanengine", "jd"])
-        assert "oceanengine" in pp
-        assert "jd" in pp
+        assert "shared" in pp
 
     def test_empty_platforms_still_includes_shared(self):
         pp = build_pythonpath([])
@@ -337,13 +332,13 @@ class TestMain:
         main(["info"])
         captured = capsys.readouterr()
         assert "mcp-cn-commerce" in captured.out
-        assert "0.1.0" in captured.out
+        assert "0.1.1" in captured.out
 
     def test_info_json_output(self, capsys):
         main(["info", "--json"])
         captured = capsys.readouterr()
         data = json.loads(captured.out)
-        assert data["version"] == "0.1.0"
+        assert data["version"] == "0.1.1"
         assert "servers" in data
         assert len(data["servers"]) == len(SERVER_REGISTRY)
 
@@ -368,11 +363,11 @@ class TestShowVersion:
     def test_basic_version(self, capsys):
         show_version(verbose=False)
         captured = capsys.readouterr()
-        assert "0.1.0" in captured.out
+        assert "0.1.1" in captured.out
 
     def test_verbose_version(self, capsys):
         show_version(verbose=True)
         captured = capsys.readouterr()
-        assert "0.1.0" in captured.out
+        assert "0.1.1" in captured.out
         assert "Python:" in captured.out
         assert "Available servers:" in captured.out

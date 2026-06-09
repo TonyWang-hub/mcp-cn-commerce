@@ -3938,7 +3938,7 @@ class TestRequestResultCache:
 
     def test_disabled_cache(self):
         config = RequestCacheConfig(enabled=False)
-        cache = RequestResultCache(config)
+        RequestResultCache(config)
         assert config.enabled is False
 
 

@@ -1,6 +1,16 @@
 # SDD 规格：仓库整改 Items 1–5
 
-> 状态：草案（待执行）· 分支 `refactor/sdd-items-1-5`
+> 状态：✅ 已全部实现并验证 · 分支 `refactor/sdd-items-1-5`
+>
+> 验证（CI 分四 job，本地按其方式分开跑）：`pytest tests/` 912、`pytest servers/` 358、
+> black ✓、ruff ✓、mypy Success、pylint 10.00/10 (exit 0)、bandit 0 issues。
+> 提交：Phase 0 → Item 4 → Item 5 → Item 3A/3B → Item 3C/3D → CI 修复，共 6 个 commit。
+>
+> 集成过程额外发现并修复 3 个潜伏 bug（因死代码从未运行而被掩盖）：
+> ExportFormat 的 `@dataclass` 误用、FailoverManager 非可重入锁死锁、
+> pinduoduo/xiaohongshu 回退构造用错关键字参数。
+>
+> 草案（原始计划）· 分支 `refactor/sdd-items-1-5`
 > 决策来源：架构/安全/测试/工程化四维分析 + 用户拍板（第3项=接入产品；第5项=shared 独立成包）
 
 ## 背景与核心问题

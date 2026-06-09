@@ -2619,10 +2619,7 @@ class TestFailoverManager:
     def test_report_failure_marks_unhealthy_after_threshold(self):
         lb = LoadBalancer()
         lb.add_endpoint("https://api1.example.com")
-        fm = FailoverManager(
-            load_balancer=lb,
-            config=FailoverConfig(max_failures=3)
-        )
+        fm = FailoverManager(load_balancer=lb, config=FailoverConfig(max_failures=3))
 
         fm.report_failure("https://api1.example.com")
         fm.report_failure("https://api1.example.com")
@@ -2667,7 +2664,7 @@ class TestFailoverManager:
             config=FailoverConfig(
                 max_failures=3,
                 circuit_breaker_threshold=0.5,
-            )
+            ),
         )
 
         # Need at least 5 requests to evaluate circuit breaker
@@ -2682,10 +2679,7 @@ class TestFailoverManager:
     def test_circuit_breaker_stays_closed_on_low_failure_rate(self):
         lb = LoadBalancer()
         lb.add_endpoint("https://api1.example.com")
-        fm = FailoverManager(
-            load_balancer=lb,
-            config=FailoverConfig(circuit_breaker_threshold=0.5)
-        )
+        fm = FailoverManager(load_balancer=lb, config=FailoverConfig(circuit_breaker_threshold=0.5))
 
         # 2 failures out of 5 = 40% < 50% threshold
         for _ in range(2):
@@ -2703,7 +2697,7 @@ class TestFailoverManager:
             config=FailoverConfig(
                 circuit_breaker_threshold=0.5,
                 circuit_breaker_reset_seconds=0.01,  # Very short timeout
-            )
+            ),
         )
 
         # Open the circuit breaker
@@ -2714,6 +2708,7 @@ class TestFailoverManager:
 
         # Wait for reset timeout
         import time as _time
+
         _time.sleep(0.02)
 
         # Should be closed now
@@ -2733,10 +2728,7 @@ class TestFailoverManager:
         lb = LoadBalancer()
         lb.add_endpoint("https://api1.example.com")
         lb.add_endpoint("https://api2.example.com")
-        fm = FailoverManager(
-            load_balancer=lb,
-            config=FailoverConfig(circuit_breaker_threshold=0.5)
-        )
+        fm = FailoverManager(load_balancer=lb, config=FailoverConfig(circuit_breaker_threshold=0.5))
 
         # Open circuit for api1
         for _ in range(5):
@@ -2799,10 +2791,7 @@ class TestFailoverManager:
     @pytest.mark.asyncio
     async def test_recovery_monitor_disabled(self):
         lb = LoadBalancer()
-        fm = FailoverManager(
-            load_balancer=lb,
-            config=FailoverConfig(enable_auto_recovery=False)
-        )
+        fm = FailoverManager(load_balancer=lb, config=FailoverConfig(enable_auto_recovery=False))
 
         await fm.start_recovery_monitor()
         assert fm._recovery_task is None
@@ -2815,7 +2804,7 @@ class TestFailoverManager:
             config=FailoverConfig(
                 enable_auto_recovery=True,
                 recovery_check_interval=0.05,
-            )
+            ),
         )
 
         await fm.start_recovery_monitor()

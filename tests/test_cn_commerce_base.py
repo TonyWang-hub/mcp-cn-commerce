@@ -25,6 +25,8 @@ if str(_shared_dir) not in sys.path:
 from cn_commerce_base import (
     DEFAULT_RETRY,
     RATE_LIMIT_RETRY,
+    AuditEntry,
+    AuditLog,
     BatchRequestItem,
     BatchResultItem,
     BatchSummary,
@@ -36,6 +38,8 @@ from cn_commerce_base import (
     ConfigurableRateLimiter,
     ConfigValidationError,
     DecompressionStats,
+    EncryptionConfig,
+    EncryptionMethod,
     EndpointMetrics,
     EndpointRateLimit,
     MetricsCollector,
@@ -50,6 +54,7 @@ from cn_commerce_base import (
     RequestCacheConfig,
     RequestCacheStats,
     RequestCompressor,
+    RequestEncryptor,
     RequestPriority,
     RequestResultCache,
     ResponseDecompressor,
@@ -4441,3 +4446,752 @@ class TestCommerceMCPBaseCacheAndCompression:
         assert client._result_cache.config.max_size == 32
         assert client._compressor.config.method == CompressionMethod.GZIP
         assert client._configurable_limiter.config.default_requests_per_second == 5.0
+
+
+# ── EncryptionMethod Tests ─────────────────────────────────
+
+
+class TestEncryptionMethod:
+    """Tests for EncryptionMethod enum values."""
+
+    def test_none_value(self):
+        assert EncryptionMethod.NONE == "none"
+
+    def test_aes_256_cbc_value(self):
+        assert EncryptionMethod.AES_256_CBC == "aes_256_cbc"
+
+    def test_xor_cipher_value(self):
+        assert EncryptionMethod.XOR_CIPHER == "xor_cipher"
+
+    def test_all_methods(self):
+        methods = list(EncryptionMethod)
+        assert len(methods) == 3
+
+
+# ── EncryptionConfig Tests ─────────────────────────────────
+
+
+class TestEncryptionConfig:
+    """Tests for EncryptionConfig dataclass."""
+
+    def test_default_config(self):
+        cfg = EncryptionConfig()
+        assert cfg.method == EncryptionMethod.NONE
+        assert cfg.encryption_key == ""
+        assert cfg.include_encrypted_header is True
+        assert cfg.header_name == "X-Encrypted"
+
+    def test_to_dict_masks_key(self):
+        cfg = EncryptionConfig(
+            method=EncryptionMethod.AES_256_CBC,
+            encryption_key="0123456789abcdef" * 4,
+        )
+        d = cfg.to_dict()
+        assert d["method"] == "aes_256_cbc"
+        assert "****" in d["encryption_key"]
+        assert d["encryption_key"] != "0123456789abcdef" * 4
+
+    def test_to_dict_empty_key(self):
+        cfg = EncryptionConfig(encryption_key="")
+        d = cfg.to_dict()
+        assert d["encryption_key"] == ""
+
+    def test_from_dict(self):
+        data = {
+            "method": "xor_cipher",
+            "encryption_key": "abcdef",
+            "include_encrypted_header": False,
+            "header_name": "X-Custom",
+        }
+        cfg = EncryptionConfig.from_dict(data)
+        assert cfg.method == EncryptionMethod.XOR_CIPHER
+        assert cfg.encryption_key == "abcdef"
+        assert cfg.include_encrypted_header is False
+        assert cfg.header_name == "X-Custom"
+
+    def test_from_dict_defaults(self):
+        cfg = EncryptionConfig.from_dict({})
+        assert cfg.method == EncryptionMethod.NONE
+        assert cfg.encryption_key == ""
+
+
+# ── RequestEncryptor Tests ─────────────────────────────────
+
+
+class TestRequestEncryptor:
+    """Tests for RequestEncryptor encrypt/decrypt."""
+
+    def test_none_encryption_passthrough(self):
+        enc = RequestEncryptor(EncryptionConfig(method=EncryptionMethod.NONE))
+        body = b'{"test": true}'
+        result, headers = enc.encrypt(body)
+        assert result == body
+        assert headers == {}
+
+    def test_none_decryption_passthrough(self):
+        enc = RequestEncryptor(EncryptionConfig(method=EncryptionMethod.NONE))
+        data = b'{"test": true}'
+        result = enc.decrypt(data)
+        assert result == data
+
+    def test_xor_encrypt_decrypt_roundtrip(self):
+        key = "deadbeef"
+        enc = RequestEncryptor(EncryptionConfig(
+            method=EncryptionMethod.XOR_CIPHER,
+            encryption_key=key,
+        ))
+        plaintext = b'{"order_id": "12345", "amount": 100}'
+        encrypted, headers = enc.encrypt(plaintext)
+
+        assert encrypted != plaintext
+        assert headers["X-Encrypted"] == "xor_cipher"
+
+        decrypted = enc.decrypt(encrypted)
+        assert decrypted == plaintext
+
+    def test_xor_empty_body(self):
+        enc = RequestEncryptor(EncryptionConfig(
+            method=EncryptionMethod.XOR_CIPHER,
+            encryption_key="ff",
+        ))
+        encrypted, _ = enc.encrypt(b"")
+        assert encrypted == b""
+        assert enc.decrypt(encrypted) == b""
+
+    def test_xor_custom_header_name(self):
+        enc = RequestEncryptor(EncryptionConfig(
+            method=EncryptionMethod.XOR_CIPHER,
+            encryption_key="aa",
+            header_name="X-Custom-Encrypt",
+        ))
+        _, headers = enc.encrypt(b"data")
+        assert "X-Custom-Encrypt" in headers
+        assert "X-Encrypted" not in headers
+
+    def test_xor_no_header_when_disabled(self):
+        enc = RequestEncryptor(EncryptionConfig(
+            method=EncryptionMethod.XOR_CIPHER,
+            encryption_key="aa",
+            include_encrypted_header=False,
+        ))
+        _, headers = enc.encrypt(b"data")
+        assert headers == {}
+
+    def test_missing_key_raises(self):
+        enc = RequestEncryptor(EncryptionConfig(
+            method=EncryptionMethod.XOR_CIPHER,
+            encryption_key="",
+        ))
+        with pytest.raises(ValueError, match="Encryption key is required"):
+            enc.encrypt(b"data")
+
+    def test_missing_key_decrypt_raises(self):
+        enc = RequestEncryptor(EncryptionConfig(
+            method=EncryptionMethod.XOR_CIPHER,
+            encryption_key="",
+        ))
+        with pytest.raises(ValueError, match="Encryption key is required"):
+            enc.decrypt(b"data")
+
+    def test_xor_key_cannot_be_empty(self):
+        enc = RequestEncryptor(EncryptionConfig(
+            method=EncryptionMethod.XOR_CIPHER,
+            encryption_key="",
+        ))
+        with pytest.raises(ValueError):
+            enc._xor_encrypt(b"test", b"")
+
+    def test_xor_large_body(self):
+        key = "1234567890abcdef"
+        enc = RequestEncryptor(EncryptionConfig(
+            method=EncryptionMethod.XOR_CIPHER,
+            encryption_key=key,
+        ))
+        body = os.urandom(10000)
+        encrypted, _ = enc.encrypt(body)
+        assert len(encrypted) == len(body)
+        assert enc.decrypt(encrypted) == body
+
+    def test_pkcs7_pad_unpad(self):
+        data = b"hello"
+        padded = RequestEncryptor._pkcs7_pad(data, 16)
+        assert len(padded) % 16 == 0
+        assert RequestEncryptor._pkcs7_unpad(padded) == data
+
+    def test_pkcs7_pad_full_block(self):
+        data = b"0123456789abcdef"  # exactly 16 bytes
+        padded = RequestEncryptor._pkcs7_pad(data, 16)
+        assert len(padded) == 32  # adds a full padding block
+        assert RequestEncryptor._pkcs7_unpad(padded) == data
+
+    def test_pkcs7_unpad_invalid(self):
+        with pytest.raises(ValueError, match="Cannot unpad empty data"):
+            RequestEncryptor._pkcs7_unpad(b"")
+
+    def test_pkcs7_unpad_bad_length(self):
+        with pytest.raises(ValueError, match="Invalid PKCS7 padding length"):
+            RequestEncryptor._pkcs7_unpad(b"\x00" + b"\x11" * 15)
+
+    def test_aes_wrong_key_length(self):
+        # 8 bytes hex = 4 bytes key (not 32)
+        enc = RequestEncryptor(EncryptionConfig(
+            method=EncryptionMethod.AES_256_CBC,
+            encryption_key="aabbccdd",
+        ))
+        with pytest.raises(ValueError, match="32-byte key"):
+            enc.encrypt(b"data")
+
+    def test_aes_decrypt_short_data(self):
+        enc = RequestEncryptor(EncryptionConfig(
+            method=EncryptionMethod.AES_256_CBC,
+            encryption_key="00" * 32,
+        ))
+        with pytest.raises(ValueError, match="too short"):
+            enc.decrypt(b"short")
+
+    def test_aes_encrypt_decrypt_roundtrip(self):
+        """Test AES-256-CBC encrypt/decrypt roundtrip (requires pyaes)."""
+        pyaes = pytest.importorskip("pyaes")
+        key = "0123456789abcdef" * 4  # 32 bytes
+        enc = RequestEncryptor(EncryptionConfig(
+            method=EncryptionMethod.AES_256_CBC,
+            encryption_key=key,
+        ))
+        plaintext = b'{"product_id": "SKU-001", "price": 99.99}'
+        encrypted, headers = enc.encrypt(plaintext)
+
+        assert encrypted != plaintext
+        assert len(encrypted) > len(plaintext)  # IV + padding
+        assert headers["X-Encrypted"] == "aes_256_cbc"
+
+        decrypted = enc.decrypt(encrypted)
+        assert decrypted == plaintext
+
+    def test_aes_different_iv_each_time(self):
+        """Each AES encryption should produce different ciphertext (random IV)."""
+        pyaes = pytest.importorskip("pyaes")
+        key = "aabbccdd" * 8
+        enc = RequestEncryptor(EncryptionConfig(
+            method=EncryptionMethod.AES_256_CBC,
+            encryption_key=key,
+        ))
+        body = b"same plaintext"
+        r1, _ = enc.encrypt(body)
+        r2, _ = enc.encrypt(body)
+        # IVs are different, so ciphertexts differ
+        assert r1 != r2
+        # But both decrypt to the same plaintext
+        assert enc.decrypt(r1) == body
+        assert enc.decrypt(r2) == body
+
+    def test_encryption_stats(self):
+        enc = RequestEncryptor(EncryptionConfig(
+            method=EncryptionMethod.XOR_CIPHER,
+            encryption_key="ab",
+        ))
+        enc.encrypt(b"hello")
+        enc.encrypt(b"world")
+        enc.decrypt(b"data")
+
+        stats = enc.get_stats()
+        assert stats["total_encrypted"] == 2
+        assert stats["total_decrypted"] == 1
+        assert stats["total_bytes_encrypted"] == 10
+        assert stats["total_bytes_decrypted"] == 4
+
+    def test_encryption_stats_reset(self):
+        enc = RequestEncryptor(EncryptionConfig(
+            method=EncryptionMethod.XOR_CIPHER,
+            encryption_key="ab",
+        ))
+        enc.encrypt(b"hello")
+        enc.reset_stats()
+        stats = enc.get_stats()
+        assert stats["total_encrypted"] == 0
+
+    def test_unsupported_method_raises(self):
+        enc = RequestEncryptor(EncryptionConfig(
+            method=EncryptionMethod.NONE,
+            encryption_key="ab",
+        ))
+        # Force an invalid method for testing
+        enc.config.method = "invalid"
+        with pytest.raises(ValueError, match="Unsupported encryption method"):
+            enc.encrypt(b"data")
+
+
+# ── AuditEntry Tests ───────────────────────────────────────
+
+
+class TestAuditEntry:
+    """Tests for AuditEntry dataclass."""
+
+    def test_defaults(self):
+        entry = AuditEntry()
+        assert entry.audit_id  # auto-generated UUID
+        assert entry.timestamp  # auto-generated ISO 8601
+        assert entry.method == ""
+        assert entry.status_code == 0
+        assert entry.encrypted is False
+
+    def test_custom_values(self):
+        entry = AuditEntry(
+            method="GET",
+            path="/api/order",
+            platform="TAOBAO",
+            status_code=200,
+            latency_ms=45.2,
+            encrypted=True,
+        )
+        d = entry.to_dict()
+        assert d["method"] == "GET"
+        assert d["path"] == "/api/order"
+        assert d["platform"] == "TAOBAO"
+        assert d["status_code"] == 200
+        assert d["latency_ms"] == 45.2
+        assert d["encrypted"] is True
+
+    def test_to_dict_structure(self):
+        entry = AuditEntry(
+            method="POST",
+            path="/api/test",
+            error="timeout",
+        )
+        d = entry.to_dict()
+        assert "audit_id" in d
+        assert "request_id" in d
+        assert "timestamp" in d
+        assert d["error"] == "timeout"
+
+    def test_metadata(self):
+        entry = AuditEntry(metadata={"user_id": "U001", "ip": "10.0.0.1"})
+        d = entry.to_dict()
+        assert d["metadata"]["user_id"] == "U001"
+
+
+# ── AuditLog Tests ─────────────────────────────────────────
+
+
+class TestAuditLog:
+    """Tests for AuditLog class."""
+
+    def test_empty_log(self):
+        log = AuditLog()
+        assert log.entry_count == 0
+        assert log.query() == []
+
+    def test_log_single_entry(self):
+        log = AuditLog()
+        entry = AuditEntry(method="GET", path="/api/test", platform="TAOBAO")
+        log.log(entry)
+        assert log.entry_count == 1
+
+    def test_query_all(self):
+        log = AuditLog()
+        for i in range(5):
+            log.log(AuditEntry(method="GET", path=f"/api/item/{i}"))
+        results = log.query(limit=10)
+        assert len(results) == 5
+
+    def test_query_by_platform(self):
+        log = AuditLog()
+        log.log(AuditEntry(method="GET", path="/a", platform="TAOBAO"))
+        log.log(AuditEntry(method="GET", path="/b", platform="DOUDIAN"))
+        log.log(AuditEntry(method="GET", path="/c", platform="TAOBAO"))
+
+        results = log.query(platform="TAOBAO")
+        assert len(results) == 2
+
+    def test_query_by_method(self):
+        log = AuditLog()
+        log.log(AuditEntry(method="GET", path="/a"))
+        log.log(AuditEntry(method="POST", path="/b"))
+        log.log(AuditEntry(method="GET", path="/c"))
+
+        results = log.query(method="POST")
+        assert len(results) == 1
+
+    def test_query_by_path(self):
+        log = AuditLog()
+        log.log(AuditEntry(method="GET", path="/api/order/1"))
+        log.log(AuditEntry(method="GET", path="/api/product/2"))
+        log.log(AuditEntry(method="GET", path="/api/order/3"))
+
+        results = log.query(path="/api/order")
+        assert len(results) == 2
+
+    def test_query_by_status_code(self):
+        log = AuditLog()
+        log.log(AuditEntry(method="GET", path="/a", status_code=200))
+        log.log(AuditEntry(method="GET", path="/b", status_code=500))
+        log.log(AuditEntry(method="GET", path="/c", status_code=200))
+
+        results = log.query(status_code=500)
+        assert len(results) == 1
+
+    def test_query_errors_only(self):
+        log = AuditLog()
+        log.log(AuditEntry(method="GET", path="/a"))
+        log.log(AuditEntry(method="GET", path="/b", error="timeout"))
+        log.log(AuditEntry(method="GET", path="/c"))
+
+        results = log.query(errors_only=True)
+        assert len(results) == 1
+
+    def test_query_encrypted_only(self):
+        log = AuditLog()
+        log.log(AuditEntry(method="POST", path="/a", encrypted=True))
+        log.log(AuditEntry(method="POST", path="/b", encrypted=False))
+        log.log(AuditEntry(method="POST", path="/c", encrypted=True))
+
+        results = log.query(encrypted_only=True)
+        assert len(results) == 2
+
+    def test_query_latency_filter(self):
+        log = AuditLog()
+        log.log(AuditEntry(method="GET", path="/a", latency_ms=10.0))
+        log.log(AuditEntry(method="GET", path="/b", latency_ms=100.0))
+        log.log(AuditEntry(method="GET", path="/c", latency_ms=500.0))
+
+        results = log.query(min_latency_ms=50.0)
+        assert len(results) == 2
+
+        results = log.query(max_latency_ms=100.0)
+        assert len(results) == 2
+
+    def test_query_pagination(self):
+        log = AuditLog()
+        for i in range(20):
+            log.log(AuditEntry(method="GET", path=f"/api/{i}"))
+
+        page1 = log.query(limit=5, offset=0)
+        page2 = log.query(limit=5, offset=5)
+        assert len(page1) == 5
+        assert len(page2) == 5
+        # Results are most-recent-first, so different pages have different entries
+        assert page1[0]["audit_id"] != page2[0]["audit_id"]
+
+    def test_max_entries_eviction(self):
+        log = AuditLog(max_entries=5)
+        for i in range(10):
+            log.log(AuditEntry(method="GET", path=f"/api/{i}"))
+        assert log.entry_count == 5
+
+    def test_combined_filters(self):
+        log = AuditLog()
+        log.log(AuditEntry(method="POST", path="/api/order", platform="TAOBAO", status_code=200))
+        log.log(AuditEntry(method="POST", path="/api/order", platform="DOUDIAN", status_code=200))
+        log.log(AuditEntry(method="GET", path="/api/order", platform="TAOBAO", status_code=200))
+
+        results = log.query(platform="TAOBAO", method="POST")
+        assert len(results) == 1
+
+    def test_stats_empty(self):
+        log = AuditLog()
+        stats = log.get_stats()
+        assert stats["total_entries"] == 0
+        assert stats["error_count"] == 0
+
+    def test_stats_with_entries(self):
+        log = AuditLog()
+        log.log(AuditEntry(method="GET", path="/a", platform="TAOBAO", encrypted=True))
+        log.log(AuditEntry(method="POST", path="/b", platform="TAOBAO", error="fail"))
+        log.log(AuditEntry(method="GET", path="/c", platform="DOUDIAN"))
+
+        stats = log.get_stats()
+        assert stats["total_entries"] == 3
+        assert stats["error_count"] == 1
+        assert stats["encrypted_count"] == 1
+        assert stats["platforms"]["TAOBAO"] == 2
+        assert stats["platforms"]["DOUDIAN"] == 1
+        assert stats["methods"]["GET"] == 2
+        assert stats["methods"]["POST"] == 1
+
+    def test_export_json(self):
+        log = AuditLog()
+        log.log(AuditEntry(method="GET", path="/api/test"))
+        json_str = log.export_json()
+        data = json.loads(json_str)
+        assert isinstance(data, list)
+        assert len(data) == 1
+        assert data[0]["method"] == "GET"
+
+    def test_export_json_with_limit(self):
+        log = AuditLog()
+        for i in range(10):
+            log.log(AuditEntry(method="GET", path=f"/api/{i}"))
+        json_str = log.export_json(limit=3)
+        data = json.loads(json_str)
+        assert len(data) == 3
+
+    def test_export_csv(self):
+        log = AuditLog()
+        log.log(AuditEntry(method="GET", path="/api/test", platform="TAOBAO"))
+        csv_str = log.export_csv()
+        assert "method" in csv_str
+        assert "GET" in csv_str
+
+    def test_export_csv_empty(self):
+        log = AuditLog()
+        assert log.export_csv() == ""
+
+    def test_export_to_file_json(self, tmp_path):
+        log = AuditLog()
+        log.log(AuditEntry(method="GET", path="/api/test"))
+        file_path = str(tmp_path / "audit.json")
+        result = log.export_to_file(file_path, format="json")
+        assert result == file_path
+        with open(file_path) as f:
+            data = json.loads(f.read())
+        assert len(data) == 1
+
+    def test_export_to_file_csv(self, tmp_path):
+        log = AuditLog()
+        log.log(AuditEntry(method="GET", path="/api/test"))
+        file_path = str(tmp_path / "audit.csv")
+        result = log.export_to_file(file_path, format="csv")
+        assert result == file_path
+        with open(file_path) as f:
+            content = f.read()
+        assert "GET" in content
+
+    def test_export_to_file_invalid_format(self, tmp_path):
+        log = AuditLog()
+        with pytest.raises(ValueError, match="Unsupported export format"):
+            log.export_to_file(str(tmp_path / "out.xml"), format="xml")
+
+    def test_clear(self):
+        log = AuditLog()
+        log.log(AuditEntry(method="GET", path="/a"))
+        log.log(AuditEntry(method="GET", path="/b"))
+        count = log.clear()
+        assert count == 2
+        assert log.entry_count == 0
+
+
+# ── CommerceMCPBase Encryption Integration ──────────────────
+
+
+class TestCommerceMCPBaseEncryption:
+    """Integration tests for encryption in CommerceMCPBase."""
+
+    def test_default_no_encryption(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        assert client._encryptor.config.method == EncryptionMethod.NONE
+
+    def test_custom_encryption_config(self):
+        cfg = EncryptionConfig(
+            method=EncryptionMethod.XOR_CIPHER,
+            encryption_key="aabb",
+        )
+        client = CommerceMCPBase(app_key="k", app_secret="s", encryption_config=cfg)
+        assert client._encryptor.config.method == EncryptionMethod.XOR_CIPHER
+
+    def test_get_encryption_stats(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        stats = client.get_encryption_stats()
+        assert "method" in stats
+        assert stats["method"] == "none"
+
+    def test_get_encryption_config(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        cfg = client.get_encryption_config()
+        assert cfg["method"] == "none"
+
+    @pytest.mark.asyncio
+    async def test_xor_encrypted_post_request(self):
+        """POST request with XOR encryption should encrypt body and add header."""
+        cfg = EncryptionConfig(
+            method=EncryptionMethod.XOR_CIPHER,
+            encryption_key="abcdef01",
+        )
+        client = CommerceMCPBase(app_key="k", app_secret="s", encryption_config=cfg)
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": "ok"}
+        mock_response.status_code = 200
+        mock_response.headers = {}
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client._request("POST", "/api/test", data={"key": "value"})
+
+        assert result == {"result": "ok"}
+        # Verify post was called (encryption happened)
+        mock_client.post.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_encrypted_request_logged_in_audit(self):
+        """Encrypted requests should be logged with encrypted=True."""
+        cfg = EncryptionConfig(
+            method=EncryptionMethod.XOR_CIPHER,
+            encryption_key="ab",
+        )
+        client = CommerceMCPBase(app_key="k", app_secret="s", encryption_config=cfg)
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"ok": True}
+        mock_response.status_code = 200
+        mock_response.headers = {}
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            await client._request("POST", "/api/test", data={"a": 1})
+
+        entries = client.query_audit(limit=10)
+        assert len(entries) == 1
+        assert entries[0]["encrypted"] is True
+
+
+# ── CommerceMCPBase Audit Integration ───────────────────────
+
+
+class TestCommerceMCPBaseAudit:
+    """Integration tests for audit logging in CommerceMCPBase."""
+
+    def test_default_audit_log(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        assert isinstance(client._audit_log, AuditLog)
+
+    def test_custom_audit_max_entries(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s", audit_max_entries=1000)
+        assert client._audit_log._max_entries == 1000
+
+    @pytest.mark.asyncio
+    async def test_request_logged_in_audit(self):
+        """Successful requests should be logged."""
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": "ok"}
+        mock_response.status_code = 200
+        mock_response.headers = {}
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            await client._request("GET", "/api/products")
+
+        stats = client.get_audit_stats()
+        assert stats["total_entries"] == 1
+
+    @pytest.mark.asyncio
+    async def test_failed_request_logged_with_error(self):
+        """Failed requests should include error message."""
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = httpx.ConnectError("Connection refused")
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            with pytest.raises(httpx.ConnectError):
+                await client._request("GET", "/api/test")
+
+        entries = client.query_audit(errors_only=True)
+        assert len(entries) == 1
+        assert "Connection refused" in entries[0]["error"]
+
+    @pytest.mark.asyncio
+    async def test_audit_records_platform(self):
+        """Audit entries should include the platform name."""
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"ok": 1}
+        mock_response.status_code = 200
+        mock_response.headers = {}
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            await client._request("GET", "/api/test")
+
+        entries = client.query_audit()
+        assert entries[0]["platform"] == "COMMERCEMCPBASE"
+
+    def test_query_audit_convenience(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        # Should not raise
+        results = client.query_audit(limit=10)
+        assert isinstance(results, list)
+
+    def test_export_audit_json(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        json_str = client.export_audit_json()
+        assert json.loads(json_str) == []
+
+    def test_export_audit_csv(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        csv_str = client.export_audit_csv()
+        assert csv_str == ""
+
+    def test_get_audit_log(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        log = client.get_audit_log()
+        assert isinstance(log, AuditLog)
+
+
+# ── CommerceMCPBase Encryption + Audit Combined ─────────────
+
+
+class TestCommerceMCPBaseEncryptionAuditCombined:
+    """Tests for combined encryption and audit features."""
+
+    def test_all_new_features_initialized(self):
+        """Client should have encryptor and audit log."""
+        client = CommerceMCPBase()
+        assert isinstance(client._encryptor, RequestEncryptor)
+        assert isinstance(client._audit_log, AuditLog)
+
+    def test_custom_configs_combined(self):
+        """All custom configs should be accepted together."""
+        enc_cfg = EncryptionConfig(
+            method=EncryptionMethod.XOR_CIPHER,
+            encryption_key="aabb",
+        )
+        client = CommerceMCPBase(
+            app_key="k",
+            app_secret="s",
+            encryption_config=enc_cfg,
+            audit_max_entries=5000,
+        )
+        assert client._encryptor.config.method == EncryptionMethod.XOR_CIPHER
+        assert client._audit_log._max_entries == 5000
+
+    @pytest.mark.asyncio
+    async def test_encrypted_request_appears_in_audit_export(self):
+        """Encrypted request should appear in JSON export."""
+        cfg = EncryptionConfig(
+            method=EncryptionMethod.XOR_CIPHER,
+            encryption_key="abcd",
+        )
+        client = CommerceMCPBase(app_key="k", app_secret="s", encryption_config=cfg)
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"ok": 1}
+        mock_response.status_code = 200
+        mock_response.headers = {}
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            await client._request("POST", "/api/order", data={"item": "test"})
+
+        json_str = client.export_audit_json()
+        entries = json.loads(json_str)
+        assert len(entries) == 1
+        assert entries[0]["encrypted"] is True
+        assert entries[0]["method"] == "POST"

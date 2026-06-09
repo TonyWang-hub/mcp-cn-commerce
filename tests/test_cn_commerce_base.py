@@ -35,6 +35,10 @@ from cn_commerce_base import (
     CompressionMethod,
     ConfigurableRateLimiter,
     ConfigValidationError,
+    DebugBreakpoint,
+    DebugBreakpointManager,
+    DebugLogger,
+    DebugLogLevel,
     EndpointMetrics,
     EndpointRateLimit,
     MetricsCollector,
@@ -46,12 +50,18 @@ from cn_commerce_base import (
     RateLimitConfig,
     RateLimiter,
     RateLimitStats,
+    ReplayConfig,
     RequestCompressor,
     RequestPriority,
+    RequestRecord,
+    RequestRecorder,
+    RequestReplayer,
+    RequestTracer,
     RetryableError,
     RetryConfig,
     SensitiveDataFilter,
     SignMethod,
+    TraceSpan,
     WarmupResult,
     WarmupTask,
     format_error_response,
@@ -3681,3 +3691,356 @@ class TestCommerceMCPBasePriority:
         stats = client.get_priority_stats()
         assert stats["stats"]["total_dispatched"] == 1
         assert stats["stats"]["by_priority"]["high"] == 1
+
+
+# ── RequestRecord Tests ─────────────────────────────────────
+
+
+class TestRequestRecord:
+    def test_default_values(self):
+        rec = RequestRecord()
+        assert rec.record_id != ""
+        assert rec.method == ""
+        assert rec.path == ""
+        assert rec.params == {}
+        assert rec.timestamp > 0
+
+    def test_custom_values(self):
+        rec = RequestRecord(method="GET", path="/api/orders", params={"page": 1}, platform="TAOBAO", tags=["orders"])
+        assert rec.method == "GET"
+        assert rec.platform == "TAOBAO"
+
+    def test_to_dict(self):
+        rec = RequestRecord(method="GET", path="/api/test")
+        d = rec.to_dict()
+        assert d["method"] == "GET"
+        assert "record_id" in d
+
+    def test_from_dict(self):
+        data = {"record_id": "test-id", "method": "POST", "path": "/api/orders", "platform": "OCEANENGINE"}
+        rec = RequestRecord.from_dict(data)
+        assert rec.record_id == "test-id"
+        assert rec.method == "POST"
+
+    def test_roundtrip(self):
+        original = RequestRecord(method="GET", path="/api/test", params={"page": 1}, status_code=200)
+        restored = RequestRecord.from_dict(original.to_dict())
+        assert restored.method == original.method
+        assert restored.path == original.path
+
+    def test_params_default_factory(self):
+        a = RequestRecord()
+        b = RequestRecord()
+        a.params["key"] = "val"
+        assert "key" not in b.params
+
+
+class TestReplayConfig:
+    def test_default_values(self):
+        cfg = ReplayConfig()
+        assert cfg.max_records == 1000
+        assert cfg.record_responses is True
+        assert cfg.match_strategy == "exact"
+
+    def test_roundtrip(self):
+        original = ReplayConfig(max_records=100, replay_delay_ms=25.0)
+        restored = ReplayConfig.from_dict(original.to_dict())
+        assert restored.max_records == 100
+
+
+class TestRequestRecorder:
+    def test_basic_record(self):
+        rec = RequestRecorder()
+        r = rec.record(method="GET", path="/api/test")
+        assert r.method == "GET"
+        assert len(rec.get_records()) == 1
+
+    def test_record_without_responses(self):
+        rec = RequestRecorder(ReplayConfig(record_responses=False))
+        r = rec.record(method="GET", path="/api/test", response={"x": 1})
+        assert r.response is None
+
+    def test_max_records_eviction(self):
+        rec = RequestRecorder(ReplayConfig(max_records=3))
+        for i in range(5):
+            rec.record(method="GET", path=f"/api/{i}")
+        assert len(rec.get_records()) == 3
+
+    def test_get_record_by_id(self):
+        rec = RequestRecorder()
+        r = rec.record(method="GET", path="/api/test")
+        assert rec.get_record(r.record_id) is not None
+        assert rec.get_record("nope") is None
+
+    def test_filter_by_method(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/a")
+        rec.record(method="POST", path="/b")
+        assert len(rec.filter(method="GET")) == 1
+
+    def test_filter_by_path(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/api/orders")
+        rec.record(method="GET", path="/api/products")
+        assert len(rec.filter(path="/api/orders")) == 1
+
+    def test_filter_by_platform(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/a", platform="TAOBAO")
+        rec.record(method="GET", path="/b", platform="OCEANENGINE")
+        assert len(rec.filter(platform="TAOBAO")) == 1
+
+    def test_filter_by_tags(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/a", tags=["orders"])
+        rec.record(method="GET", path="/b", tags=["products"])
+        assert len(rec.filter(tags=["orders"])) == 1
+
+    def test_clear(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/a")
+        assert rec.clear() == 1
+        assert len(rec.get_records()) == 0
+
+    def test_export_import_json(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/api/test")
+        json_str = rec.export_json()
+        new_rec = RequestRecorder()
+        assert new_rec.import_json(json_str) == 1
+
+    def test_export_import_file(self, tmp_path):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/api/test")
+        fp = str(tmp_path / "records.json")
+        rec.export_to_file(fp)
+        new_rec = RequestRecorder()
+        assert new_rec.import_from_file(fp) == 1
+
+    def test_stats(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/a")
+        stats = rec.get_stats()
+        assert stats["record_count"] == 1
+        assert stats["total_recorded"] == 1
+
+
+class TestRequestReplayer:
+    @pytest.mark.asyncio
+    async def test_replay_single(self):
+        rec = RequestRecorder()
+        r = rec.record(method="GET", path="/api/test", params={"page": 1}, response={"original": True})
+        replayer = RequestReplayer(rec)
+
+        async def exec_fn(method, path, params, data):
+            return {"new": True}
+
+        result = await replayer.replay(r, exec_fn)
+        assert result["success"] is True
+        assert result["new_response"] == {"new": True}
+
+    @pytest.mark.asyncio
+    async def test_replay_error(self):
+        rec = RequestRecorder()
+        r = rec.record(method="GET", path="/api/test")
+        replayer = RequestReplayer(rec)
+
+        async def fail(**kw):
+            raise ValueError("fail")
+
+        result = await replayer.replay(r, fail)
+        assert result["success"] is False
+        assert "fail" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_replay_all(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/a")
+        rec.record(method="GET", path="/b")
+        replayer = RequestReplayer(rec)
+
+        async def exec_fn(**kw):
+            return {"ok": True}
+
+        results = await replayer.replay_all(exec_fn)
+        assert len(results) == 2
+
+    @pytest.mark.asyncio
+    async def test_validate_replay_match(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/api/test", response={"result": "ok"})
+        replayer = RequestReplayer(rec)
+
+        async def exec_fn(**kw):
+            return {"result": "different"}
+
+        v = await replayer.validate_replay(exec_fn)
+        assert v["matched"] == 1
+
+    @pytest.mark.asyncio
+    async def test_validate_replay_mismatch(self):
+        rec = RequestRecorder()
+        rec.record(method="GET", path="/api/test", response={"a": 1, "b": 2})
+        replayer = RequestReplayer(rec)
+
+        async def exec_fn(**kw):
+            return {"a": 1}
+
+        v = await replayer.validate_replay(exec_fn)
+        assert v["mismatched"] == 1
+
+    def test_responses_match(self):
+        assert RequestReplayer._responses_match({"a": 1}, {"a": 2}) is True
+        assert RequestReplayer._responses_match({"a": 1}, {"b": 2}) is False
+
+
+class TestTraceSpan:
+    def test_default_values(self):
+        span = TraceSpan()
+        assert span.span_id != ""
+        assert span.is_active is True
+
+    def test_finish(self):
+        span = TraceSpan()
+        span.finish("ok")
+        assert span.is_active is False
+        assert span.status == "ok"
+        assert span.duration_ms >= 0
+
+    def test_set_attribute(self):
+        span = TraceSpan()
+        span.set_attribute("key", "val")
+        assert span.attributes["key"] == "val"
+
+    def test_add_event(self):
+        span = TraceSpan()
+        span.add_event("test_event")
+        assert len(span.events) == 1
+
+
+class TestRequestTracer:
+    def test_init(self):
+        tracer = RequestTracer(service_name="test")
+        assert tracer.service_name == "test"
+
+    def test_start_finish_span(self):
+        tracer = RequestTracer()
+        span = tracer.start_span("test")
+        assert len(tracer.get_active_spans()) == 1
+        tracer.finish_span(span)
+        assert len(tracer.get_active_spans()) == 0
+
+    def test_parent_child(self):
+        tracer = RequestTracer()
+        parent = tracer.start_span("parent")
+        child = tracer.start_span("child", parent=parent)
+        assert child.parent_id == parent.span_id
+        assert child.trace_id == parent.trace_id
+
+    def test_trace_summary(self):
+        tracer = RequestTracer(service_name="test")
+        span = tracer.start_span("root")
+        tracer.finish_span(span)
+        s = tracer.get_trace_summary()
+        assert s["span_count"] == 1
+        assert s["status"] == "ok"
+
+    def test_clear(self):
+        tracer = RequestTracer()
+        tracer.start_span("test")
+        tracer.clear()
+        assert len(tracer.get_spans()) == 0
+
+
+class TestDebugLogLevel:
+    def test_values(self):
+        assert DebugLogLevel.TRACE == "trace"
+        assert DebugLogLevel.ERROR == "error"
+
+
+class TestDebugLogger:
+    def test_log_and_get(self):
+        log = DebugLogger()
+        entry = log.log(DebugLogLevel.INFO, "test", {"k": "v"})
+        assert entry is not None
+        assert entry.message == "test"
+
+    def test_level_filtering(self):
+        log = DebugLogger(level=DebugLogLevel.WARN)
+        assert log.log(DebugLogLevel.DEBUG, "skip") is None
+        assert log.log(DebugLogLevel.ERROR, "keep") is not None
+
+    def test_get_entries(self):
+        log = DebugLogger()
+        log.log(DebugLogLevel.INFO, "a")
+        log.log(DebugLogLevel.ERROR, "b")
+        assert len(log.get_entries()) == 2
+        assert len(log.get_entries(level=DebugLogLevel.ERROR)) == 1
+
+    def test_export_clear(self):
+        log = DebugLogger()
+        log.log(DebugLogLevel.INFO, "test")
+        json_str = log.export_json()
+        assert len(json.loads(json_str)) == 1
+        assert log.clear() == 1
+
+    def test_stats(self):
+        log = DebugLogger(level=DebugLogLevel.WARN)
+        log.log(DebugLogLevel.INFO, "filtered")
+        log.log(DebugLogLevel.ERROR, "kept")
+        stats = log.get_stats()
+        assert stats["total_logged"] == 1
+        assert stats["total_filtered"] == 1
+
+
+class TestDebugBreakpoint:
+    def test_evaluate_no_condition(self):
+        bp = DebugBreakpoint(enabled=True)
+        assert bp.evaluate() is True
+
+    def test_evaluate_disabled(self):
+        bp = DebugBreakpoint(enabled=False)
+        assert bp.evaluate() is False
+
+    def test_evaluate_condition(self):
+        bp = DebugBreakpoint(condition=lambda status_code, **kw: status_code >= 400)
+        assert bp.evaluate(status_code=500) is True
+        assert bp.evaluate(status_code=200) is False
+
+
+class TestDebugBreakpointManager:
+    def test_add_remove(self):
+        mgr = DebugBreakpointManager()
+        bp = mgr.add_breakpoint(name="test")
+        assert len(mgr.list_breakpoints()) == 1
+        assert mgr.remove_breakpoint(bp.breakpoint_id) is True
+        assert len(mgr.list_breakpoints()) == 0
+
+    def test_should_break(self):
+        mgr = DebugBreakpointManager()
+        mgr.add_breakpoint(name="errors", condition=lambda status_code, **kw: status_code >= 400)
+        assert mgr.should_break(status_code=500) is not None
+        assert mgr.should_break(status_code=200) is None
+
+    def test_hit_count_and_history(self):
+        mgr = DebugBreakpointManager()
+        mgr.add_breakpoint(name="test")
+        mgr.should_break(method="GET")
+        mgr.should_break(method="POST")
+        assert mgr.list_breakpoints()[0].hit_count == 2
+        assert len(mgr.get_hit_history()) == 2
+
+    def test_clear(self):
+        mgr = DebugBreakpointManager()
+        mgr.add_breakpoint(name="test")
+        mgr.should_break()
+        mgr.clear()
+        assert len(mgr.list_breakpoints()) == 0
+
+    def test_stats(self):
+        mgr = DebugBreakpointManager()
+        mgr.add_breakpoint(name="test")
+        mgr.should_break()
+        stats = mgr.get_stats()
+        assert stats["total_checks"] == 1
+        assert stats["total_hits"] == 1

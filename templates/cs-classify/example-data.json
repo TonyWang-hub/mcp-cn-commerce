@@ -1,0 +1,37 @@
+{
+  "date_range": "2026-06-01 ~ 2026-06-09",
+  "total_refunds": 45,
+  "total_amount": 897600,
+  "total_orders": 980,
+  "refund_rate": 0.046,
+  "by_type": {
+    "refund_only": 28,
+    "return_and_refund": 17
+  },
+  "by_reason": {
+    "商品质量问题": {"count": 12, "amount": 238800, "avg_process_hours": 4.2},
+    "未收到货": {"count": 8, "amount": 159200, "avg_process_hours": 2.1},
+    "与描述不符": {"count": 10, "amount": 199000, "avg_process_hours": 6.5},
+    "尺码不合适": {"count": 7, "amount": 139300, "avg_process_hours": 18.3},
+    "不想要了": {"count": 5, "amount": 99500, "avg_process_hours": 1.0},
+    "其他": {"count": 3, "amount": 61800, "avg_process_hours": 3.8}
+  },
+  "by_platform": {
+    "doudian": {"count": 15, "amount": 298500},
+    "pdd": {"count": 12, "amount": 238800},
+    "jd": {"count": 8, "amount": 159200},
+    "xiaohongshu": {"count": 6, "amount": 119400},
+    "kuaishou": {"count": 4, "amount": 81700}
+  },
+  "trend": [
+    {"date": "2026-06-01", "count": 5, "amount": 99500},
+    {"date": "2026-06-02", "count": 3, "amount": 59700},
+    {"date": "2026-06-03", "count": 7, "amount": 139300},
+    {"date": "2026-06-04", "count": 4, "amount": 79600},
+    {"date": "2026-06-05", "count": 6, "amount": 119400},
+    {"date": "2026-06-06", "count": 8, "amount": 159200},
+    {"date": "2026-06-07", "count": 5, "amount": 99500},
+    {"date": "2026-06-08", "count": 4, "amount": 79600},
+    {"date": "2026-06-09", "count": 3, "amount": 61800}
+  ]
+}

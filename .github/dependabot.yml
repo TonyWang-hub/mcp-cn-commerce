@@ -42,3 +42,5 @@ updates:
     labels:
       - "dependencies"
       - "ci"
+    # 自动合并补丁版本更新
+    auto-merge: true

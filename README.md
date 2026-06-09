@@ -96,7 +96,22 @@ See [Docker documentation](docs/docker.md) for full usage, MCP client configurat
 
 ### Installation
 
-#### From GitHub Releases (recommended — no registration needed)
+#### From PyPI (recommended)
+
+```bash
+# Install base package
+pip install mcp-cn-commerce
+
+# Install single platform
+pip install mcp-cn-commerce[doudian]      # Douyin Shop
+pip install mcp-cn-commerce[jd]           # JD.com
+pip install mcp-cn-commerce[oceanengine]  # Ocean Engine
+
+# Install all platforms
+pip install mcp-cn-commerce[all]
+```
+
+#### From GitHub Releases
 
 ```bash
 # Visit the latest Release and download the .whl file
@@ -261,16 +276,11 @@ If you use mcp-cn-commerce in your research or project:
 
 ```bibtex
 @software{mcp-cn-commerce,
-  author = {Wang, Zhuo},
   title = {mcp-cn-commerce: MCP Servers for Chinese E-Commerce Platforms},
   year = {2026},
   url = {https://github.com/TonyWang-hub/mcp-cn-commerce}
 }
 ```
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=TonyWang-hub/mcp-cn-commerce&type=Date)](https://star-history.com/#TonyWang-hub/mcp-cn-commerce&Date)
 
 ## License
 

@@ -12,14 +12,13 @@ import hmac
 import json
 import logging
 import os
+import random
 import re
 import threading
 import time
-import uuid
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
 from typing import Any
 
 import httpx
@@ -286,6 +285,276 @@ class RateLimiter:
         self.last_request_time = time.time()
 
 
+# ── Metrics ────────────────────────────────────────────────
+
+
+@dataclass
+class EndpointMetrics:
+    """Metrics for a single API endpoint.
+
+    Attributes:
+        request_count: Total number of requests.
+        error_count: Number of failed requests.
+        total_latency_ms: Cumulative latency in milliseconds.
+        min_latency_ms: Minimum observed latency.
+        max_latency_ms: Maximum observed latency.
+        last_error_code: Most recent error code (0 if none).
+        last_error_msg: Most recent error message.
+    """
+
+    request_count: int = 0
+    error_count: int = 0
+    total_latency_ms: float = 0.0
+    min_latency_ms: float = float("inf")
+    max_latency_ms: float = 0.0
+    last_error_code: int = 0
+    last_error_msg: str = ""
+
+    @property
+    def avg_latency_ms(self) -> float:
+        """Average latency in milliseconds."""
+        if self.request_count == 0:
+            return 0.0
+        return self.total_latency_ms / self.request_count
+
+    @property
+    def error_rate(self) -> float:
+        """Error rate as a fraction (0.0 to 1.0)."""
+        if self.request_count == 0:
+            return 0.0
+        return self.error_count / self.request_count
+
+
+class MetricsCollector:
+    """Collects and aggregates request metrics across endpoints.
+
+    Thread-safe via a lock so it can be used from concurrent async tasks.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._endpoints: OrderedDict[str, EndpointMetrics] = OrderedDict()
+        self._global = EndpointMetrics()
+        self._start_time = time.time()
+
+    def record_request(
+        self,
+        endpoint: str,
+        latency_ms: float,
+        success: bool,
+        error_code: int = 0,
+        error_msg: str = "",
+    ) -> None:
+        """Record a completed request.
+
+        Args:
+            endpoint: The API endpoint path.
+            latency_ms: Request duration in milliseconds.
+            success: Whether the request succeeded.
+            error_code: Platform-specific error code (if failed).
+            error_msg: Error message (if failed).
+        """
+        with self._lock:
+            ep = self._endpoints.setdefault(endpoint, EndpointMetrics())
+            ep.request_count += 1
+            ep.total_latency_ms += latency_ms
+            ep.min_latency_ms = min(ep.min_latency_ms, latency_ms)
+            ep.max_latency_ms = max(ep.max_latency_ms, latency_ms)
+            if not success:
+                ep.error_count += 1
+                ep.last_error_code = error_code
+                ep.last_error_msg = error_msg
+
+            # Global aggregation
+            self._global.request_count += 1
+            self._global.total_latency_ms += latency_ms
+            self._global.min_latency_ms = min(self._global.min_latency_ms, latency_ms)
+            self._global.max_latency_ms = max(self._global.max_latency_ms, latency_ms)
+            if not success:
+                self._global.error_count += 1
+
+    def get_endpoint_metrics(self, endpoint: str) -> EndpointMetrics:
+        """Get metrics for a specific endpoint, or a default empty one."""
+        with self._lock:
+            return self._endpoints.get(endpoint, EndpointMetrics())
+
+    def get_global_metrics(self) -> EndpointMetrics:
+        """Get aggregated metrics across all endpoints."""
+        with self._lock:
+            return self._global
+
+    def get_all_metrics(self) -> dict[str, EndpointMetrics]:
+        """Get metrics for all recorded endpoints."""
+        with self._lock:
+            return dict(self._endpoints)
+
+    def get_summary(self) -> dict[str, Any]:
+        """Get a JSON-serializable summary of all metrics.
+
+        Returns:
+            Dict with ``uptime_seconds``, ``global``, and ``endpoints`` keys.
+        """
+        with self._lock:
+            uptime = time.time() - self._start_time
+            return {
+                "uptime_seconds": round(uptime, 2),
+                "global": {
+                    "total_requests": self._global.request_count,
+                    "total_errors": self._global.error_count,
+                    "avg_latency_ms": round(self._global.avg_latency_ms, 2),
+                    "error_rate": round(self._global.error_rate, 4),
+                },
+                "endpoints": {
+                    ep: {
+                        "requests": m.request_count,
+                        "errors": m.error_count,
+                        "avg_latency_ms": round(m.avg_latency_ms, 2),
+                        "min_latency_ms": m.min_latency_ms if m.min_latency_ms != float("inf") else 0.0,
+                        "max_latency_ms": m.max_latency_ms,
+                        "error_rate": round(m.error_rate, 4),
+                    }
+                    for ep, m in self._endpoints.items()
+                },
+            }
+
+    def reset(self) -> None:
+        """Reset all collected metrics."""
+        with self._lock:
+            self._endpoints.clear()
+            self._global = EndpointMetrics()
+            self._start_time = time.time()
+
+
+# ── Retry Mechanism ────────────────────────────────────────
+
+
+class RetryableError(Exception):
+    """Exception that signals the operation should be retried.
+
+    Wraps the original exception so callers can distinguish between
+    retryable and non-retryable failures.
+    """
+
+    def __init__(self, original: Exception, attempt: int) -> None:
+        self.original = original
+        self.attempt = attempt
+        super().__init__(f"Retryable error on attempt {attempt}: {original}")
+
+
+@dataclass
+class RetryConfig:
+    """Configuration for the retry mechanism.
+
+    Attributes:
+        max_retries: Maximum number of retry attempts (0 = no retries).
+        base_delay: Base delay in seconds for exponential backoff.
+        max_delay: Maximum delay cap in seconds.
+        jitter: Whether to add random jitter to the delay.
+        retryable_exceptions: Tuple of exception types that should be retried.
+        retryable_status_codes: Set of HTTP status codes that should be retried.
+        retryable_api_codes: Set of platform API error codes that should be retried.
+    """
+
+    max_retries: int = 3
+    base_delay: float = 1.0
+    max_delay: float = 60.0
+    jitter: bool = True
+    retryable_exceptions: tuple[type[Exception], ...] = (
+        httpx.ConnectError,
+        httpx.ReadTimeout,
+        httpx.WriteTimeout,
+        httpx.PoolTimeout,
+    )
+    retryable_status_codes: set[int] = field(default_factory=lambda: {429, 500, 502, 503, 504})
+    retryable_api_codes: set[int] = field(default_factory=lambda: set())
+
+    def compute_delay(self, attempt: int) -> float:
+        """Compute the delay before the next retry using exponential backoff.
+
+        Args:
+            attempt: The current attempt number (0-indexed).
+
+        Returns:
+            Delay in seconds.
+        """
+        delay = min(self.base_delay * (2**attempt), self.max_delay)
+        if self.jitter:
+            delay = delay * (0.5 + random.random())
+        return delay
+
+    def should_retry_http_status(self, status_code: int) -> bool:
+        """Check if an HTTP status code should trigger a retry."""
+        return status_code in self.retryable_status_codes
+
+    def should_retry_api_code(self, api_code: int) -> bool:
+        """Check if a platform API error code should trigger a retry."""
+        return api_code in self.retryable_api_codes
+
+    def should_retry_exception(self, exc: Exception) -> bool:
+        """Check if an exception should trigger a retry."""
+        if isinstance(exc, CommerceAPIError):
+            return self.should_retry_api_code(exc.code)
+        return isinstance(exc, self.retryable_exceptions)
+
+
+# Default retry config for common transient errors
+DEFAULT_RETRY = RetryConfig()
+
+# Aggressive retry config for rate-limited endpoints
+RATE_LIMIT_RETRY = RetryConfig(
+    max_retries=5,
+    base_delay=2.0,
+    max_delay=120.0,
+    retryable_status_codes={429, 500, 502, 503, 504},
+)
+
+
+def with_retry(config: RetryConfig | None = None) -> Callable[..., Any]:
+    """Decorator that adds retry with exponential backoff to an async function.
+
+    Usage::
+
+        @with_retry(RetryConfig(max_retries=3))
+        async def fetch_data(self, ...):
+            ...
+
+    Args:
+        config: Retry configuration. Uses DEFAULT_RETRY if not provided.
+
+    Returns:
+        A decorator that wraps the async function with retry logic.
+    """
+    retry_config = config or DEFAULT_RETRY
+
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        @functools.wraps(func)
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            last_exc: Exception | None = None
+            for attempt in range(retry_config.max_retries + 1):
+                try:
+                    return await func(*args, **kwargs)
+                except Exception as exc:
+                    last_exc = exc
+                    if not retry_config.should_retry_exception(exc):
+                        raise
+                    if attempt == retry_config.max_retries:
+                        logger.error(f"Max retries ({retry_config.max_retries}) exhausted for {func.__name__}")
+                        raise
+                    delay = retry_config.compute_delay(attempt)
+                    logger.warning(
+                        f"Retry {attempt + 1}/{retry_config.max_retries} for {func.__name__} "
+                        f"after {delay:.2f}s: {exc}"
+                    )
+                    await asyncio.sleep(delay)
+            # Should not reach here, but safety net
+            if last_exc:
+                raise last_exc
+
+        return wrapper
+
+    return decorator
+
+
 class CommerceMCPBase:
     """Base class for Chinese e-commerce platform MCP servers.
 
@@ -308,6 +577,7 @@ class CommerceMCPBase:
         self.app_secret = app_secret
         self.access_token = access_token
         self.rate_limiter = RateLimiter()
+        self.metrics = MetricsCollector()
 
     def _get_client(self) -> httpx.AsyncClient:
         """Get or create an HTTP client with connection pooling."""
@@ -356,44 +626,93 @@ class CommerceMCPBase:
     # ── HTTP ──────────────────────────────────────────────
 
     async def _request(
-        self, method: str, path: str, params: dict | None = None, data: dict | None = None
+        self,
+        method: str,
+        path: str,
+        params: dict | None = None,
+        data: dict | None = None,
+        retry_config: RetryConfig | None = None,
     ) -> dict[str, Any]:
-        """Make a signed API request."""
+        """Make a signed API request with optional retry support.
+
+        Args:
+            method: HTTP method ("GET" or "POST").
+            path: API endpoint path (appended to BASE_URL).
+            params: Query parameters.
+            data: Request body (JSON).
+            retry_config: If provided, retry failed requests according to this config.
+
+        Returns:
+            Parsed JSON response as a dict.
+
+        Raises:
+            CommerceAPIError: If the API returns an error response.
+            httpx.HTTPError: For non-retryable network errors.
+        """
         params = params or {}
         data = data or {}
 
-        # Rate limiting
-        if self.rate_limiter:
-            await self.rate_limiter.acquire()
-
-        # Inject auth params
-        params["app_key"] = self.app_key
-        params["timestamp"] = str(int(time.time() * 1000))
+        # Snapshot auth params for retry (timestamp must be regenerated each attempt)
+        auth_params: dict[str, str] = {}
+        auth_params["app_key"] = self.app_key
         if self.access_token:
-            params["access_token"] = self.access_token
+            auth_params["access_token"] = self.access_token
 
-        # Sign
-        params["sign"] = self._sign(params)
-        params["sign_method"] = self.sign_method
+        last_exc: Exception | None = None
+        max_attempts = (retry_config.max_retries + 1) if retry_config else 1
 
-        url = f"{self.BASE_URL}{path}"
-        logger.debug(f"Request: {method} {url}")
+        for attempt in range(max_attempts):
+            try:
+                # Rate limiting
+                if self.rate_limiter:
+                    await self.rate_limiter.acquire()
 
-        client = self._get_client()
-        if method == "GET":
-            resp = await client.get(url, params={**params, **data})
-        else:
-            resp = await client.post(url, params=params, json=data)
+                # Build fresh params each attempt (timestamp changes)
+                attempt_params = {**params, **auth_params}
+                attempt_params["timestamp"] = str(int(time.time() * 1000))
+                attempt_params["sign"] = self._sign(attempt_params)
+                attempt_params["sign_method"] = self.sign_method
 
-        result = resp.json()
-        if "error_response" in result:
-            error_code = result["error_response"].get("code", -1)
-            error_msg = result["error_response"].get("msg", "unknown")
-            logger.warning(f"API error: [{error_code}] {error_msg}")
-            raise CommerceAPIError(code=error_code, msg=error_msg)
+                url = f"{self.BASE_URL}{path}"
+                logger.debug(f"Request: {method} {url} (attempt {attempt + 1}/{max_attempts})")
 
-        logger.debug(f"Response: {resp.status_code}")
-        return result
+                client = self._get_client()
+                if method == "GET":
+                    resp = await client.get(url, params={**attempt_params, **data})
+                else:
+                    resp = await client.post(url, params=attempt_params, json=data)
+
+                result = resp.json()
+                if "error_response" in result:
+                    error_code = result["error_response"].get("code", -1)
+                    error_msg = result["error_response"].get("msg", "unknown")
+                    logger.warning(f"API error: [{error_code}] {error_msg}")
+                    raise CommerceAPIError(code=error_code, msg=error_msg)
+
+                logger.debug(f"Response: {resp.status_code}")
+                return result
+
+            except Exception as exc:
+                last_exc = exc
+                # If no retry config or not retryable, re-raise immediately
+                if not retry_config or not retry_config.should_retry_exception(exc):
+                    raise
+
+                # If this was the last attempt, re-raise
+                if attempt == max_attempts - 1:
+                    logger.error(f"Max retries ({retry_config.max_retries}) exhausted for {path}")
+                    raise
+
+                delay = retry_config.compute_delay(attempt)
+                logger.warning(
+                    f"Retry {attempt + 1}/{retry_config.max_retries} for {path} " f"after {delay:.2f}s: {exc}"
+                )
+                await asyncio.sleep(delay)
+
+        # Should not reach here
+        if last_exc:
+            raise last_exc  # type: ignore[misc]
+        return {}  # type: ignore[return-value]
 
     # ── Signing ───────────────────────────────────────────
 
@@ -436,6 +755,191 @@ class CommerceMCPBase:
         if self._client and not self._client.is_closed:
             await self._client.aclose()
             self._client = None
+
+    async def health_check(self) -> dict[str, Any]:
+        """Check API reachability and client configuration.
+
+        Returns:
+            Dict with ``configured``, ``has_token``, ``api_reachable``,
+            ``metrics``, and optionally ``error`` keys.
+        """
+        result: dict[str, Any] = {
+            "configured": bool(self.app_key and self.app_secret),
+            "has_token": bool(self.access_token),
+            "api_reachable": False,
+            "metrics": self.metrics.get_summary(),
+        }
+        if not self.BASE_URL:
+            return result
+        try:
+            client = self._get_client()
+            resp = await client.head(self.BASE_URL, timeout=5)
+            result["api_reachable"] = resp.status_code < 500
+        except Exception as exc:
+            result["api_reachable"] = False
+            result["error"] = str(exc)
+        return result
+
+    # ── Batch Operations ──────────────────────────────────
+
+    @staticmethod
+    def _batch_aggregate(
+        results: list[BatchResultItem],
+        total_latency_ms: float,
+    ) -> BatchSummary:
+        """Aggregate individual batch results into a summary.
+
+        Args:
+            results: List of individual result items.
+            total_latency_ms: Wall-clock time for the entire batch.
+
+        Returns:
+            A BatchSummary with counts and error breakdown.
+        """
+        succeeded = sum(1 for r in results if r.success)
+        failed = len(results) - succeeded
+        error_summary: dict[str, int] = {}
+        for r in results:
+            if r.error is not None:
+                key = type(r.error).__name__
+                error_summary[key] = error_summary.get(key, 0) + 1
+        return BatchSummary(
+            total=len(results),
+            succeeded=succeeded,
+            failed=failed,
+            results=results,
+            total_latency_ms=total_latency_ms,
+            error_summary=error_summary,
+        )
+
+    async def _batch_request(
+        self,
+        requests: list[BatchRequestItem],
+        max_concurrency: int = 5,
+        fail_fast: bool = False,
+    ) -> BatchSummary:
+        """Execute multiple API requests concurrently.
+
+        Args:
+            requests: List of batch request items to execute.
+            max_concurrency: Maximum concurrent requests (clamped to 1-20).
+            fail_fast: If True, stop submitting new requests after the first error.
+
+        Returns:
+            A BatchSummary with all individual results.
+
+        Raises:
+            ValueError: If the request list is empty.
+        """
+        if not requests:
+            raise ValueError("Request list cannot be empty")
+
+        max_concurrency = max(1, min(max_concurrency, 20))
+        semaphore = asyncio.Semaphore(max_concurrency)
+        batch_start = time.time()
+        results: list[BatchResultItem] = []
+        cancelled = asyncio.Event()
+
+        async def _execute_one(item: BatchRequestItem) -> BatchResultItem:
+            if fail_fast and cancelled.is_set():
+                return BatchResultItem(
+                    request_id=item.request_id,
+                    success=False,
+                    error=RuntimeError("Cancelled due to fail_fast"),
+                )
+            async with semaphore:
+                start = time.time()
+                try:
+                    data = await self._request(
+                        method=item.method,
+                        path=item.path,
+                        params=dict(item.params),
+                        data=dict(item.data),
+                    )
+                    elapsed = (time.time() - start) * 1000
+                    return BatchResultItem(
+                        request_id=item.request_id,
+                        success=True,
+                        data=data,
+                        latency_ms=elapsed,
+                    )
+                except Exception as exc:
+                    elapsed = (time.time() - start) * 1000
+                    if fail_fast:
+                        cancelled.set()
+                    return BatchResultItem(
+                        request_id=item.request_id,
+                        success=False,
+                        error=exc,
+                        latency_ms=elapsed,
+                    )
+
+        tasks = [_execute_one(item) for item in requests]
+        results = list(await asyncio.gather(*tasks))
+        total_latency = (time.time() - batch_start) * 1000
+        return self._batch_aggregate(results, total_latency_ms=total_latency)
+
+
+# ── Batch Operations ──────────────────────────────────────
+
+
+@dataclass
+class BatchRequestItem:
+    """A single request within a batch operation.
+
+    Attributes:
+        method: HTTP method ("GET" or "POST").
+        path: API endpoint path.
+        params: Query parameters.
+        data: Request body data.
+        request_id: Caller-assigned identifier for correlation.
+    """
+
+    method: str = ""
+    path: str = ""
+    params: dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
+    request_id: str = ""
+
+
+@dataclass
+class BatchResultItem:
+    """Result of a single request within a batch.
+
+    Attributes:
+        request_id: Matches the request_id from BatchRequestItem.
+        success: Whether the request succeeded.
+        data: Response data (None on failure).
+        error: The exception that caused the failure (None on success).
+        latency_ms: Request duration in milliseconds.
+    """
+
+    request_id: str = ""
+    success: bool = True
+    data: Any = None
+    error: Exception | None = None
+    latency_ms: float = 0.0
+
+
+@dataclass
+class BatchSummary:
+    """Aggregated summary of a batch operation.
+
+    Attributes:
+        total: Total number of requests.
+        succeeded: Number of successful requests.
+        failed: Number of failed requests.
+        results: Individual result items.
+        total_latency_ms: Wall-clock time for the entire batch.
+        error_summary: Count of errors grouped by exception type name.
+    """
+
+    total: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    results: list[BatchResultItem] = field(default_factory=list)
+    total_latency_ms: float = 0.0
+    error_summary: dict[str, int] = field(default_factory=dict)
 
 
 class CommerceAPIError(Exception):
@@ -521,603 +1025,3 @@ def handle_tool_errors(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awa
             )
 
     return wrapper
-
-
-# ── Webhook Support ─────────────────────────────────────────
-
-
-class WebhookEventType(str, Enum):
-    """Supported webhook event types for e-commerce platforms.
-
-    Attributes:
-        ORDER_UPDATE: Order status changes (created, paid, shipped, completed, cancelled).
-        INVENTORY_CHANGE: Stock level updates (low stock, out of stock, restocked).
-        PRODUCT_UPDATE: Product information changes (price, description, images).
-        REFUND_REQUEST: Refund initiated or processed.
-        PAYMENT_RECEIVED: Payment confirmed for an order.
-        SHIPPING_UPDATE: Shipping status changes (shipped, in transit, delivered).
-        REVIEW_SUBMITTED: New customer review submitted.
-        COUPON_USED: Coupon or promotion code used.
-        CUSTOM: User-defined custom event type.
-    """
-
-    ORDER_UPDATE = "order_update"
-    INVENTORY_CHANGE = "inventory_change"
-    PRODUCT_UPDATE = "product_update"
-    REFUND_REQUEST = "refund_request"
-    PAYMENT_RECEIVED = "payment_received"
-    SHIPPING_UPDATE = "shipping_update"
-    REVIEW_SUBMITTED = "review_submitted"
-    COUPON_USED = "coupon_used"
-    CUSTOM = "custom"
-
-
-@dataclass
-class WebhookSubscription:
-    """Represents a registered webhook subscription.
-
-    Attributes:
-        subscription_id: Unique identifier for the subscription.
-        url: Callback URL where webhook events will be delivered.
-        event_types: List of event types this subscription listens to.
-        secret: Shared secret used for HMAC signature verification.
-        platform: Platform name this subscription belongs to.
-        is_active: Whether the subscription is currently active.
-        created_at: ISO 8601 timestamp when the subscription was created.
-        last_triggered_at: ISO 8601 timestamp of last event delivery.
-        failure_count: Number of consecutive delivery failures.
-        metadata: Optional key-value pairs for additional configuration.
-    """
-
-    subscription_id: str
-    url: str
-    event_types: list[str]
-    secret: str
-    platform: str = ""
-    is_active: bool = True
-    created_at: str = ""
-    last_triggered_at: str = ""
-    failure_count: int = 0
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if not self.created_at:
-            self.created_at = datetime.now(timezone.utc).isoformat()
-        if not self.subscription_id:
-            self.subscription_id = str(uuid.uuid4())
-        if not self.secret:
-            self.secret = hashlib.sha256(
-                f"{self.subscription_id}:{self.url}:{time.time()}".encode()
-            ).hexdigest()
-
-
-@dataclass
-class WebhookEvent:
-    """Represents a webhook event to be delivered.
-
-    Attributes:
-        event_id: Unique identifier for this event instance.
-        event_type: Type of the event (must match WebhookEventType values).
-        platform: Platform that generated the event.
-        payload: Event data as a dictionary.
-        timestamp: ISO 8601 timestamp of when the event occurred.
-        source: Source identifier (e.g., order_id, product_id).
-        version: API version for the event format.
-    """
-
-    event_id: str = ""
-    event_type: str = ""
-    platform: str = ""
-    payload: dict[str, Any] = field(default_factory=dict)
-    timestamp: str = ""
-    source: str = ""
-    version: str = "1.0"
-
-    def __post_init__(self) -> None:
-        if not self.event_id:
-            self.event_id = str(uuid.uuid4())
-        if not self.timestamp:
-            self.timestamp = datetime.now(timezone.utc).isoformat()
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert event to a dictionary for JSON serialization."""
-        return {
-            "event_id": self.event_id,
-            "event_type": self.event_type,
-            "platform": self.platform,
-            "payload": self.payload,
-            "timestamp": self.timestamp,
-            "source": self.source,
-            "version": self.version,
-        }
-
-
-class WebhookSignatureVerifier:
-    """Verifies webhook signatures using HMAC-SHA256.
-
-    Used to ensure webhook payloads are authentic and have not been tampered with.
-    Implements the standard HMAC-based signature verification used by major platforms.
-
-    Usage:
-        verifier = WebhookSignatureVerifier(secret="your_secret")
-        is_valid = verifier.verify(payload_bytes, signature_header)
-    """
-
-    def __init__(self, secret: str, algorithm: str = "sha256") -> None:
-        """Initialize the verifier with a shared secret.
-
-        Args:
-            secret: The shared secret key for HMAC computation.
-            algorithm: Hash algorithm to use (default: sha256).
-        """
-        self.secret = secret
-        self.algorithm = algorithm
-
-    def sign(self, payload: bytes) -> str:
-        """Generate HMAC signature for a payload.
-
-        Args:
-            payload: Raw payload bytes to sign.
-
-        Returns:
-            Hex-encoded HMAC signature string.
-        """
-        hash_func = getattr(hashlib, self.algorithm)
-        return hmac.new(self.secret.encode(), payload, hash_func).hexdigest()
-
-    def verify(self, payload: bytes, signature: str) -> bool:
-        """Verify a payload signature.
-
-        Args:
-            payload: Raw payload bytes.
-            signature: Signature to verify (hex-encoded string).
-
-        Returns:
-            True if signature is valid, False otherwise.
-        """
-        if not signature:
-            return False
-        expected = self.sign(payload)
-        return hmac.compare_digest(expected, signature)
-
-    @staticmethod
-    def extract_signature(signature_header: str, prefix: str = "") -> str:
-        """Extract signature value from a header string.
-
-        Many platforms prefix signatures (e.g., "sha256=abc123").
-        This method strips such prefixes.
-
-        Args:
-            signature_header: Raw signature header value.
-            prefix: Optional prefix to strip (e.g., "sha256=").
-
-        Returns:
-            Cleaned signature string.
-        """
-        if prefix and signature_header.startswith(prefix):
-            return signature_header[len(prefix):]
-        return signature_header
-
-
-class WebhookDeliveryError(Exception):
-    """Raised when webhook delivery fails.
-
-    Attributes:
-        subscription_id: ID of the failed subscription.
-        url: Target URL that failed.
-        status_code: HTTP status code (0 if connection failed).
-        message: Error description.
-    """
-
-    def __init__(
-        self,
-        subscription_id: str,
-        url: str,
-        status_code: int = 0,
-        message: str = "",
-    ) -> None:
-        self.subscription_id = subscription_id
-        self.url = url
-        self.status_code = status_code
-        self.message = message or f"Failed to deliver webhook to {url}"
-        super().__init__(self.message)
-
-
-@dataclass
-class WebhookDeliveryResult:
-    """Result of a webhook delivery attempt.
-
-    Attributes:
-        subscription_id: ID of the subscription.
-        event_id: ID of the event that was delivered.
-        success: Whether delivery succeeded.
-        status_code: HTTP response status code.
-        latency_ms: Delivery time in milliseconds.
-        error: Error message if delivery failed.
-        attempt: Which attempt number this was (1-based).
-    """
-
-    subscription_id: str
-    event_id: str
-    success: bool
-    status_code: int = 0
-    latency_ms: float = 0.0
-    error: str = ""
-    attempt: int = 1
-
-
-class WebhookManager:
-    """Manages webhook subscriptions and event delivery.
-
-    Provides a complete webhook lifecycle management system:
-    - Register and unregister webhook subscriptions
-    - Trigger events to matching subscriptions
-    - Verify webhook signatures
-    - Track delivery metrics and failures
-    - Automatic retry with exponential backoff
-
-    Usage:
-        manager = WebhookManager()
-        sub = manager.subscribe(
-            url="https://example.com/webhook",
-            event_types=["order_update", "inventory_change"],
-        )
-        await manager.trigger(WebhookEvent(event_type="order_update", payload={...}))
-    """
-
-    def __init__(
-        self,
-        max_delivery_retries: int = 3,
-        delivery_timeout: float = 30.0,
-        max_consecutive_failures: int = 10,
-    ) -> None:
-        """Initialize the webhook manager.
-
-        Args:
-            max_delivery_retries: Max retry attempts for failed deliveries.
-            delivery_timeout: HTTP request timeout in seconds.
-            max_consecutive_failures: Auto-disable subscription after this many failures.
-        """
-        self._subscriptions: dict[str, WebhookSubscription] = {}
-        self._event_history: list[WebhookEvent] = []
-        self._delivery_results: list[WebhookDeliveryResult] = []
-        self._delivery_callbacks: list[Callable[..., Awaitable[WebhookDeliveryResult]]] = []
-        self._max_delivery_retries = max_delivery_retries
-        self._delivery_timeout = delivery_timeout
-        self._max_consecutive_failures = max_consecutive_failures
-        self._lock = threading.Lock()
-
-    def subscribe(
-        self,
-        url: str,
-        event_types: list[str],
-        secret: str = "",
-        platform: str = "",
-        metadata: dict[str, Any] | None = None,
-    ) -> WebhookSubscription:
-        """Register a new webhook subscription.
-
-        Args:
-            url: Callback URL for event delivery.
-            event_types: List of event type strings to subscribe to.
-            secret: Shared secret for signature verification (auto-generated if empty).
-            platform: Platform identifier.
-            metadata: Optional metadata for the subscription.
-
-        Returns:
-            The created WebhookSubscription.
-
-        Raises:
-            ValueError: If url is empty or event_types is empty.
-        """
-        if not url:
-            raise ValueError("Webhook URL cannot be empty")
-        if not event_types:
-            raise ValueError("At least one event type must be specified")
-
-        # Validate event types
-        valid_types = {e.value for e in WebhookEventType}
-        for et in event_types:
-            if et not in valid_types:
-                raise ValueError(f"Invalid event type: {et}")
-
-        subscription = WebhookSubscription(
-            subscription_id=str(uuid.uuid4()),
-            url=url,
-            event_types=event_types,
-            secret=secret,
-            platform=platform,
-            metadata=metadata or {},
-        )
-
-        with self._lock:
-            self._subscriptions[subscription.subscription_id] = subscription
-
-        logger.info(
-            f"Webhook subscription created: {subscription.subscription_id} "
-            f"for events {event_types}"
-        )
-        return subscription
-
-    def unsubscribe(self, subscription_id: str) -> bool:
-        """Remove a webhook subscription.
-
-        Args:
-            subscription_id: ID of the subscription to remove.
-
-        Returns:
-            True if subscription was found and removed, False otherwise.
-        """
-        with self._lock:
-            if subscription_id in self._subscriptions:
-                del self._subscriptions[subscription_id]
-                logger.info(f"Webhook subscription removed: {subscription_id}")
-                return True
-        return False
-
-    def get_subscription(self, subscription_id: str) -> WebhookSubscription | None:
-        """Get a subscription by ID.
-
-        Args:
-            subscription_id: ID of the subscription.
-
-        Returns:
-            The WebhookSubscription if found, None otherwise.
-        """
-        return self._subscriptions.get(subscription_id)
-
-    def list_subscriptions(
-        self,
-        event_type: str | None = None,
-        platform: str | None = None,
-        active_only: bool = True,
-    ) -> list[WebhookSubscription]:
-        """List subscriptions with optional filtering.
-
-        Args:
-            event_type: Filter by event type.
-            platform: Filter by platform.
-            active_only: Only return active subscriptions.
-
-        Returns:
-            List of matching subscriptions.
-        """
-        results = []
-        for sub in self._subscriptions.values():
-            if active_only and not sub.is_active:
-                continue
-            if event_type and event_type not in sub.event_types:
-                continue
-            if platform and sub.platform != platform:
-                continue
-            results.append(sub)
-        return results
-
-    def update_subscription(
-        self,
-        subscription_id: str,
-        url: str | None = None,
-        event_types: list[str] | None = None,
-        is_active: bool | None = None,
-        secret: str | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> WebhookSubscription | None:
-        """Update an existing subscription.
-
-        Args:
-            subscription_id: ID of the subscription to update.
-            url: New callback URL.
-            event_types: New event types list.
-            is_active: New active status.
-            secret: New shared secret.
-            metadata: New metadata dict.
-
-        Returns:
-            Updated WebhookSubscription if found, None otherwise.
-        """
-        with self._lock:
-            sub = self._subscriptions.get(subscription_id)
-            if not sub:
-                return None
-            if url is not None:
-                sub.url = url
-            if event_types is not None:
-                sub.event_types = event_types
-            if is_active is not None:
-                sub.is_active = is_active
-            if secret is not None:
-                sub.secret = secret
-            if metadata is not None:
-                sub.metadata = metadata
-            return sub
-
-    def add_delivery_callback(
-        self, callback: Callable[..., Awaitable[WebhookDeliveryResult]]
-    ) -> None:
-        """Register a callback for webhook delivery.
-
-        This allows custom HTTP client injection for actual delivery.
-
-        Args:
-            callback: Async function that takes (subscription, event, payload_bytes, signature)
-                     and returns a WebhookDeliveryResult.
-        """
-        self._delivery_callbacks.append(callback)
-
-    def _prepare_delivery(
-        self, subscription: WebhookSubscription, event: WebhookEvent
-    ) -> tuple[bytes, str]:
-        """Prepare payload and signature for delivery.
-
-        Args:
-            subscription: Target subscription.
-            event: Event to deliver.
-
-        Returns:
-            Tuple of (payload_bytes, signature_hex).
-        """
-        payload_dict = {
-            "event": event.to_dict(),
-            "subscription_id": subscription.subscription_id,
-            "delivery_timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        payload_bytes = json.dumps(payload_dict, ensure_ascii=False, sort_keys=True).encode()
-        verifier = WebhookSignatureVerifier(secret=subscription.secret)
-        signature = verifier.sign(payload_bytes)
-        return payload_bytes, signature
-
-    async def _deliver_with_retry(
-        self,
-        subscription: WebhookSubscription,
-        event: WebhookEvent,
-    ) -> WebhookDeliveryResult:
-        """Attempt delivery with retry logic.
-
-        Args:
-            subscription: Target subscription.
-            event: Event to deliver.
-
-        Returns:
-            WebhookDeliveryResult with delivery status.
-        """
-        payload_bytes, signature = self._prepare_delivery(subscription, event)
-        last_error = ""
-
-        for attempt in range(1, self._max_delivery_retries + 1):
-            start_time = time.time()
-            result: WebhookDeliveryResult | None = None
-
-            for callback in self._delivery_callbacks:
-                try:
-                    result = await callback(subscription, event, payload_bytes, signature)
-                    result.attempt = attempt
-                    if result.success:
-                        with self._lock:
-                            subscription.last_triggered_at = datetime.now(timezone.utc).isoformat()
-                            subscription.failure_count = 0
-                        return result
-                    last_error = result.error or f"HTTP {result.status_code}"
-                except Exception as exc:
-                    last_error = str(exc)
-                    result = WebhookDeliveryResult(
-                        subscription_id=subscription.subscription_id,
-                        event_id=event.event_id,
-                        success=False,
-                        error=last_error,
-                        attempt=attempt,
-                        latency_ms=(time.time() - start_time) * 1000,
-                    )
-
-            if attempt < self._max_delivery_retries:
-                delay = min(2 ** attempt, 30)
-                await asyncio.sleep(delay)
-
-        # All retries exhausted
-        with self._lock:
-            subscription.failure_count += 1
-            if subscription.failure_count >= self._max_consecutive_failures:
-                subscription.is_active = False
-                logger.warning(
-                    f"Webhook subscription {subscription.subscription_id} auto-disabled "
-                    f"after {subscription.failure_count} consecutive failures"
-                )
-
-        return WebhookDeliveryResult(
-            subscription_id=subscription.subscription_id,
-            event_id=event.event_id,
-            success=False,
-            status_code=0,
-            error=f"Max retries ({self._max_delivery_retries}) exhausted: {last_error}",
-            attempt=self._max_delivery_retries,
-        )
-
-    async def trigger(self, event: WebhookEvent) -> list[WebhookDeliveryResult]:
-        """Trigger a webhook event to all matching subscriptions.
-
-        Finds all active subscriptions matching the event type and delivers
-        the event to each one.
-
-        Args:
-            event: The WebhookEvent to deliver.
-
-        Returns:
-            List of WebhookDeliveryResult for each subscription.
-        """
-        if not event.event_type:
-            raise ValueError("Event type cannot be empty")
-
-        # Record event
-        self._event_history.append(event)
-
-        # Find matching subscriptions
-        matching = self.list_subscriptions(event_type=event.event_type, active_only=True)
-
-        if not matching:
-            logger.debug(f"No subscriptions for event type: {event.event_type}")
-            return []
-
-        # Deliver to all matching subscriptions
-        results: list[WebhookDeliveryResult] = []
-        for sub in matching:
-            result = await self._deliver_with_retry(sub, event)
-            results.append(result)
-            self._delivery_results.append(result)
-
-        succeeded = sum(1 for r in results if r.success)
-        logger.info(
-            f"Webhook event {event.event_id} delivered: "
-            f"{succeeded}/{len(results)} succeeded"
-        )
-        return results
-
-    def verify_signature(
-        self,
-        payload: bytes,
-        signature: str,
-        secret: str,
-        algorithm: str = "sha256",
-    ) -> bool:
-        """Verify a webhook payload signature.
-
-        Args:
-            payload: Raw request body bytes.
-            signature: Signature from the request header.
-            secret: Shared secret for verification.
-            algorithm: Hash algorithm (default: sha256).
-
-        Returns:
-            True if signature is valid.
-        """
-        verifier = WebhookSignatureVerifier(secret=secret, algorithm=algorithm)
-        return verifier.verify(payload, signature)
-
-    def get_delivery_stats(self) -> dict[str, Any]:
-        """Get webhook delivery statistics.
-
-        Returns:
-            Dictionary with delivery metrics.
-        """
-        total = len(self._delivery_results)
-        succeeded = sum(1 for r in self._delivery_results if r.success)
-        failed = total - succeeded
-        avg_latency = (
-            sum(r.latency_ms for r in self._delivery_results) / total
-            if total > 0
-            else 0.0
-        )
-
-        return {
-            "total_deliveries": total,
-            "succeeded": succeeded,
-            "failed": failed,
-            "success_rate": round(succeeded / total, 4) if total > 0 else 0.0,
-            "avg_latency_ms": round(avg_latency, 2),
-            "active_subscriptions": len(self.list_subscriptions(active_only=True)),
-            "total_subscriptions": len(self._subscriptions),
-            "total_events": len(self._event_history),
-        }
-
-    def clear_history(self) -> None:
-        """Clear event history and delivery results."""
-        self._event_history.clear()
-        self._delivery_results.clear()

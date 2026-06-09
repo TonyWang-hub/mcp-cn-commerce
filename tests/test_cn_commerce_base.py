@@ -39,9 +39,9 @@ from cn_commerce_base import (
     EndpointRateLimit,
     MetricsCollector,
     PlatformRateLimitConfig,
+    PrioritizedRequest,
     PriorityQueue,
     PriorityScheduler,
-    PrioritizedRequest,
     PriorityStats,
     RateLimitConfig,
     RateLimiter,
@@ -3256,6 +3256,7 @@ class TestPriorityQueueConcurrency:
 
     def test_concurrent_enqueue_dequeue(self):
         import threading
+
         pq = PriorityQueue()
         dequeued = []
         errors = []
@@ -3286,6 +3287,7 @@ class TestPriorityQueueConcurrency:
 
     def test_concurrent_multiple_priorities(self):
         import threading
+
         pq = PriorityQueue()
 
         def enqueue_batch(priority, count):
@@ -3425,7 +3427,10 @@ class TestPriorityScheduler:
     async def test_schedule_and_execute(self):
         scheduler = PriorityScheduler()
         req = PrioritizedRequest(
-            priority=RequestPriority.HIGH, method="GET", path="/api/orders", params={"page": 1},
+            priority=RequestPriority.HIGH,
+            method="GET",
+            path="/api/orders",
+            params={"page": 1},
         )
 
         async def mock_execute(r):
@@ -3441,7 +3446,10 @@ class TestPriorityScheduler:
         limiter = ConfigurableRateLimiter(RateLimitConfig(enabled=False))
         scheduler = PriorityScheduler(rate_limiter=limiter)
         req = PrioritizedRequest(
-            priority=RequestPriority.NORMAL, method="GET", path="/api/test", platform="TEST",
+            priority=RequestPriority.NORMAL,
+            method="GET",
+            path="/api/test",
+            platform="TEST",
         )
 
         async def mock_execute(r):
@@ -3651,7 +3659,10 @@ class TestCommerceMCPBasePriority:
 
         with patch.object(client, "_ensure_client", return_value=mock_client):
             result = await client.prioritized_request(
-                "GET", "/api/orders", priority=RequestPriority.CRITICAL, params={"order_id": "12345"},
+                "GET",
+                "/api/orders",
+                priority=RequestPriority.CRITICAL,
+                params={"order_id": "12345"},
             )
         assert result == {"result": "ok"}
 

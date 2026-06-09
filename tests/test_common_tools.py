@@ -7,7 +7,7 @@ servers, exposing the four operational tools ``get_metrics``, ``get_traces``,
 
 Two server families exist:
 
-* **FastMCP servers** (jd, kuaishou, pinduoduo, taobao, weixin-store,
+* **FastMCP servers** (jd, kuaishou, pinduoduo, taobao, weixin_store,
   xiaohongshu) expose a ``mcp = FastMCP(...)`` instance whose registered tools
   are introspectable via ``await mcp.list_tools()``.
 * **Low-level ``Server`` servers** (doudian, oceanengine) use ``@server.tool()``.
@@ -86,14 +86,14 @@ if not hasattr(_orig_server_cls, "tool"):
 
 # ── Import every server module (after env + shim are in place) ───────────────
 
-import mcp_doudian.server as doudian_server  # noqa: E402
-import mcp_jd.server as jd_server  # noqa: E402
-import mcp_kuaishou.server as kuaishou_server  # noqa: E402
-import mcp_oceanengine.server as oceanengine_server  # noqa: E402
-import mcp_pinduoduo.server as pinduoduo_server  # noqa: E402
-import mcp_taobao.server as taobao_server  # noqa: E402
-import mcp_weixin_store.server as weixin_store_server  # noqa: E402
-import mcp_xiaohongshu.server as xiaohongshu_server  # noqa: E402
+import servers.doudian.server as doudian_server  # noqa: E402
+import servers.jd.server as jd_server  # noqa: E402
+import servers.kuaishou.server as kuaishou_server  # noqa: E402
+import servers.oceanengine.server as oceanengine_server  # noqa: E402
+import servers.pinduoduo.server as pinduoduo_server  # noqa: E402
+import servers.taobao.server as taobao_server  # noqa: E402
+import servers.weixin_store.server as weixin_store_server  # noqa: E402
+import servers.xiaohongshu.server as xiaohongshu_server  # noqa: E402
 
 from shared.cn_commerce_base import CommerceMCPBase  # noqa: E402
 
@@ -105,7 +105,7 @@ FASTMCP_SERVERS = [
     pytest.param(kuaishou_server, id="kuaishou"),
     pytest.param(pinduoduo_server, id="pinduoduo"),
     pytest.param(taobao_server, id="taobao"),
-    pytest.param(weixin_store_server, id="weixin-store"),
+    pytest.param(weixin_store_server, id="weixin_store"),
     pytest.param(xiaohongshu_server, id="xiaohongshu"),
 ]
 

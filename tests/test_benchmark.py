@@ -8,7 +8,7 @@ can capture and compare numbers across runs.
 Run with:
     PYTHONPATH=servers/oceanengine/src:servers/doudian/src:servers/jd/src:\
     servers/taobao/src:servers/pinduoduo/src:servers/kuaishou/src:\
-    servers/xiaohongshu/src:servers/weixin-store/src \
+    servers/xiaohongshu/src:servers/weixin_store/src \
     pytest tests/test_benchmark.py -v --tb=short
 """
 

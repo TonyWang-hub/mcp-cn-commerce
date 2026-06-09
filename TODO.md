@@ -12,27 +12,7 @@
 
 ### 待上传 ⏳
 
-**因 PyPI 限流（429 Too Many Requests），以下包需要等待 15-30 分钟后上传：**
-
-- [ ] `mcp-cn-taobao`
-- [ ] `mcp-cn-pinduoduo`
-- [ ] `mcp-cn-kuaishou`
-- [ ] `mcp-cn-xiaohongshu`
-- [ ] `mcp-cn-weixin-store`
-
-**上传命令：**
-
-```bash
-cd /Users/wangzhuo/work/mcp-cn-commerce
-
-# 请使用你的 PyPI API Token 替换 <YOUR_TOKEN>
-for platform in taobao pinduoduo kuaishou xiaohongshu weixin-store; do
-  echo "=== Uploading $platform ==="
-  cd /Users/wangzhuo/work/mcp-cn-commerce/servers/$platform
-  twine upload dist/* -u __token__ -p <YOUR_TOKEN>
-  sleep 10
-done
-```
+已重构为单一包架构，不再需要分别上传子包。
 
 ---
 

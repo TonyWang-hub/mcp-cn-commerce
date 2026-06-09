@@ -31,18 +31,9 @@ make test       # Run tests
 
 # Option 2: Manual setup
 pip install -e ".[dev]"
-pip install -e servers/oceanengine/
-pip install -e servers/doudian/
-pip install -e servers/jd/
-pip install -e servers/taobao/
-pip install -e servers/pinduoduo/
-pip install -e servers/kuaishou/
-pip install -e servers/xiaohongshu/
-pip install -e servers/weixin-store/
 
-# Run tests (requires PYTHONPATH)
-PYTHONPATH=servers/oceanengine/src:servers/doudian/src:servers/jd/src:servers/taobao/src:servers/pinduoduo/src:servers/kuaishou/src:servers/xiaohongshu/src:servers/weixin-store/src \
-pytest servers/ -v
+# Run tests
+pytest tests/ -v
 ```
 
 ## Adding a New Platform Server
@@ -50,10 +41,8 @@ pytest servers/ -v
 1. Create `servers/<platform>/` with this structure:
    ```
    servers/<platform>/
-   ├── pyproject.toml
-   ├── src/mcp_<platform>/
-   │   ├── __init__.py
-   │   └── server.py
+   ├── __init__.py
+   ├── server.py
    └── tests/
        └── test_<platform>.py
    ```

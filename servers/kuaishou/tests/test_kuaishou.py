@@ -14,7 +14,7 @@ os.environ.setdefault("KUAISHOU_APP_SECRET", "test_app_secret")
 os.environ.setdefault("KUAISHOU_SIGN_SECRET", "test_sign_secret")
 os.environ.setdefault("KUAISHOU_ACCESS_TOKEN", "test_access_token")
 
-from mcp_kuaishou.server import (  # noqa: E402
+from servers.kuaishou.server import (  # noqa: E402
     get_logistics_tracking,
     get_order_detail,
     get_order_list,

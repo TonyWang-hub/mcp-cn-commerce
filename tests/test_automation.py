@@ -401,10 +401,8 @@ class TestFullRequestFlowAutomation:
         }
         mock_http.post.return_value = mock_http_response
 
-        with patch("mcp_doudian.server._get_client", return_value=client):
-            with patch("httpx.AsyncClient") as mock_ctx:
-                mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_http)
-                mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
+        with patch.object(client, "_ensure_client", return_value=mock_http):
+            with patch("mcp_doudian.server._get_client", return_value=client):
                 from mcp_doudian.server import get_order_list
 
                 result = await get_order_list(start_time="2024-01-01", end_time="2024-01-31")

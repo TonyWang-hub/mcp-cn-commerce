@@ -70,6 +70,7 @@ all = [
     "mcp-cn-weixin-store",
 ]
 dev = ["pytest>=7.0", "pytest-asyncio", "pytest-cov", "black", "ruff"]
+crypto = ["pyaes>=1.6"]
 
 [project.scripts]
 mcp-cn-commerce = "cli:main"

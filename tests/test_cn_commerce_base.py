@@ -29,10 +29,15 @@ from cn_commerce_base import (
     BatchSummary,
     CommerceAPIError,
     CommerceMCPBase,
+    ConfigurableRateLimiter,
     ConfigValidationError,
     EndpointMetrics,
+    EndpointRateLimit,
     MetricsCollector,
+    PlatformRateLimitConfig,
+    RateLimitConfig,
     RateLimiter,
+    RateLimitStats,
     RetryableError,
     RetryConfig,
     SensitiveDataFilter,
@@ -1856,3 +1861,394 @@ class TestSignDeterministic:
         sig1 = client._sign({"a": "1", "b": ""})
         sig2 = client._sign({"a": "1"})
         assert sig1 == sig2
+
+
+# ── EndpointRateLimit Tests ─────────────────────────────────
+
+
+class TestEndpointRateLimit:
+    """Tests for EndpointRateLimit dataclass."""
+
+    def test_default_values(self):
+        ep = EndpointRateLimit(endpoint="/api/test")
+        assert ep.endpoint == "/api/test"
+        assert ep.requests_per_second == 10.0
+        assert ep.burst_size == 1
+        assert ep.cooldown_seconds == 0.0
+
+    def test_custom_values(self):
+        ep = EndpointRateLimit(
+            endpoint="/api/order/search",
+            requests_per_second=2.0,
+            burst_size=5,
+            cooldown_seconds=1.0,
+        )
+        assert ep.endpoint == "/api/order/search"
+        assert ep.requests_per_second == 2.0
+        assert ep.burst_size == 5
+        assert ep.cooldown_seconds == 1.0
+
+
+# ── PlatformRateLimitConfig Tests ───────────────────────────
+
+
+class TestPlatformRateLimitConfig:
+    """Tests for PlatformRateLimitConfig dataclass."""
+
+    def test_default_values(self):
+        cfg = PlatformRateLimitConfig(platform="OCEANENGINE")
+        assert cfg.platform == "OCEANENGINE"
+        assert cfg.default_requests_per_second == 10.0
+        assert cfg.endpoints == {}
+        assert cfg.burst_size == 1
+        assert cfg.enabled is True
+
+    def test_get_endpoint_limit_fallback(self):
+        """Should return platform default when endpoint is not configured."""
+        cfg = PlatformRateLimitConfig(
+            platform="TAOBAO",
+            default_requests_per_second=5.0,
+            burst_size=3,
+        )
+        ep = cfg.get_endpoint_limit("/api/unknown")
+        assert ep.endpoint == "/api/unknown"
+        assert ep.requests_per_second == 5.0
+        assert ep.burst_size == 3
+
+    def test_get_endpoint_limit_specific(self):
+        """Should return endpoint-specific config when available."""
+        cfg = PlatformRateLimitConfig(
+            platform="TAOBAO",
+            default_requests_per_second=10.0,
+            endpoints={
+                "/api/order/search": EndpointRateLimit(
+                    endpoint="/api/order/search",
+                    requests_per_second=2.0,
+                ),
+            },
+        )
+        ep = cfg.get_endpoint_limit("/api/order/search")
+        assert ep.requests_per_second == 2.0
+
+    def test_disabled_platform(self):
+        cfg = PlatformRateLimitConfig(platform="TEST", enabled=False)
+        assert cfg.enabled is False
+
+
+# ── RateLimitStats Tests ────────────────────────────────────
+
+
+class TestRateLimitStats:
+    """Tests for RateLimitStats dataclass."""
+
+    def test_default_values(self):
+        stats = RateLimitStats()
+        assert stats.total_requests == 0
+        assert stats.total_throttled == 0
+        assert stats.total_wait_time_ms == 0.0
+        assert stats.platform_stats == {}
+        assert stats.endpoint_stats == {}
+
+    def test_throttle_rate_no_requests(self):
+        stats = RateLimitStats()
+        assert stats.throttle_rate == 0.0
+
+    def test_throttle_rate_with_requests(self):
+        stats = RateLimitStats()
+        stats.record_throttle("TEST", "/api", 100.0)
+        stats.record_request("TEST", "/api")
+        stats.record_request("TEST", "/api")
+        assert stats.throttle_rate == pytest.approx(1 / 3)
+
+    def test_avg_wait_time_ms(self):
+        stats = RateLimitStats()
+        assert stats.avg_wait_time_ms == 0.0
+        stats.record_throttle("TEST", "/api", 100.0)
+        stats.record_throttle("TEST", "/api", 200.0)
+        assert stats.avg_wait_time_ms == pytest.approx(150.0)
+
+    def test_record_throttle(self):
+        stats = RateLimitStats()
+        stats.record_throttle("OCEANENGINE", "/api/order", 50.0)
+        assert stats.total_requests == 1
+        assert stats.total_throttled == 1
+        assert stats.total_wait_time_ms == 50.0
+        assert stats.last_throttled_at > 0
+        assert "OCEANENGINE" in stats.platform_stats
+        assert "OCEANENGINE:/api/order" in stats.endpoint_stats
+
+    def test_record_request(self):
+        stats = RateLimitStats()
+        stats.record_request("TAOBAO", "/api/product")
+        assert stats.total_requests == 1
+        assert stats.total_throttled == 0
+        assert "TAOBAO" in stats.platform_stats
+        assert "TAOBAO:/api/product" in stats.endpoint_stats
+
+    def test_get_summary_structure(self):
+        stats = RateLimitStats()
+        stats.record_throttle("TEST", "/api", 100.0)
+        stats.record_request("TEST", "/api")
+        summary = stats.get_summary()
+        assert "global" in summary
+        assert "platforms" in summary
+        assert "endpoints" in summary
+        assert summary["global"]["total_requests"] == 2
+        assert summary["global"]["total_throttled"] == 1
+
+    def test_reset(self):
+        stats = RateLimitStats()
+        stats.record_throttle("TEST", "/api", 100.0)
+        stats.record_request("TEST", "/api")
+        stats.reset()
+        assert stats.total_requests == 0
+        assert stats.total_throttled == 0
+        assert stats.total_wait_time_ms == 0.0
+        assert stats.platform_stats == {}
+        assert stats.endpoint_stats == {}
+        assert stats.last_throttled_at == 0.0
+
+    def test_platform_stats_accumulation(self):
+        stats = RateLimitStats()
+        stats.record_request("P1", "/a")
+        stats.record_request("P1", "/b")
+        stats.record_throttle("P1", "/a", 50.0)
+        stats.record_request("P2", "/a")
+        assert stats.platform_stats["P1"]["requests"] == 3
+        assert stats.platform_stats["P1"]["throttled"] == 1
+        assert stats.platform_stats["P2"]["requests"] == 1
+
+
+# ── RateLimitConfig Tests ───────────────────────────────────
+
+
+class TestRateLimitConfig:
+    """Tests for RateLimitConfig dataclass."""
+
+    def test_default_values(self):
+        cfg = RateLimitConfig()
+        assert cfg.platforms == {}
+        assert cfg.default_requests_per_second == 10.0
+        assert cfg.default_burst_size == 1
+        assert cfg.enabled is True
+
+    def test_get_platform_config_existing(self):
+        p_cfg = PlatformRateLimitConfig(platform="TEST", default_requests_per_second=5.0)
+        cfg = RateLimitConfig(platforms={"TEST": p_cfg})
+        result = cfg.get_platform_config("TEST")
+        assert result is p_cfg
+        assert result.default_requests_per_second == 5.0
+
+    def test_get_platform_config_default(self):
+        """Should create default config for unknown platforms."""
+        cfg = RateLimitConfig(default_requests_per_second=15.0, default_burst_size=3)
+        result = cfg.get_platform_config("UNKNOWN")
+        assert result.platform == "UNKNOWN"
+        assert result.default_requests_per_second == 15.0
+        assert result.burst_size == 3
+        assert result.enabled is True
+
+    def test_get_platform_config_global_enabled(self):
+        cfg = RateLimitConfig(enabled=False)
+        result = cfg.get_platform_config("TEST")
+        assert result.enabled is False
+
+    def test_to_dict(self):
+        cfg = RateLimitConfig(
+            default_requests_per_second=5.0,
+            platforms={
+                "TEST": PlatformRateLimitConfig(
+                    platform="TEST",
+                    default_requests_per_second=3.0,
+                    endpoints={
+                        "/api": EndpointRateLimit(
+                            endpoint="/api",
+                            requests_per_second=1.0,
+                        ),
+                    },
+                ),
+            },
+        )
+        d = cfg.to_dict()
+        assert d["enabled"] is True
+        assert d["default_requests_per_second"] == 5.0
+        assert "TEST" in d["platforms"]
+        assert d["platforms"]["TEST"]["default_requests_per_second"] == 3.0
+        assert "/api" in d["platforms"]["TEST"]["endpoints"]
+
+    def test_from_dict(self):
+        data = {
+            "enabled": True,
+            "default_requests_per_second": 10.0,
+            "default_burst_size": 2,
+            "platforms": {
+                "OCEANENGINE": {
+                    "platform": "OCEANENGINE",
+                    "default_requests_per_second": 5.0,
+                    "burst_size": 3,
+                    "enabled": True,
+                    "endpoints": {
+                        "/api/order": {
+                            "endpoint": "/api/order",
+                            "requests_per_second": 2.0,
+                            "burst_size": 1,
+                            "cooldown_seconds": 0.5,
+                        },
+                    },
+                },
+            },
+        }
+        cfg = RateLimitConfig.from_dict(data)
+        assert cfg.default_requests_per_second == 10.0
+        assert cfg.default_burst_size == 2
+        assert "OCEANENGINE" in cfg.platforms
+        p = cfg.platforms["OCEANENGINE"]
+        assert p.default_requests_per_second == 5.0
+        assert p.burst_size == 3
+        assert "/api/order" in p.endpoints
+        ep = p.endpoints["/api/order"]
+        assert ep.requests_per_second == 2.0
+        assert ep.cooldown_seconds == 0.5
+
+    def test_from_dict_empty(self):
+        cfg = RateLimitConfig.from_dict({})
+        assert cfg.default_requests_per_second == 10.0
+        assert cfg.platforms == {}
+
+    def test_roundtrip(self):
+        """to_dict -> from_dict should preserve configuration."""
+        original = RateLimitConfig(
+            default_requests_per_second=7.0,
+            platforms={
+                "TEST": PlatformRateLimitConfig(
+                    platform="TEST",
+                    default_requests_per_second=3.0,
+                    endpoints={
+                        "/api": EndpointRateLimit(endpoint="/api", requests_per_second=1.5),
+                    },
+                ),
+            },
+        )
+        d = original.to_dict()
+        restored = RateLimitConfig.from_dict(d)
+        assert restored.default_requests_per_second == 7.0
+        assert "TEST" in restored.platforms
+        assert restored.platforms["TEST"].default_requests_per_second == 3.0
+        assert restored.platforms["TEST"].endpoints["/api"].requests_per_second == 1.5
+
+
+# ── ConfigurableRateLimiter Tests ───────────────────────────
+
+
+class TestConfigurableRateLimiter:
+    """Tests for ConfigurableRateLimiter."""
+
+    def test_default_init(self):
+        limiter = ConfigurableRateLimiter()
+        assert limiter.config is not None
+        assert limiter.stats is not None
+
+    def test_custom_config(self):
+        config = RateLimitConfig(default_requests_per_second=5.0)
+        limiter = ConfigurableRateLimiter(config)
+        assert limiter.config.default_requests_per_second == 5.0
+
+    @pytest.mark.asyncio
+    async def test_acquire_basic(self):
+        limiter = ConfigurableRateLimiter()
+        await limiter.acquire("TEST", "/api/test")
+        assert limiter.stats.total_requests >= 1
+
+    @pytest.mark.asyncio
+    async def test_acquire_disabled_platform(self):
+        config = RateLimitConfig(
+            platforms={
+                "TEST": PlatformRateLimitConfig(platform="TEST", enabled=False),
+            },
+        )
+        limiter = ConfigurableRateLimiter(config)
+        await limiter.acquire("TEST", "/api/test")
+        assert limiter.stats.total_requests == 1
+        assert limiter.stats.total_throttled == 0
+
+    @pytest.mark.asyncio
+    async def test_acquire_disabled_global(self):
+        config = RateLimitConfig(enabled=False)
+        limiter = ConfigurableRateLimiter(config)
+        await limiter.acquire("TEST", "/api/test")
+        assert limiter.stats.total_requests == 1
+        assert limiter.stats.total_throttled == 0
+
+    @pytest.mark.asyncio
+    async def test_acquire_multiple_platforms(self):
+        config = RateLimitConfig(
+            platforms={
+                "P1": PlatformRateLimitConfig(platform="P1", default_requests_per_second=100.0),
+                "P2": PlatformRateLimitConfig(platform="P2", default_requests_per_second=100.0),
+            },
+        )
+        limiter = ConfigurableRateLimiter(config)
+        await limiter.acquire("P1", "/api")
+        await limiter.acquire("P2", "/api")
+        assert limiter.stats.total_requests >= 2
+
+    def test_update_platform_config(self):
+        config = RateLimitConfig(
+            platforms={
+                "TEST": PlatformRateLimitConfig(platform="TEST", default_requests_per_second=5.0),
+            },
+        )
+        limiter = ConfigurableRateLimiter(config)
+        new_config = PlatformRateLimitConfig(platform="TEST", default_requests_per_second=20.0)
+        limiter.update_platform_config("TEST", new_config)
+        assert limiter.config.platforms["TEST"].default_requests_per_second == 20.0
+
+    def test_update_endpoint_limit(self):
+        config = RateLimitConfig(
+            platforms={
+                "TEST": PlatformRateLimitConfig(platform="TEST", default_requests_per_second=10.0),
+            },
+        )
+        limiter = ConfigurableRateLimiter(config)
+        limiter.update_endpoint_limit("TEST", "/api/slow", requests_per_second=1.0)
+        assert limiter.config.platforms["TEST"].endpoints["/api/slow"].requests_per_second == 1.0
+
+    def test_update_endpoint_limit_creates_platform(self):
+        """update_endpoint_limit should create platform config if missing."""
+        limiter = ConfigurableRateLimiter()
+        limiter.update_endpoint_limit("NEW_PLATFORM", "/api", requests_per_second=5.0)
+        assert "NEW_PLATFORM" in limiter.config.platforms
+        assert limiter.config.platforms["NEW_PLATFORM"].endpoints["/api"].requests_per_second == 5.0
+
+    def test_get_stats_summary(self):
+        limiter = ConfigurableRateLimiter()
+        summary = limiter.get_stats_summary()
+        assert "config" in summary
+        assert "stats" in summary
+
+    def test_reset_stats(self):
+        limiter = ConfigurableRateLimiter()
+        limiter.stats.record_throttle("TEST", "/api", 100.0)
+        limiter.reset_stats()
+        assert limiter.stats.total_requests == 0
+
+    @pytest.mark.asyncio
+    async def test_acquire_with_endpoint_config(self):
+        config = RateLimitConfig(
+            platforms={
+                "TEST": PlatformRateLimitConfig(
+                    platform="TEST",
+                    default_requests_per_second=100.0,
+                    endpoints={
+                        "/api/slow": EndpointRateLimit(
+                            endpoint="/api/slow",
+                            requests_per_second=100.0,
+                        ),
+                    },
+                ),
+            },
+        )
+        limiter = ConfigurableRateLimiter(config)
+        await limiter.acquire("TEST", "/api/slow")
+        await limiter.acquire("TEST", "/api/fast")
+        assert limiter.stats.total_requests >= 2

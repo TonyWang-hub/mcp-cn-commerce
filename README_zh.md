@@ -180,15 +180,19 @@ export JD_ACCESS_TOKEN="你的 Access Token"
 
 | Server | 工具数 | 覆盖类别 |
 |---|---|---|
-| oceanengine | 17 | 广告、千川、星图、素材、人群、优化 |
-| doudian | 20 | 订单、商品、售后、物流、评价、直播、流量、营销、资金、店铺 |
-| jd | 14 | 订单、商品、售后、物流、评价、价格、库存、营销、店铺 |
-| taobao | 13 | 订单、商品、售后、物流、评价、店铺、营销、类目 |
-| pinduoduo | 13 | 订单、商品、售后、物流、评价、店铺、营销、多多客 |
-| kuaishou | 12 | 订单、商品、售后、物流、评价、店铺、营销 |
-| xiaohongshu | 12 | 订单、商品、售后、物流、评价、店铺、营销、库存、财务 |
-| weixin-store | 11 | 订单、商品、售后、物流、店铺、营销、供货、类目 |
-| **合计** | **112** | 全部默认只读 |
+| oceanengine | 22 | 广告、千川、星图、素材、人群、优化 |
+| doudian | 24 | 订单、商品、售后、物流、评价、直播、流量、营销、资金、店铺 |
+| jd | 19 | 订单、商品、售后、物流、评价、价格、库存、营销、店铺 |
+| taobao | 17 | 订单、商品、售后、物流、评价、店铺、营销、类目 |
+| pinduoduo | 17 | 订单、商品、售后、物流、评价、店铺、营销、多多客 |
+| kuaishou | 16 | 订单、商品、售后、物流、评价、店铺、营销 |
+| xiaohongshu | 17 | 订单、商品、售后、物流、评价、店铺、营销、库存、财务 |
+| weixin-store | 15 | 订单、商品、售后、物流、店铺、营销、供货、类目 |
+| **合计** | **147** | 平台工具 + 每个 server 额外 4 个通用运维工具 |
+
+每个 server 还额外暴露 **4 个跨平台运维工具**（已计入上表）：`get_metrics`（各接口延迟/成功/错误统计）、
+`get_traces`（最近请求链路）、`get_alerts`（按实时指标评估告警规则）、`export_data`（导出记录为 CSV/JSON）。
+请求链路追踪与指标在每次调用时自动采集。
 
 每个工具的具体用法见各 `servers/<平台>/src/` 目录下的源码。
 
@@ -200,10 +204,10 @@ mcp-cn-commerce/
 ├── shared/                           # 共享基类：签名/请求/分页
 │   └── cn_commerce_base.py           # 继承此基类即可新建平台
 ├── servers/
-│   ├── oceanengine/  17 tools        ├── doudian/    20 tools
-│   ├── jd/           14 tools        ├── taobao/     13 tools
-│   ├── pinduoduo/    13 tools        ├── kuaishou/   12 tools
-│   ├── xiaohongshu/  12 tools        └── weixin-store/ 11 tools
+│   ├── oceanengine/  22 tools        ├── doudian/    24 tools
+│   ├── jd/           19 tools        ├── taobao/     17 tools
+│   ├── pinduoduo/    17 tools        ├── kuaishou/   16 tools
+│   ├── xiaohongshu/  17 tools        └── weixin-store/ 15 tools
 ├── docs/platforms.md                 # 8 平台 API 对比 & 认证方式矩阵
 ├── README.md / README_zh.md          # 英文 / 简体中文
 └── LICENSE                           # MIT
@@ -217,7 +221,7 @@ Monorepo 架构：每个平台是一个独立的 MCP Server，用户按需安装
 
 - 🔒 **本地运行** — API 密钥和凭证存在你的电脑上，不经过任何服务器
 - 📖 **代码开源** — 每一行代码都可审计
-- 👁️ **默认只读** — 全部 112 个工具只读数据，零写入/修改/删除操作
+- 👁️ **默认只读** — 全部平台工具只读数据，零写入/修改/删除操作
 - 📡 **无数据收集** — 不收集、不追踪、不上传任何使用数据
 - 🖥️ **直连平台 API** — 代码直接调用平台 API，无中间服务器或代理
 - 🔑 **环境变量配置** — 凭证通过环境变量加载，绝不硬编码

@@ -1,215 +1,131 @@
-# Distributed Tracing & Connection Pool Monitoring
+# Request Tracing
 
-mcp-cn-commerce includes built-in distributed tracing and connection pool monitoring for all platform API calls.
+mcp-cn-commerce records a lightweight span trace for every platform API call.
+Tracing is **enabled by default** -- there is nothing to turn on.
 
-## Distributed Tracing
+## What's wired in (always on)
 
-### Core Concepts
+Every `CommerceMCPBase` instance creates a `RequestTracer` named after its class
+(e.g. `"JDMCP"`). On every `_request()` call the base:
 
-- **Trace**: A complete request flow across one or more services, identified by a `trace_id`.
-- **Span**: A single unit of work within a trace (e.g., one API call), identified by a `span_id`.
-- **TraceContext**: Propagated across service boundaries via HTTP headers.
+1. Starts one span (`"<METHOD> <path>"`, e.g. `"GET /api/orders"`) covering the
+   whole logical request, including any retries.
+2. Finishes the span with status `"ok"` on success or `"error"` on failure.
 
-### Basic Usage
+The trace summary is surfaced two ways:
 
-Every `CommerceMCPBase` instance has a built-in `Tracer`:
+- **In code:** `client.get_trace_summary()`.
+- **As an MCP tool:** every platform server registers a `get_traces` tool
+  (via `register_common_tools`) that returns the same summary as JSON.
 
 ```python
-from cn_commerce_base import CommerceMCPBase, span_scope
+from shared.cn_commerce_base import CommerceMCPBase
 
-client = CommerceMCPBase(app_key="...", app_secret="...")
-tracer = client.tracer
+client = CommerceMCPBase(app_key="...", app_secret="...", access_token="...")
 
-# All _request() calls automatically create spans
-# Access the trace summary after requests
-summary = tracer.get_trace_summary()
+# Spans are created automatically on each request.
+await client._request("GET", "/api/orders", params={"page": "1"})
+
+summary = client.get_trace_summary()
 print(summary)
 # {
-#   "trace_id": "abc123...",
-#   "span_count": 3,
+#   "trace_id": "e78ca20649b14e4e94aa4b15eaf35995",
+#   "span_count": 1,
 #   "active_span_count": 0,
-#   "total_duration_ms": 245.32,
+#   "total_duration_ms": 101.13,
 #   "root_span": "GET /api/orders",
-#   "status": "ok",
+#   "status": "ok",            # "error" if any span failed
 #   "service_name": "CommerceMCPBase"
 # }
 ```
 
-### Creating Custom Spans
+A runnable, offline demo is in
+[`examples/best-practices/observability_demo.py`](../examples/best-practices/observability_demo.py).
+
+### Trace summary fields
+
+| Field | Type | Description |
+|---|---|---|
+| `trace_id` | `str` | ID of the first recorded trace |
+| `span_count` | `int` | Total spans recorded so far |
+| `active_span_count` | `int` | Spans not yet finished |
+| `total_duration_ms` | `float` | Sum of finished span durations |
+| `root_span` | `str` | Name of the first root (parentless) span |
+| `status` | `str` | `"error"` if any span errored, else `"ok"` |
+| `service_name` | `str` | Tracer service name (the client class name) |
+
+## Direct access to the tracer
+
+The underlying tracer is available as `client._tracer` for callers that want raw
+span access:
 
 ```python
-from cn_commerce_base import Tracer, span_scope
+tracer = client._tracer
 
-tracer = Tracer(service_name="order-service")
-
-# Using start_span / finish_span
-span = tracer.start_span("process_order")
-span.set_attribute("order_id", "12345")
-span.add_event("validation_complete")
-# ... do work ...
-span.set_status("ok")
-tracer.finish_span(span)
-
-# Using the span_scope context manager (recommended)
-with span_scope(tracer, "process_order") as span:
-    span.set_attribute("order_id", "12345")
-    # span is automatically finished on block exit
-    # errors are automatically captured
+tracer.get_spans()         # list[TraceSpan]  -- all recorded spans (copy)
+tracer.get_active_spans()  # list[TraceSpan]  -- unfinished spans
+tracer.get_stats()         # {"service_name", "total_spans", "active_spans", "current_trace_id"}
+tracer.clear()             # drop all spans (e.g. between logical operations)
 ```
 
-### Parent-Child Spans
+## Creating custom spans
+
+`RequestTracer` can be used standalone to trace your own operations, with
+optional parent/child relationships.
 
 ```python
-parent = tracer.start_span("fetch_all_orders")
+from shared.cn_commerce_base import RequestTracer
 
-with span_scope(tracer, "fetch_page_1", parent=parent) as child:
-    child.set_attribute("page", 1)
-    # ... fetch first page ...
+tracer = RequestTracer(service_name="order-service")
 
-with span_scope(tracer, "fetch_page_2", parent=parent) as child:
-    child.set_attribute("page", 2)
-    # ... fetch second page ...
+# Root span
+root = tracer.start_span("fetch_all_orders", attributes={"shop_id": "123"})
 
-tracer.finish_span(parent)
+# Child span -- pass the parent to inherit its trace_id
+child = tracer.start_span("api_call", parent=root, attributes={"method": "GET"})
+child.set_attribute("page", 1)
+child.add_event("response_received", {"status_code": 200})
+tracer.finish_span(child, status="ok")
+
+tracer.finish_span(root, status="ok")
+
+print(tracer.get_trace_summary())
 ```
 
-### Trace Context Propagation
+### TraceSpan
 
-Inject and extract trace context across HTTP boundaries:
+Each span exposes:
+
+| Member | Description |
+|---|---|
+| `span_id` / `trace_id` / `parent_id` | Identity (auto-generated) |
+| `name` | Span name |
+| `start_time` / `end_time` / `duration_ms` | Timing (ms once finished) |
+| `status` | `"unset"`, `"ok"`, or `"error"` |
+| `attributes` | `dict` of key/value metadata |
+| `events` | List of timestamped events |
+| `set_attribute(key, value)` | Add/update an attribute |
+| `add_event(name, attributes=None)` | Append a timestamped event |
+| `finish(status="ok")` | Mark the span finished |
+| `is_active` | `True` until the span is finished |
+| `to_dict()` | JSON-serializable representation |
+
+### Error spans
+
+Mark a span as errored when an operation fails:
 
 ```python
-# Sender: inject trace context into headers
-headers = {"Content-Type": "application/json"}
-tracer.inject_headers(headers)
-# headers now contains: X-Trace-Id, X-Span-Id
-
-# Receiver: extract trace context from headers
-context = tracer.extract_context(incoming_headers)
+span = tracer.start_span("api_call")
+try:
+    result = await client._request("GET", "/api/orders")
+    tracer.finish_span(span, status="ok")
+except Exception as exc:
+    span.set_attribute("error.type", type(exc).__name__)
+    tracer.finish_span(span, status="error")
+    raise
 ```
 
-#### W3C Trace Context Support
-
-```python
-from cn_commerce_base import TraceContext
-
-# Parse W3C traceparent header
-context = TraceContext.from_w3c(
-    traceparent="00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
-    tracestate="vendor=value",
-)
-
-# Convert back to W3C format
-traceparent, tracestate = context.to_w3c()
-```
-
-### Exporting Traces
-
-```python
-# Export all spans as structured JSON
-trace_data = tracer.export_trace()
-# {
-#   "trace_id": "...",
-#   "service_name": "taobao-api",
-#   "span_count": 5,
-#   "spans": [
-#     {
-#       "trace_id": "...",
-#       "span_id": "...",
-#       "parent_id": null,
-#       "name": "GET /api/orders",
-#       "start_time": 1717800000.0,
-#       "end_time": 1717800000.25,
-#       "duration_ms": 250.0,
-#       "status": "ok",
-#       "attributes": {"http.method": "GET"},
-#       "events": []
-#     },
-#     ...
-#   ]
-# }
-```
-
-### Clearing Traces
-
-```python
-tracer.clear()  # Removes all recorded spans
-```
-
-## Connection Pool Monitoring
-
-### Basic Usage
-
-Every `CommerceMCPBase` instance has a built-in `ConnectionPoolMonitor`:
-
-```python
-client = CommerceMCPBase(app_key="...", app_secret="...")
-
-# Get current pool metrics
-metrics = client.pool_monitor.get_metrics()
-print(metrics)
-# PoolMetrics(
-#   total_connections=3,
-#   active_connections=3,
-#   idle_connections=7,
-#   pool_utilization=0.3,
-#   max_connections=10,
-#   ...
-# )
-```
-
-### Health Status
-
-```python
-health = client.pool_monitor.get_health_status()
-# {
-#   "status": "healthy",          # "healthy", "warning", or "critical"
-#   "utilization": 0.3,
-#   "peak_active": 5,
-#   "total_requests": 42,
-#   "avg_wait_time_ms": 1.23,
-#   "warning": None               # or a warning message
-# }
-```
-
-### Health Status Thresholds
-
-| Utilization | Status   | Description |
-|------------|----------|-------------|
-| < 70%      | healthy  | Normal operation |
-| 70% - 90%  | warning  | Monitor for saturation |
-| > 90%      | critical | Consider increasing max_connections |
-
-### Manual Monitoring
-
-```python
-from cn_commerce_base import ConnectionPoolMonitor
-
-monitor = ConnectionPoolMonitor(max_connections=20)
-
-# Record connection lifecycle
-monitor.record_acquire(latency_ms=5.2)
-# ... use connection ...
-monitor.record_release()
-
-# Reset metrics
-monitor.reset()
-```
-
-## Integration with Health Check
-
-The `health_check()` method includes both pool and metrics data:
-
-```python
-result = await client.health_check()
-# {
-#   "configured": true,
-#   "has_token": true,
-#   "api_reachable": true,
-#   "metrics": { ... },          # API endpoint metrics
-#   "pool": {                    # Connection pool status
-#     "status": "healthy",
-#     "utilization": 0.1,
-#     ...
-#   }
-# }
-```
+> Note: the tracer is an in-process span recorder. It does not propagate
+> context across HTTP boundaries or export to an external collector
+> (OpenTelemetry/Jaeger). To ship traces externally, periodically read
+> `tracer.get_spans()` (each has `.to_dict()`) and forward them yourself.

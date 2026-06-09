@@ -7,28 +7,18 @@ Does not require the MCP stdio transport.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# Set up import paths so the server module and shared base can be imported.
-# Mirrors the logic in server.py but adjusted for the test file's location
-# (tests/ is one level shallower than src/mcp_oceanengine/).
+# Repo root, used by tests that probe the on-disk project layout (e.g. .env).
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_SHARED_DIR = _REPO_ROOT / "shared"
-_SRC_DIR = _REPO_ROOT / "servers" / "oceanengine" / "src"
-
-if str(_SHARED_DIR) not in sys.path:
-    sys.path.insert(0, str(_SHARED_DIR))
-if str(_SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(_SRC_DIR))
 
 # ── Compatibility shim: MCP >=1.27 moved the tool() decorator to ──
 # FastMCP. The server under test uses @server.tool().  Monkey-patch
 # Server so the module can be imported under newer MCP versions.
-import mcp.server  # noqa: E402
+import mcp.server
 
 _orig_server_cls = mcp.server.Server
 
@@ -44,7 +34,7 @@ if not hasattr(_orig_server_cls, "tool"):
 
     _orig_server_cls.tool = _mock_tool  # type: ignore[attr-defined]
 
-from cn_commerce_base import CommerceAPIError  # noqa: E402
+from shared.cn_commerce_base import CommerceAPIError  # noqa: E402
 
 # ── Fixtures ────────────────────────────────────────────────
 
@@ -118,14 +108,14 @@ class TestSafeIntList:
 
 class TestFormatHelpers:
     def test_format_response_pretty_json(self):
-        from cn_commerce_base import format_response
+        from shared.cn_commerce_base import format_response
 
         result = json.loads(format_response({"code": 0, "data": {"name": "测试"}}))
         assert result["code"] == 0
         assert result["data"]["name"] == "测试"
 
     def test_format_error_structure(self):
-        from cn_commerce_base import format_error_response
+        from shared.cn_commerce_base import format_error_response
 
         err = CommerceAPIError(40001, "Invalid parameters")
         result = json.loads(format_error_response(err))

@@ -4,13 +4,20 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mcp-cn-pinduoduo"
-version = "0.1.0"
+dynamic = ["version"]
 description = "MCP server for Pinduoduo (拼多多) e-commerce platform"
-requires-python = ">=3.10"
-dependencies = ["mcp>=1.0", "httpx>=0.27"]
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.0,<2",
+    "httpx>=0.27,<1",
+    "mcp-cn-commerce>=0.1,<0.2",
+]
 
 [project.scripts]
 mcp-cn-pinduoduo = "mcp_pinduoduo.server:main"
+
+[tool.hatch.version]
+path = "src/mcp_pinduoduo/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcp_pinduoduo"]

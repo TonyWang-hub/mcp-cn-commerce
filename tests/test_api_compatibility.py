@@ -12,36 +12,13 @@ from __future__ import annotations
 import json
 import os
 import sys
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
-import pytest
-
-# ── Path setup ───────────────────────────────────────────────────
-
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-_SHARED_DIR = _REPO_ROOT / "shared"
-
-_ALL_PLATFORMS = [
-    "oceanengine",
-    "doudian",
-    "jd",
-    "taobao",
-    "pinduoduo",
-    "kuaishou",
-    "xiaohongshu",
-    "weixin-store",
-]
-for _p in _ALL_PLATFORMS:
-    _src = _REPO_ROOT / "servers" / _p / "src"
-    if _src.is_dir() and str(_src) not in sys.path:
-        sys.path.insert(0, str(_src))
-if str(_SHARED_DIR) not in sys.path:
-    sys.path.insert(0, str(_SHARED_DIR))
 
 # MCP compat shim
-import mcp.server  # noqa: E402
+import mcp.server
+import pytest
 
 _orig_server_cls = mcp.server.Server
 if not hasattr(_orig_server_cls, "tool"):
@@ -54,7 +31,7 @@ if not hasattr(_orig_server_cls, "tool"):
 
     _orig_server_cls.tool = _mock_tool  # type: ignore[attr-defined]
 
-from cn_commerce_base import (  # noqa: E402
+from shared.cn_commerce_base import (  # noqa: E402
     CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,

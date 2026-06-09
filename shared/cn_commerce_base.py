@@ -220,6 +220,30 @@ def validate_api_param(name: str, value: str, max_length: int = 4096) -> str:
     return value
 
 
+def canonicalize_sign_value(value: Any) -> str:
+    """Canonicalize a parameter value for stable signing.
+
+    Signatures must be reproducible: the same logical value must always
+    serialize to the same string, regardless of Python object identity or
+    dict ordering. Naively interpolating arbitrary values (``f"{v}"``) makes
+    ``dict``/``list`` values stringify non-deterministically, producing
+    signatures that intermittently fail server-side verification.
+
+    Args:
+        value: Any parameter value.
+
+    Returns:
+        A deterministic string representation.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return str(value)
+
+
 def validate_env_var_name(name: str) -> str:
     """Validate an environment variable name.
 
@@ -2678,10 +2702,12 @@ class CommerceMCPBase:
         reconnect_config: ReconnectConfig | None = None,
         compression_config: CompressionConfig | None = None,
         rate_limit_config: RateLimitConfig | None = None,
+        validate_input: bool = True,
     ) -> None:
         self.app_key = app_key
         self.app_secret = app_secret
         self.access_token = access_token
+        self.validate_input = validate_input
         self.rate_limiter = RateLimiter()
         self.metrics = MetricsCollector()
         self._reconnect_config = reconnect_config or ReconnectConfig()
@@ -2837,6 +2863,11 @@ class CommerceMCPBase:
         params = params or {}
         data = data or {}
 
+        # Reject injection-style payloads before they reach the upstream API.
+        if self.validate_input:
+            self._validate_params(params)
+            self._validate_params(data)
+
         # Snapshot auth params for retry (timestamp must be regenerated each attempt)
         auth_params: dict[str, str] = {}
         auth_params["app_key"] = self.app_key
@@ -2914,6 +2945,18 @@ class CommerceMCPBase:
             raise last_exc  # type: ignore[misc]
         return {}  # type: ignore[return-value]
 
+    # ── Input validation ──────────────────────────────────
+
+    def _validate_params(self, params: dict[str, Any]) -> None:
+        """Validate string parameter values for injection patterns.
+
+        Only string values are checked; numeric/bool values are inherently
+        safe. Raises ``ValueError`` on the first suspicious value.
+        """
+        for name, value in params.items():
+            if isinstance(value, str):
+                validate_api_param(name, value)
+
     # ── Signing ───────────────────────────────────────────
 
     def _sign(self, params: dict[str, Any]) -> str:
@@ -2921,7 +2964,11 @@ class CommerceMCPBase:
         # Remove sign and sign_method, sort by key
         to_sign = {k: v for k, v in params.items() if k not in ("sign", "sign_method") and v != ""}
         sorted_keys = sorted(to_sign.keys())
-        raw = self.app_secret + "".join(f"{k}{to_sign[k]}" for k in sorted_keys) + self.app_secret
+        raw = (
+            self.app_secret
+            + "".join(f"{k}{canonicalize_sign_value(to_sign[k])}" for k in sorted_keys)
+            + self.app_secret
+        )
 
         if self.sign_method == SignMethod.MD5:
             return hashlib.md5(raw.encode()).hexdigest().upper()

@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Allow other workflows (e.g. release) to require this suite as a gate.
+  workflow_call:
 
 jobs:
   test:

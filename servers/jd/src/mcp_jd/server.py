@@ -21,7 +21,7 @@ _project_root = Path(__file__).resolve().parents[4]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from shared.cn_commerce_base import CommerceMCPBase, ConfigValidationError, SignMethod
+from shared.cn_commerce_base import CommerceMCPBase, ConfigValidationError, SignMethod, canonicalize_sign_value
 
 # ── JD client ───────────────────────────────────────────────────────────────
 
@@ -40,7 +40,11 @@ class JDMCP(CommerceMCPBase):
         """
         to_sign = {k: v for k, v in params.items() if k not in ("sign", "sign_method") and v != ""}
         sorted_keys = sorted(to_sign.keys())
-        raw = self.app_secret + "".join(f"{k}{to_sign[k]}" for k in sorted_keys) + self.app_secret
+        raw = (
+            self.app_secret
+            + "".join(f"{k}{canonicalize_sign_value(to_sign[k])}" for k in sorted_keys)
+            + self.app_secret
+        )
         return hmac.new(self.app_secret.encode(), raw.encode(), hashlib.md5).hexdigest().upper()
 
     async def _call(self, api_method: str, biz_params: dict | None = None) -> dict:

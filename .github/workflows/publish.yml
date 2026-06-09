@@ -7,8 +7,13 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Run the full quality suite first; release is gated on it passing.
+  quality:
+    uses: ./.github/workflows/test.yml
+
   release:
     runs-on: ubuntu-latest
+    needs: [quality]
     permissions:
       contents: write
     steps:

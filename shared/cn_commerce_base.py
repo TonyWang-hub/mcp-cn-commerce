@@ -5344,7 +5344,7 @@ class RequestRecorder:
         with self._lock:
             self._records.append(rec)
             if len(self._records) > self.config.max_records:
-                self._records = self._records[-self.config.max_records:]
+                self._records = self._records[-self.config.max_records :]
             self._stats["total_recorded"] += 1
 
         logger.debug(f"Recorded request: {rec.method} {rec.path} [{rec.record_id[:8]}]")
@@ -5411,7 +5411,7 @@ class RequestRecorder:
         with self._lock:
             self._records.extend(records)
             if len(self._records) > self.config.max_records:
-                self._records = self._records[-self.config.max_records:]
+                self._records = self._records[-self.config.max_records :]
             self._stats["total_imported"] += len(records)
         logger.debug(f"Imported {len(records)} request records")
         return len(records)
@@ -5531,7 +5531,10 @@ class RequestReplayer:
     ) -> list[dict[str, Any]]:
         """Replay filtered recorded requests."""
         records = self._recorder.filter(
-            method=method, path=path, platform=platform, tags=tags,
+            method=method,
+            path=path,
+            platform=platform,
+            tags=tags,
         )
         results: list[dict[str, Any]] = []
         for record in records:
@@ -5556,11 +5559,13 @@ class RequestReplayer:
             result = await self.replay(record, execute_fn)
             if not result["success"]:
                 mismatched += 1
-                details.append({
-                    "record_id": record.record_id,
-                    "status": "error",
-                    "error": result.get("error", ""),
-                })
+                details.append(
+                    {
+                        "record_id": record.record_id,
+                        "status": "error",
+                        "error": result.get("error", ""),
+                    }
+                )
                 continue
 
             original = record.response or {}
@@ -5568,18 +5573,22 @@ class RequestReplayer:
 
             if self._responses_match(original, new):
                 matched += 1
-                details.append({
-                    "record_id": record.record_id,
-                    "status": "matched",
-                })
+                details.append(
+                    {
+                        "record_id": record.record_id,
+                        "status": "matched",
+                    }
+                )
             else:
                 mismatched += 1
-                details.append({
-                    "record_id": record.record_id,
-                    "status": "mismatched",
-                    "original_keys": sorted(original.keys()) if isinstance(original, dict) else [],
-                    "new_keys": sorted(new.keys()) if isinstance(new, dict) else [],
-                })
+                details.append(
+                    {
+                        "record_id": record.record_id,
+                        "status": "mismatched",
+                        "original_keys": sorted(original.keys()) if isinstance(original, dict) else [],
+                        "new_keys": sorted(new.keys()) if isinstance(new, dict) else [],
+                    }
+                )
 
         self._stats["total_matched"] += matched
         self._stats["total_mismatched"] += mismatched
@@ -5645,11 +5654,13 @@ class TraceSpan:
 
     def add_event(self, name: str, attributes: dict[str, Any] | None = None) -> None:
         """Add a timestamped event to the span."""
-        self.events.append({
-            "name": name,
-            "timestamp": time.time(),
-            "attributes": attributes or {},
-        })
+        self.events.append(
+            {
+                "name": name,
+                "timestamp": time.time(),
+                "attributes": attributes or {},
+            }
+        )
 
     def finish(self, status: str = "ok") -> None:
         """Mark the span as finished."""
@@ -5887,7 +5898,7 @@ class DebugLogger:
         with self._lock:
             self._entries.append(entry)
             if len(self._entries) > self._max_entries:
-                self._entries = self._entries[-self._max_entries:]
+                self._entries = self._entries[-self._max_entries :]
             self._stats["total_logged"] += 1
 
         return entry
@@ -6073,12 +6084,14 @@ class DebugBreakpointManager:
 
     def _record_hit(self, bp: DebugBreakpoint, context: dict[str, Any]) -> None:
         """Record a breakpoint hit in history."""
-        self._hit_history.append({
-            "breakpoint_id": bp.breakpoint_id,
-            "name": bp.name,
-            "timestamp": time.time(),
-            "context": context,
-        })
+        self._hit_history.append(
+            {
+                "breakpoint_id": bp.breakpoint_id,
+                "name": bp.name,
+                "timestamp": time.time(),
+                "context": context,
+            }
+        )
         if len(self._hit_history) > 1000:
             self._hit_history = self._hit_history[-500:]
 

@@ -3821,6 +3821,7 @@ class TestRequestResultCache:
         key = RequestResultCache.make_key("GET", "/api/test")
         cache.set(key, {"result": "ok"})
         import time as _time
+
         _time.sleep(0.01)
         assert cache.get(key) is None
 
@@ -3892,6 +3893,7 @@ class TestRequestResultCache:
         cache.set("k1", {"a": 1})
         cache.set("k2", {"b": 2})
         import time as _time
+
         _time.sleep(0.01)
         removed = cache.cleanup_expired()
         assert removed == 2
@@ -4331,9 +4333,7 @@ class TestCommerceMCPBaseResultCache:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                mock_response.json.return_value = {
-                    "error_response": {"code": 40001, "msg": "bad"}
-                }
+                mock_response.json.return_value = {"error_response": {"code": 40001, "msg": "bad"}}
             else:
                 mock_response.json.return_value = {"result": "ok"}
             mock_response.status_code = 200
@@ -4378,9 +4378,7 @@ class TestCommerceMCPBaseDecompression:
 
         client = CommerceMCPBase(app_key="k", app_secret="s")
         original_data = {"result": {"products": list(range(100))}}
-        compressed_body = gzip_mod.compress(
-            json.dumps(original_data, ensure_ascii=False).encode()
-        )
+        compressed_body = gzip_mod.compress(json.dumps(original_data, ensure_ascii=False).encode())
 
         mock_response = MagicMock()
         mock_response.content = compressed_body
@@ -4536,10 +4534,12 @@ class TestRequestEncryptor:
 
     def test_xor_encrypt_decrypt_roundtrip(self):
         key = "deadbeef"
-        enc = RequestEncryptor(EncryptionConfig(
-            method=EncryptionMethod.XOR_CIPHER,
-            encryption_key=key,
-        ))
+        enc = RequestEncryptor(
+            EncryptionConfig(
+                method=EncryptionMethod.XOR_CIPHER,
+                encryption_key=key,
+            )
+        )
         plaintext = b'{"order_id": "12345", "amount": 100}'
         encrypted, headers = enc.encrypt(plaintext)
 
@@ -4550,63 +4550,77 @@ class TestRequestEncryptor:
         assert decrypted == plaintext
 
     def test_xor_empty_body(self):
-        enc = RequestEncryptor(EncryptionConfig(
-            method=EncryptionMethod.XOR_CIPHER,
-            encryption_key="ff",
-        ))
+        enc = RequestEncryptor(
+            EncryptionConfig(
+                method=EncryptionMethod.XOR_CIPHER,
+                encryption_key="ff",
+            )
+        )
         encrypted, _ = enc.encrypt(b"")
         assert encrypted == b""
         assert enc.decrypt(encrypted) == b""
 
     def test_xor_custom_header_name(self):
-        enc = RequestEncryptor(EncryptionConfig(
-            method=EncryptionMethod.XOR_CIPHER,
-            encryption_key="aa",
-            header_name="X-Custom-Encrypt",
-        ))
+        enc = RequestEncryptor(
+            EncryptionConfig(
+                method=EncryptionMethod.XOR_CIPHER,
+                encryption_key="aa",
+                header_name="X-Custom-Encrypt",
+            )
+        )
         _, headers = enc.encrypt(b"data")
         assert "X-Custom-Encrypt" in headers
         assert "X-Encrypted" not in headers
 
     def test_xor_no_header_when_disabled(self):
-        enc = RequestEncryptor(EncryptionConfig(
-            method=EncryptionMethod.XOR_CIPHER,
-            encryption_key="aa",
-            include_encrypted_header=False,
-        ))
+        enc = RequestEncryptor(
+            EncryptionConfig(
+                method=EncryptionMethod.XOR_CIPHER,
+                encryption_key="aa",
+                include_encrypted_header=False,
+            )
+        )
         _, headers = enc.encrypt(b"data")
         assert headers == {}
 
     def test_missing_key_raises(self):
-        enc = RequestEncryptor(EncryptionConfig(
-            method=EncryptionMethod.XOR_CIPHER,
-            encryption_key="",
-        ))
+        enc = RequestEncryptor(
+            EncryptionConfig(
+                method=EncryptionMethod.XOR_CIPHER,
+                encryption_key="",
+            )
+        )
         with pytest.raises(ValueError, match="Encryption key is required"):
             enc.encrypt(b"data")
 
     def test_missing_key_decrypt_raises(self):
-        enc = RequestEncryptor(EncryptionConfig(
-            method=EncryptionMethod.XOR_CIPHER,
-            encryption_key="",
-        ))
+        enc = RequestEncryptor(
+            EncryptionConfig(
+                method=EncryptionMethod.XOR_CIPHER,
+                encryption_key="",
+            )
+        )
         with pytest.raises(ValueError, match="Encryption key is required"):
             enc.decrypt(b"data")
 
     def test_xor_key_cannot_be_empty(self):
-        enc = RequestEncryptor(EncryptionConfig(
-            method=EncryptionMethod.XOR_CIPHER,
-            encryption_key="",
-        ))
+        enc = RequestEncryptor(
+            EncryptionConfig(
+                method=EncryptionMethod.XOR_CIPHER,
+                encryption_key="",
+            )
+        )
         with pytest.raises(ValueError):
             enc._xor_encrypt(b"test", b"")
 
     def test_xor_large_body(self):
         key = "1234567890abcdef"
-        enc = RequestEncryptor(EncryptionConfig(
-            method=EncryptionMethod.XOR_CIPHER,
-            encryption_key=key,
-        ))
+        enc = RequestEncryptor(
+            EncryptionConfig(
+                method=EncryptionMethod.XOR_CIPHER,
+                encryption_key=key,
+            )
+        )
         body = os.urandom(10000)
         encrypted, _ = enc.encrypt(body)
         assert len(encrypted) == len(body)
@@ -4634,18 +4648,22 @@ class TestRequestEncryptor:
 
     def test_aes_wrong_key_length(self):
         # 8 bytes hex = 4 bytes key (not 32)
-        enc = RequestEncryptor(EncryptionConfig(
-            method=EncryptionMethod.AES_256_CBC,
-            encryption_key="aabbccdd",
-        ))
+        enc = RequestEncryptor(
+            EncryptionConfig(
+                method=EncryptionMethod.AES_256_CBC,
+                encryption_key="aabbccdd",
+            )
+        )
         with pytest.raises(ValueError, match="32-byte key"):
             enc.encrypt(b"data")
 
     def test_aes_decrypt_short_data(self):
-        enc = RequestEncryptor(EncryptionConfig(
-            method=EncryptionMethod.AES_256_CBC,
-            encryption_key="00" * 32,
-        ))
+        enc = RequestEncryptor(
+            EncryptionConfig(
+                method=EncryptionMethod.AES_256_CBC,
+                encryption_key="00" * 32,
+            )
+        )
         with pytest.raises(ValueError, match="too short"):
             enc.decrypt(b"short")
 
@@ -4653,10 +4671,12 @@ class TestRequestEncryptor:
         """Test AES-256-CBC encrypt/decrypt roundtrip (requires pyaes)."""
         pyaes = pytest.importorskip("pyaes")
         key = "0123456789abcdef" * 4  # 32 bytes
-        enc = RequestEncryptor(EncryptionConfig(
-            method=EncryptionMethod.AES_256_CBC,
-            encryption_key=key,
-        ))
+        enc = RequestEncryptor(
+            EncryptionConfig(
+                method=EncryptionMethod.AES_256_CBC,
+                encryption_key=key,
+            )
+        )
         plaintext = b'{"product_id": "SKU-001", "price": 99.99}'
         encrypted, headers = enc.encrypt(plaintext)
 
@@ -4671,10 +4691,12 @@ class TestRequestEncryptor:
         """Each AES encryption should produce different ciphertext (random IV)."""
         pyaes = pytest.importorskip("pyaes")
         key = "aabbccdd" * 8
-        enc = RequestEncryptor(EncryptionConfig(
-            method=EncryptionMethod.AES_256_CBC,
-            encryption_key=key,
-        ))
+        enc = RequestEncryptor(
+            EncryptionConfig(
+                method=EncryptionMethod.AES_256_CBC,
+                encryption_key=key,
+            )
+        )
         body = b"same plaintext"
         r1, _ = enc.encrypt(body)
         r2, _ = enc.encrypt(body)
@@ -4685,10 +4707,12 @@ class TestRequestEncryptor:
         assert enc.decrypt(r2) == body
 
     def test_encryption_stats(self):
-        enc = RequestEncryptor(EncryptionConfig(
-            method=EncryptionMethod.XOR_CIPHER,
-            encryption_key="ab",
-        ))
+        enc = RequestEncryptor(
+            EncryptionConfig(
+                method=EncryptionMethod.XOR_CIPHER,
+                encryption_key="ab",
+            )
+        )
         enc.encrypt(b"hello")
         enc.encrypt(b"world")
         enc.decrypt(b"data")
@@ -4700,20 +4724,24 @@ class TestRequestEncryptor:
         assert stats["total_bytes_decrypted"] == 4
 
     def test_encryption_stats_reset(self):
-        enc = RequestEncryptor(EncryptionConfig(
-            method=EncryptionMethod.XOR_CIPHER,
-            encryption_key="ab",
-        ))
+        enc = RequestEncryptor(
+            EncryptionConfig(
+                method=EncryptionMethod.XOR_CIPHER,
+                encryption_key="ab",
+            )
+        )
         enc.encrypt(b"hello")
         enc.reset_stats()
         stats = enc.get_stats()
         assert stats["total_encrypted"] == 0
 
     def test_unsupported_method_raises(self):
-        enc = RequestEncryptor(EncryptionConfig(
-            method=EncryptionMethod.NONE,
-            encryption_key="ab",
-        ))
+        enc = RequestEncryptor(
+            EncryptionConfig(
+                method=EncryptionMethod.NONE,
+                encryption_key="ab",
+            )
+        )
         # Force an invalid method for testing
         enc.config.method = "invalid"
         with pytest.raises(ValueError, match="Unsupported encryption method"):

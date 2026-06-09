@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import functools
+import gzip
 import hashlib
 import hmac
 import io
@@ -20,6 +21,7 @@ import re
 import threading
 import time
 import uuid
+import zlib
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -1177,6 +1179,543 @@ class HealthCheckCache:
             }
 
 
+# ── Cache Warmup ───────────────────────────────────────────
+
+
+@dataclass
+class WarmupTask:
+    """A registered cache warmup task.
+
+    Attributes:
+        platform: Platform identifier (e.g. "OCEANENGINE", "TAOBAO").
+        cache_key: Key used to store the warmed data.
+        fetch_fn: Async callable that fetches the data to cache.
+        priority: Lower values are warmed first (default 0).
+        enabled: Whether this task is active.
+    """
+
+    platform: str
+    cache_key: str
+    fetch_fn: Callable[..., Awaitable[Any]]
+    priority: int = 0
+    enabled: bool = True
+
+
+@dataclass
+class WarmupResult:
+    """Result of a single warmup execution.
+
+    Attributes:
+        platform: Platform identifier.
+        cache_key: Cache key that was warmed.
+        success: Whether the warmup succeeded.
+        latency_ms: Duration of the warmup in milliseconds.
+        error: Error message if warmup failed.
+    """
+
+    platform: str = ""
+    cache_key: str = ""
+    success: bool = True
+    latency_ms: float = 0.0
+    error: str = ""
+
+
+class CacheWarmer:
+    """Manages cache warmup tasks for e-commerce platforms.
+
+    Supports three warmup modes:
+    1. **Startup warmup**: Warm all registered tasks at once.
+    2. **Per-platform warmup**: Warm tasks for a specific platform.
+    3. **Scheduled warmup**: Periodically re-warm tasks via an asyncio task.
+
+    Usage::
+
+        warmer = CacheWarmer()
+        warmer.register("OCEANENGINE", "hot_products", fetch_hot_products)
+        warmer.register("TAOBAO", "categories", fetch_categories)
+
+        # Startup warmup
+        results = await warmer.warmup_all()
+
+        # Per-platform
+        results = await warmer.warmup_platform("OCEANENGINE")
+
+        # Scheduled (returns an asyncio.Task)
+        task = warmer.start_scheduled(interval_seconds=300)
+        # ... later ...
+        warmer.stop_scheduled()
+    """
+
+    def __init__(self) -> None:
+        self._tasks: list[WarmupTask] = []
+        self._cache: dict[str, Any] = {}
+        self._cache_timestamps: dict[str, float] = {}
+        self._cache_ttl: dict[str, float] = {}
+        self._scheduled_task: asyncio.Task[None] | None = None
+        self._lock = threading.Lock()
+        self._history: list[WarmupResult] = []
+
+    def register(
+        self,
+        platform: str,
+        cache_key: str,
+        fetch_fn: Callable[..., Awaitable[Any]],
+        priority: int = 0,
+        ttl_seconds: float = 300.0,
+        enabled: bool = True,
+    ) -> None:
+        """Register a warmup task.
+
+        Args:
+            platform: Platform identifier.
+            cache_key: Key for caching the fetched result.
+            fetch_fn: Async callable that returns the data to cache.
+            priority: Execution priority (lower = earlier).
+            ttl_seconds: TTL for the cached data in seconds.
+            enabled: Whether the task is active.
+        """
+        task = WarmupTask(
+            platform=platform,
+            cache_key=cache_key,
+            fetch_fn=fetch_fn,
+            priority=priority,
+            enabled=enabled,
+        )
+        self._tasks.append(task)
+        self._cache_ttl[cache_key] = ttl_seconds
+        self._tasks.sort(key=lambda t: t.priority)
+        logger.debug(f"Registered warmup task: {platform}/{cache_key}")
+
+    def unregister(self, platform: str, cache_key: str) -> bool:
+        """Remove a warmup task.
+
+        Args:
+            platform: Platform identifier.
+            cache_key: Cache key of the task to remove.
+
+        Returns:
+            True if the task was found and removed.
+        """
+        before = len(self._tasks)
+        self._tasks = [t for t in self._tasks if not (t.platform == platform and t.cache_key == cache_key)]
+        removed = len(self._tasks) < before
+        if removed:
+            self._cache_ttl.pop(cache_key, None)
+        return removed
+
+    async def warmup_all(self) -> list[WarmupResult]:
+        """Execute all registered warmup tasks.
+
+        Tasks are executed in priority order. Failed tasks are logged
+        but do not prevent subsequent tasks from running.
+
+        Returns:
+            List of WarmupResult for each task.
+        """
+        results: list[WarmupResult] = []
+        for task in self._tasks:
+            if not task.enabled:
+                continue
+            result = await self._execute_task(task)
+            results.append(result)
+        succeeded = sum(1 for r in results if r.success)
+        logger.info(f"Warmup complete: {succeeded}/{len(results)} succeeded")
+        return results
+
+    async def warmup_platform(self, platform: str) -> list[WarmupResult]:
+        """Execute warmup tasks for a specific platform.
+
+        Args:
+            platform: Platform identifier.
+
+        Returns:
+            List of WarmupResult for matching tasks.
+        """
+        tasks = [t for t in self._tasks if t.platform == platform and t.enabled]
+        results: list[WarmupResult] = []
+        for task in tasks:
+            result = await self._execute_task(task)
+            results.append(result)
+        succeeded = sum(1 for r in results if r.success)
+        logger.info(f"Warmup for {platform}: {succeeded}/{len(results)} succeeded")
+        return results
+
+    async def _execute_task(self, task: WarmupTask) -> WarmupResult:
+        """Execute a single warmup task.
+
+        Args:
+            task: The WarmupTask to execute.
+
+        Returns:
+            WarmupResult with execution details.
+        """
+        start = time.time()
+        try:
+            data = await task.fetch_fn()
+            elapsed_ms = (time.time() - start) * 1000
+            with self._lock:
+                self._cache[task.cache_key] = data
+                self._cache_timestamps[task.cache_key] = time.time()
+            result = WarmupResult(
+                platform=task.platform,
+                cache_key=task.cache_key,
+                success=True,
+                latency_ms=elapsed_ms,
+            )
+            logger.debug(f"Warmed {task.platform}/{task.cache_key} in {elapsed_ms:.1f}ms")
+        except Exception as exc:
+            elapsed_ms = (time.time() - start) * 1000
+            result = WarmupResult(
+                platform=task.platform,
+                cache_key=task.cache_key,
+                success=False,
+                latency_ms=elapsed_ms,
+                error=str(exc),
+            )
+            logger.warning(f"Warmup failed for {task.platform}/{task.cache_key}: {exc}")
+
+        self._history.append(result)
+        return result
+
+    def get_cached(self, cache_key: str) -> Any | None:
+        """Get a value from the warmup cache.
+
+        Args:
+            cache_key: The cache key to look up.
+
+        Returns:
+            Cached value or None if missing/expired.
+        """
+        with self._lock:
+            ts = self._cache_timestamps.get(cache_key)
+            if ts is None:
+                return None
+            ttl = self._cache_ttl.get(cache_key, 300.0)
+            if time.time() - ts > ttl:
+                # Expired
+                return None
+            return self._cache.get(cache_key)
+
+    def set_cached(self, cache_key: str, value: Any, ttl_seconds: float | None = None) -> None:
+        """Manually set a value in the warmup cache.
+
+        Args:
+            cache_key: Cache key.
+            value: Value to store.
+            ttl_seconds: TTL override (uses registered TTL if None).
+        """
+        with self._lock:
+            self._cache[cache_key] = value
+            self._cache_timestamps[cache_key] = time.time()
+            if ttl_seconds is not None:
+                self._cache_ttl[cache_key] = ttl_seconds
+
+    def invalidate(self, cache_key: str | None = None) -> None:
+        """Invalidate warmup cache entries.
+
+        Args:
+            cache_key: Specific key to invalidate, or None to clear all.
+        """
+        with self._lock:
+            if cache_key is None:
+                self._cache.clear()
+                self._cache_timestamps.clear()
+            else:
+                self._cache.pop(cache_key, None)
+                self._cache_timestamps.pop(cache_key, None)
+
+    def start_scheduled(
+        self,
+        interval_seconds: float = 300.0,
+        warmup_platforms: list[str] | None = None,
+    ) -> asyncio.Task[None]:
+        """Start a background task that periodically warms the cache.
+
+        Args:
+            interval_seconds: Seconds between warmup cycles.
+            warmup_platforms: If provided, only warm these platforms.
+                             Otherwise, warm all registered tasks.
+
+        Returns:
+            The asyncio.Task running the scheduled warmup.
+        """
+        self.stop_scheduled()
+
+        async def _warmup_loop() -> None:
+            logger.info(f"Scheduled warmup started (interval={interval_seconds}s)")
+            while True:
+                try:
+                    if warmup_platforms:
+                        for platform in warmup_platforms:
+                            await self.warmup_platform(platform)
+                    else:
+                        await self.warmup_all()
+                except Exception as exc:
+                    logger.error(f"Scheduled warmup error: {exc}")
+                await asyncio.sleep(interval_seconds)
+
+        self._scheduled_task = asyncio.ensure_future(_warmup_loop())
+        return self._scheduled_task
+
+    def stop_scheduled(self) -> None:
+        """Stop the scheduled warmup task if running."""
+        if self._scheduled_task is not None and not self._scheduled_task.done():
+            self._scheduled_task.cancel()
+            self._scheduled_task = None
+            logger.info("Scheduled warmup stopped")
+
+    @property
+    def is_scheduled(self) -> bool:
+        """Whether a scheduled warmup task is active."""
+        return self._scheduled_task is not None and not self._scheduled_task.done()
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get warmup cache statistics.
+
+        Returns:
+            Dict with registered_tasks, cached_keys, and history summary.
+        """
+        with self._lock:
+            now = time.time()
+            valid_keys = [k for k, ts in self._cache_timestamps.items() if now - ts <= self._cache_ttl.get(k, 300.0)]
+            total = len(self._history)
+            succeeded = sum(1 for r in self._history if r.success)
+            return {
+                "registered_tasks": len(self._tasks),
+                "cached_keys": valid_keys,
+                "cached_count": len(valid_keys),
+                "scheduled": self.is_scheduled,
+                "history": {
+                    "total": total,
+                    "succeeded": succeeded,
+                    "failed": total - succeeded,
+                },
+            }
+
+    def get_history(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Get recent warmup history.
+
+        Args:
+            limit: Maximum number of entries to return.
+
+        Returns:
+            List of warmup result dicts.
+        """
+        recent = self._history[-limit:] if limit > 0 else self._history
+        return [
+            {
+                "platform": r.platform,
+                "cache_key": r.cache_key,
+                "success": r.success,
+                "latency_ms": round(r.latency_ms, 2),
+                "error": r.error,
+            }
+            for r in recent
+        ]
+
+
+# ── Request Compression ────────────────────────────────────
+
+
+class CompressionMethod(StrEnum):
+    """Supported request body compression methods.
+
+    Attributes:
+        NONE: No compression.
+        GZIP: gzip compression (RFC 1952).
+        DEFLATE: deflate compression (RFC 1951).
+        AUTO: Automatically choose the best method based on
+              Accept-Encoding headers or default to gzip.
+    """
+
+    NONE = "none"
+    GZIP = "gzip"
+    DEFLATE = "deflate"
+    AUTO = "auto"
+
+
+@dataclass
+class CompressionConfig:
+    """Configuration for request body compression.
+
+    Attributes:
+        method: Compression method to use.
+        min_size_bytes: Minimum body size in bytes to trigger compression.
+            Bodies smaller than this are sent uncompressed.
+        gzip_level: gzip compression level (1-9). Higher = smaller but slower.
+        include_content_encoding: Whether to set the Content-Encoding header.
+    """
+
+    method: CompressionMethod = CompressionMethod.NONE
+    min_size_bytes: int = 1024  # 1 KB
+    gzip_level: int = 6
+    include_content_encoding: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        return {
+            "method": self.method.value,
+            "min_size_bytes": self.min_size_bytes,
+            "gzip_level": self.gzip_level,
+            "include_content_encoding": self.include_content_encoding,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> CompressionConfig:
+        """Deserialize from a dictionary."""
+        return cls(
+            method=CompressionMethod(data.get("method", "none")),
+            min_size_bytes=data.get("min_size_bytes", 1024),
+            gzip_level=data.get("gzip_level", 6),
+            include_content_encoding=data.get("include_content_encoding", True),
+        )
+
+
+class RequestCompressor:
+    """Compresses request bodies for API calls.
+
+    Supports gzip and deflate compression with configurable thresholds.
+    Automatically selects the best compression method when set to AUTO.
+
+    Usage::
+
+        compressor = RequestCompressor(CompressionConfig(method=CompressionMethod.GZIP))
+        body, headers = compressor.compress(b'{"data": "..."}')
+    """
+
+    def __init__(self, config: CompressionConfig | None = None) -> None:
+        """Initialize the compressor.
+
+        Args:
+            config: Compression configuration. Uses defaults if None.
+        """
+        self.config = config or CompressionConfig()
+        self._stats_lock = threading.Lock()
+        self._total_requests = 0
+        self._compressed_requests = 0
+        self._total_original_bytes = 0
+        self._total_compressed_bytes = 0
+
+    def compress(
+        self,
+        body: bytes,
+        accept_encoding: str = "",
+    ) -> tuple[bytes, dict[str, str]]:
+        """Compress a request body.
+
+        Args:
+            body: Raw request body bytes.
+            accept_encoding: The Accept-Encoding header value from the server
+                to determine the best compression method (used with AUTO).
+
+        Returns:
+            Tuple of (compressed_body, extra_headers).
+            If compression is skipped, returns (original_body, {}).
+        """
+        method = self._resolve_method(accept_encoding)
+
+        # Track stats
+        with self._stats_lock:
+            self._total_requests += 1
+            self._total_original_bytes += len(body)
+
+        # Skip compression for small bodies or NONE method
+        if method == CompressionMethod.NONE or len(body) < self.config.min_size_bytes:
+            with self._stats_lock:
+                self._total_compressed_bytes += len(body)
+            return body, {}
+
+        compressed, encoding = self._do_compress(body, method)
+
+        # Only use compression if it actually reduces size
+        if len(compressed) >= len(body):
+            with self._stats_lock:
+                self._total_compressed_bytes += len(body)
+            return body, {}
+
+        headers: dict[str, str] = {}
+        if self.config.include_content_encoding:
+            headers["Content-Encoding"] = encoding
+
+        with self._stats_lock:
+            self._compressed_requests += 1
+            self._total_compressed_bytes += len(compressed)
+
+        logger.debug(
+            f"Compressed {len(body)} -> {len(compressed)} bytes "
+            f"({100 - len(compressed) * 100 // len(body)}% reduction) using {encoding}"
+        )
+        return compressed, headers
+
+    def _resolve_method(self, accept_encoding: str) -> CompressionMethod:
+        """Resolve the actual compression method to use.
+
+        Args:
+            accept_encoding: Accept-Encoding header value.
+
+        Returns:
+            The resolved CompressionMethod (never AUTO).
+        """
+        if self.config.method != CompressionMethod.AUTO:
+            return self.config.method
+
+        # Parse Accept-Encoding to find supported methods
+        supported = {m.strip().lower() for m in accept_encoding.split(",")}
+        if "gzip" in supported or "x-gzip" in supported:
+            return CompressionMethod.GZIP
+        if "deflate" in supported:
+            return CompressionMethod.DEFLATE
+        # Default to gzip when AUTO and nothing specified
+        return CompressionMethod.GZIP
+
+    def _do_compress(self, body: bytes, method: CompressionMethod) -> tuple[bytes, str]:
+        """Perform the actual compression.
+
+        Args:
+            body: Body bytes to compress.
+            method: Compression method (must not be NONE or AUTO).
+
+        Returns:
+            Tuple of (compressed_bytes, encoding_name).
+        """
+        if method == CompressionMethod.GZIP:
+            return gzip.compress(body, compresslevel=self.config.gzip_level), "gzip"
+        elif method == CompressionMethod.DEFLATE:
+            return zlib.compress(body, level=self.config.gzip_level), "deflate"
+        else:
+            return body, ""
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get compression statistics.
+
+        Returns:
+            Dict with compression counts, ratios, and bytes saved.
+        """
+        with self._stats_lock:
+            ratio = 0.0
+            if self._total_original_bytes > 0:
+                ratio = 1.0 - (self._total_compressed_bytes / self._total_original_bytes)
+            return {
+                "total_requests": self._total_requests,
+                "compressed_requests": self._compressed_requests,
+                "compression_rate": (
+                    round(self._compressed_requests / self._total_requests, 4) if self._total_requests > 0 else 0.0
+                ),
+                "total_original_bytes": self._total_original_bytes,
+                "total_compressed_bytes": self._total_compressed_bytes,
+                "bytes_saved": self._total_original_bytes - self._total_compressed_bytes,
+                "avg_compression_ratio": round(ratio, 4),
+            }
+
+    def reset_stats(self) -> None:
+        """Reset all collected statistics."""
+        with self._stats_lock:
+            self._total_requests = 0
+            self._compressed_requests = 0
+            self._total_original_bytes = 0
+            self._total_compressed_bytes = 0
+
+
 class CommerceMCPBase:
     """Base class for Chinese e-commerce platform MCP servers.
 
@@ -1200,6 +1739,7 @@ class CommerceMCPBase:
         app_secret: str = "",
         access_token: str = "",
         reconnect_config: ReconnectConfig | None = None,
+        compression_config: CompressionConfig | None = None,
     ) -> None:
         self.app_key = app_key
         self.app_secret = app_secret
@@ -1208,6 +1748,8 @@ class CommerceMCPBase:
         self.metrics = MetricsCollector()
         self._reconnect_config = reconnect_config or ReconnectConfig()
         self._health_cache = HealthCheckCache(ttl_seconds=30.0)
+        self.cache_warmer = CacheWarmer()
+        self._compressor = RequestCompressor(compression_config)
 
     def _get_client(self) -> httpx.AsyncClient:
         """Get or create an HTTP client with connection pooling.
@@ -1382,7 +1924,22 @@ class CommerceMCPBase:
                 if method == "GET":
                     resp = await client.get(url, params={**attempt_params, **data})
                 else:
-                    resp = await client.post(url, params=attempt_params, json=data)
+                    # Compress POST body if configured
+                    extra_headers: dict[str, str] = {}
+                    if self._compressor.config.method != CompressionMethod.NONE and data:
+                        body_bytes = json.dumps(data, ensure_ascii=False).encode("utf-8")
+                        compressed_body, extra_headers = self._compressor.compress(body_bytes)
+                        if extra_headers:
+                            resp = await client.post(
+                                url,
+                                params=attempt_params,
+                                content=compressed_body,
+                                headers={**extra_headers, "Content-Type": "application/json"},
+                            )
+                        else:
+                            resp = await client.post(url, params=attempt_params, json=data)
+                    else:
+                        resp = await client.post(url, params=attempt_params, json=data)
 
                 result = resp.json()
                 if "error_response" in result:
@@ -1593,6 +2150,42 @@ class CommerceMCPBase:
         )
 
         return result.to_dict()
+
+    # ── Cache Warmup Convenience ────────────────────────────
+
+    async def warmup_cache(self, platforms: list[str] | None = None) -> list[dict[str, Any]]:
+        """Warm cache for specified platforms or all registered tasks.
+
+        Args:
+            platforms: List of platform identifiers. If None, warm all.
+
+        Returns:
+            List of warmup result dicts.
+        """
+        if platforms:
+            results: list[WarmupResult] = []
+            for platform in platforms:
+                results.extend(await self.cache_warmer.warmup_platform(platform))
+        else:
+            results = await self.cache_warmer.warmup_all()
+        return [
+            {
+                "platform": r.platform,
+                "cache_key": r.cache_key,
+                "success": r.success,
+                "latency_ms": round(r.latency_ms, 2),
+                "error": r.error,
+            }
+            for r in results
+        ]
+
+    def get_compression_stats(self) -> dict[str, Any]:
+        """Get request compression statistics.
+
+        Returns:
+            Dict with compression metrics.
+        """
+        return self._compressor.get_stats()
 
     # ── Batch Operations ──────────────────────────────────
 
@@ -2425,697 +3018,6 @@ class WebhookManager:
         self._delivery_results.clear()
 
 
-# ── Connection Reuse & Pool Management ─────────────────────
-
-
-@dataclass
-class ConnectionPoolStats:
-    """Statistics for the connection pool.
-
-    Attributes:
-        total_connections: Total number of connections created.
-        active_connections: Number of currently active connections.
-        idle_connections: Number of idle connections in the pool.
-        connections_reused: Number of times a connection was reused.
-        connections_created: Number of new connections created.
-        connections_closed: Number of connections that were closed.
-        health_checks_passed: Number of successful health checks.
-        health_checks_failed: Number of failed health checks.
-        avg_connection_age_ms: Average age of active connections in milliseconds.
-    """
-
-    total_connections: int = 0
-    active_connections: int = 0
-    idle_connections: int = 0
-    connections_reused: int = 0
-    connections_created: int = 0
-    connections_closed: int = 0
-    health_checks_passed: int = 0
-    health_checks_failed: int = 0
-    avg_connection_age_ms: float = 0.0
-
-    @property
-    def reuse_ratio(self) -> float:
-        """Fraction of requests that reused an existing connection."""
-        total = self.connections_reused + self.connections_created
-        if total == 0:
-            return 0.0
-        return self.connections_reused / total
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert stats to a dictionary."""
-        return {
-            "total_connections": self.total_connections,
-            "active_connections": self.active_connections,
-            "idle_connections": self.idle_connections,
-            "connections_reused": self.connections_reused,
-            "connections_created": self.connections_created,
-            "connections_closed": self.connections_closed,
-            "health_checks_passed": self.health_checks_passed,
-            "health_checks_failed": self.health_checks_failed,
-            "reuse_ratio": round(self.reuse_ratio, 4),
-            "avg_connection_age_ms": round(self.avg_connection_age_ms, 2),
-        }
-
-    def reset(self) -> None:
-        """Reset all collected statistics."""
-        self.total_connections = 0
-        self.active_connections = 0
-        self.idle_connections = 0
-        self.connections_reused = 0
-        self.connections_created = 0
-        self.connections_closed = 0
-        self.health_checks_passed = 0
-        self.health_checks_failed = 0
-        self.avg_connection_age_ms = 0.0
-
-
-@dataclass
-class ConnectionPoolConfig:
-    """Configuration for the HTTP connection pool.
-
-    Attributes:
-        max_connections: Maximum total connections in the pool.
-        max_keepalive_connections: Maximum idle keep-alive connections.
-        keepalive_expiry: Seconds before an idle connection is closed.
-        connect_timeout: Timeout for establishing new connections in seconds.
-        http2: Whether to enable HTTP/2 support.
-        health_check_interval: Seconds between health checks (0 = disabled).
-        health_check_timeout: Timeout for health check probes in seconds.
-        health_check_url: URL to probe for health checks (empty = skip probe).
-    """
-
-    max_connections: int = 20
-    max_keepalive_connections: int = 10
-    keepalive_expiry: float = 60.0
-    connect_timeout: float = 10.0
-    http2: bool = False
-    health_check_interval: float = 30.0
-    health_check_timeout: float = 5.0
-    health_check_url: str = ""
-
-
-class ConnectionPool:
-    """Managed HTTP connection pool with health checks and HTTP/2 support.
-
-    Wraps ``httpx.AsyncClient`` with lifecycle management, connection reuse
-    tracking, and periodic health checks.
-
-    Usage::
-
-        pool = ConnectionPool(ConnectionPoolConfig(http2=True))
-        client = await pool.acquire()
-        resp = await client.get("https://api.example.com")
-        stats = pool.get_stats()
-        await pool.close()
-
-    Args:
-        config: Pool configuration. Uses defaults if not provided.
-    """
-
-    def __init__(self, config: ConnectionPoolConfig | None = None) -> None:
-        self._config = config or ConnectionPoolConfig()
-        self._client: httpx.AsyncClient | None = None
-        self._lock = threading.Lock()
-        self._stats = ConnectionPoolStats()
-        self._created_at: float = 0.0
-        self._last_health_check: float = 0.0
-        self._healthy: bool = True
-        self._health_task: asyncio.Task[None] | None = None
-
-    def _create_client(self) -> httpx.AsyncClient:
-        """Create a new httpx client with the configured limits."""
-        limits = httpx.Limits(
-            max_connections=self._config.max_connections,
-            max_keepalive_connections=self._config.max_keepalive_connections,
-            keepalive_expiry=self._config.keepalive_expiry,
-        )
-        client = httpx.AsyncClient(
-            http2=self._config.http2,
-            timeout=httpx.Timeout(
-                connect=self._config.connect_timeout,
-                read=30.0,
-                write=30.0,
-                pool=5.0,
-            ),
-            limits=limits,
-        )
-        with self._lock:
-            self._stats.connections_created += 1
-            self._stats.total_connections += 1
-        self._created_at = time.time()
-        logger.debug(f"Connection pool: new client created (http2={self._config.http2})")
-        return client
-
-    async def acquire(self) -> httpx.AsyncClient:
-        """Acquire a client from the pool, reusing an existing one if healthy.
-
-        Returns:
-            A usable ``httpx.AsyncClient``.
-        """
-        if self._client is not None and not self._client.is_closed:
-            with self._lock:
-                self._stats.connections_reused += 1
-            return self._client
-
-        self._client = self._create_client()
-        return self._client
-
-    async def release(self, client: httpx.AsyncClient) -> None:
-        """Release a client back to the pool.
-
-        The client is kept alive for reuse. If the pool already has a
-        healthy client, the released client is closed.
-
-        Args:
-            client: The client to release.
-        """
-        if self._client is None or self._client.is_closed:
-            self._client = client
-        elif self._client is not client:
-            await client.aclose()
-            with self._lock:
-                self._stats.connections_closed += 1
-
-    async def health_check(self) -> bool:
-        """Perform a health check on the pooled connection.
-
-        If ``health_check_url`` is configured, sends a HEAD request to
-        verify connectivity. Otherwise, checks that the client is not closed.
-
-        Returns:
-            True if the connection is healthy.
-        """
-        if self._client is None or self._client.is_closed:
-            self._healthy = False
-            with self._lock:
-                self._stats.health_checks_failed += 1
-            return False
-
-        if not self._config.health_check_url:
-            self._healthy = True
-            with self._lock:
-                self._stats.health_checks_passed += 1
-            self._last_health_check = time.time()
-            return True
-
-        try:
-            resp = await self._client.head(
-                self._config.health_check_url,
-                timeout=self._config.health_check_timeout,
-            )
-            self._healthy = resp.status_code < 500
-        except Exception:
-            self._healthy = False
-
-        with self._lock:
-            if self._healthy:
-                self._stats.health_checks_passed += 1
-            else:
-                self._stats.health_checks_failed += 1
-        self._last_health_check = time.time()
-        return self._healthy
-
-    async def _health_check_loop(self) -> None:
-        """Background loop that periodically checks connection health."""
-        interval = self._config.health_check_interval
-        if interval <= 0:
-            return
-        while True:
-            await asyncio.sleep(interval)
-            try:
-                await self.health_check()
-                if not self._healthy:
-                    logger.warning("Connection pool health check failed, reconnecting")
-                    await self._reconnect()
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.error(f"Connection pool health check error: {exc}")
-
-    async def _reconnect(self) -> None:
-        """Close the current client and create a fresh one."""
-        if self._client and not self._client.is_closed:
-            await self._client.aclose()
-            with self._lock:
-                self._stats.connections_closed += 1
-        self._client = None
-        self._client = self._create_client()
-        logger.info("Connection pool: reconnected")
-
-    def start_health_monitor(self) -> None:
-        """Start the background health check loop.
-
-        No-op if ``health_check_interval`` is 0 or negative.
-        """
-        if self._config.health_check_interval <= 0:
-            return
-        if self._health_task is not None and not self._health_task.done():
-            return
-        try:
-            self._health_task = asyncio.ensure_future(self._health_check_loop())
-        except RuntimeError:
-            # No running event loop (e.g. in tests)
-            pass
-
-    def stop_health_monitor(self) -> None:
-        """Stop the background health check loop."""
-        if self._health_task is not None and not self._health_task.done():
-            self._health_task.cancel()
-            self._health_task = None
-
-    def get_stats(self) -> ConnectionPoolStats:
-        """Get current pool statistics.
-
-        Returns:
-            A copy of the current ConnectionPoolStats.
-        """
-        with self._lock:
-            age_ms = (time.time() - self._created_at) * 1000 if self._created_at > 0 else 0.0
-            active = 0 if (self._client is None or self._client.is_closed) else 1
-            self._stats.active_connections = active
-            self._stats.idle_connections = 1 - active if self._client is not None and not self._client.is_closed else 0
-            self._stats.avg_connection_age_ms = age_ms if active > 0 else 0.0
-            return ConnectionPoolStats(**self._stats.__dict__)
-
-    @property
-    def is_healthy(self) -> bool:
-        """Whether the pool's connection is currently healthy."""
-        return self._healthy
-
-    async def close(self) -> None:
-        """Close the connection pool and all associated resources."""
-        self.stop_health_monitor()
-        if self._client and not self._client.is_closed:
-            await self._client.aclose()
-            with self._lock:
-                self._stats.connections_closed += 1
-        self._client = None
-        logger.debug("Connection pool closed")
-
-
-# ── Async Request Queue ───────────────────────────────────
-
-
-class QueuePriority(StrEnum):
-    """Priority levels for the async request queue.
-
-    Lower numeric value = higher priority (processed first).
-    """
-
-    CRITICAL = "critical"
-    HIGH = "high"
-    NORMAL = "normal"
-    LOW = "low"
-
-
-# Map priority enum to numeric values (lower = higher priority)
-_PRIORITY_VALUES: dict[str, int] = {
-    QueuePriority.CRITICAL: 0,
-    QueuePriority.HIGH: 1,
-    QueuePriority.NORMAL: 2,
-    QueuePriority.LOW: 3,
-}
-
-
-@dataclass(order=True)
-class QueuedRequest:
-    """A request item in the async queue.
-
-    Items are ordered by priority (lower numeric value first),
-    then by insertion order (FIFO within the same priority).
-
-    Attributes:
-        priority_num: Numeric priority (internal, do not set manually).
-        sequence: Insertion sequence number (internal, for FIFO ordering).
-        method: HTTP method.
-        path: API endpoint path.
-        params: Query parameters.
-        data: Request body data.
-        priority: Priority level as a QueuePriority string.
-        request_id: Caller-assigned identifier.
-        future: Asyncio Future for returning the result to the caller.
-        enqueued_at: Timestamp when the request was enqueued.
-    """
-
-    priority_num: int = field(compare=True)
-    sequence: int = field(compare=True)
-    method: str = field(default="", compare=False)
-    path: str = field(default="", compare=False)
-    params: dict[str, Any] = field(default_factory=dict, compare=False)
-    data: dict[str, Any] = field(default_factory=dict, compare=False)
-    priority: str = field(default=QueuePriority.NORMAL, compare=False)
-    request_id: str = field(default="", compare=False)
-    future: asyncio.Future[Any] = field(default_factory=lambda: asyncio.get_event_loop().create_future(), compare=False)
-    enqueued_at: float = field(default_factory=time.time, compare=False)
-
-
-@dataclass
-class AsyncQueueStats:
-    """Statistics for the async request queue.
-
-    Attributes:
-        total_enqueued: Total requests added to the queue.
-        total_processed: Total requests successfully processed.
-        total_failed: Total requests that failed processing.
-        total_cancelled: Total requests that were cancelled.
-        current_depth: Current number of items in the queue.
-        max_depth: Maximum queue depth observed.
-        avg_wait_time_ms: Average time requests spent waiting in the queue.
-        priority_counts: Number of requests per priority level.
-        processing_errors: Count of errors grouped by exception type name.
-    """
-
-    total_enqueued: int = 0
-    total_processed: int = 0
-    total_failed: int = 0
-    total_cancelled: int = 0
-    current_depth: int = 0
-    max_depth: int = 0
-    avg_wait_time_ms: float = 0.0
-    priority_counts: dict[str, int] = field(default_factory=dict)
-    processing_errors: dict[str, int] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert stats to a dictionary."""
-        return {
-            "total_enqueued": self.total_enqueued,
-            "total_processed": self.total_processed,
-            "total_failed": self.total_failed,
-            "total_cancelled": self.total_cancelled,
-            "current_depth": self.current_depth,
-            "max_depth": self.max_depth,
-            "avg_wait_time_ms": round(self.avg_wait_time_ms, 2),
-            "priority_counts": dict(self.priority_counts),
-            "processing_errors": dict(self.processing_errors),
-        }
-
-    def reset(self) -> None:
-        """Reset all collected statistics."""
-        self.total_enqueued = 0
-        self.total_processed = 0
-        self.total_failed = 0
-        self.total_cancelled = 0
-        self.current_depth = 0
-        self.max_depth = 0
-        self.avg_wait_time_ms = 0.0
-        self.priority_counts.clear()
-        self.processing_errors.clear()
-
-
-class AsyncRequestQueue:
-    """Priority-based async request queue with monitoring.
-
-    Requests are processed in priority order (CRITICAL > HIGH > NORMAL > LOW).
-    Within the same priority, requests are processed FIFO.
-
-    Usage::
-
-        queue = AsyncRequestQueue(max_workers=5)
-        queue.set_processor(my_request_handler)
-
-        # Enqueue a request and wait for the result
-        result = await queue.enqueue("GET", "/api/orders", priority=QueuePriority.HIGH)
-
-        # Or enqueue without waiting
-        queue.enqueue_nowait("GET", "/api/orders")
-
-        stats = queue.get_stats()
-        await queue.close()
-
-    Args:
-        max_workers: Maximum number of concurrent workers processing the queue.
-        max_queue_size: Maximum items allowed in the queue (0 = unlimited).
-    """
-
-    def __init__(
-        self,
-        max_workers: int = 5,
-        max_queue_size: int = 0,
-    ) -> None:
-        self._max_workers = max(1, min(max_workers, 20))
-        self._max_queue_size = max_queue_size
-        self._queue: asyncio.PriorityQueue[QueuedRequest] = asyncio.PriorityQueue()
-        self._stats = AsyncQueueStats()
-        self._lock = threading.Lock()
-        self._sequence = 0
-        self._processor: Callable[..., Awaitable[Any]] | None = None
-        self._workers: list[asyncio.Task[None]] = []
-        self._running = False
-        self._total_wait_ms: float = 0.0
-
-    def set_processor(self, processor: Callable[..., Awaitable[Any]]) -> None:
-        """Set the request processing function.
-
-        The processor is called with ``(method, path, params, data)`` and
-        should return the API response dict.
-
-        Args:
-            processor: Async function to process requests.
-        """
-        self._processor = processor
-
-    async def _worker(self) -> None:
-        """Worker coroutine that processes requests from the queue."""
-        while self._running:
-            try:
-                request = await asyncio.wait_for(self._queue.get(), timeout=1.0)
-            except TimeoutError:
-                continue
-            except asyncio.CancelledError:
-                break
-
-            wait_ms = (time.time() - request.enqueued_at) * 1000
-
-            if request.future.cancelled():
-                with self._lock:
-                    self._stats.total_cancelled += 1
-                    self._stats.current_depth = self._queue.qsize()
-                self._queue.task_done()
-                continue
-
-            try:
-                if self._processor is None:
-                    raise RuntimeError("No processor configured for async queue")
-
-                result = await self._processor(
-                    request.method,
-                    request.path,
-                    request.params,
-                    request.data,
-                )
-                if not request.future.cancelled():
-                    request.future.set_result(result)
-
-                with self._lock:
-                    self._stats.total_processed += 1
-                    self._total_wait_ms += wait_ms
-                    n = self._stats.total_processed
-                    self._stats.avg_wait_time_ms = self._total_wait_ms / n
-
-            except Exception as exc:
-                if not request.future.cancelled():
-                    request.future.set_exception(exc)
-                error_name = type(exc).__name__
-                with self._lock:
-                    self._stats.total_failed += 1
-                    self._stats.processing_errors[error_name] = self._stats.processing_errors.get(error_name, 0) + 1
-                logger.warning(f"Queue worker error for {request.method} {request.path}: {exc}")
-
-            finally:
-                self._queue.task_done()
-                with self._lock:
-                    self._stats.current_depth = self._queue.qsize()
-
-    async def start(self) -> None:
-        """Start the queue workers.
-
-        Launches ``max_workers`` concurrent worker tasks.
-        """
-        if self._running:
-            return
-        self._running = True
-        for i in range(self._max_workers):
-            task = asyncio.ensure_future(self._worker())
-            self._workers.append(task)
-        logger.info(f"Async queue started with {self._max_workers} workers")
-
-    async def stop(self) -> None:
-        """Stop all queue workers gracefully.
-
-        Waits for the queue to drain before cancelling workers.
-        """
-        self._running = False
-        # Cancel any pending items
-        while not self._queue.empty():
-            try:
-                request = self._queue.get_nowait()
-                if not request.future.cancelled():
-                    request.future.cancel()
-                self._queue.task_done()
-            except asyncio.QueueEmpty:
-                break
-
-        for task in self._workers:
-            task.cancel()
-        if self._workers:
-            await asyncio.gather(*self._workers, return_exceptions=True)
-        self._workers.clear()
-        logger.info("Async queue stopped")
-
-    async def enqueue(
-        self,
-        method: str,
-        path: str,
-        params: dict[str, Any] | None = None,
-        data: dict[str, Any] | None = None,
-        priority: str = QueuePriority.NORMAL,
-        request_id: str = "",
-    ) -> Any:
-        """Enqueue a request and wait for its result.
-
-        Args:
-            method: HTTP method.
-            path: API endpoint path.
-            params: Query parameters.
-            data: Request body.
-            priority: Priority level (QueuePriority enum value).
-            request_id: Optional caller-assigned identifier.
-
-        Returns:
-            The result from the processor function.
-
-        Raises:
-            RuntimeError: If the queue is full or no processor is configured.
-            Exception: Any exception raised by the processor.
-        """
-        if self._max_queue_size > 0 and self._queue.qsize() >= self._max_queue_size:
-            raise RuntimeError(f"Queue is full ({self._max_queue_size} items)")
-
-        if not self._running:
-            await self.start()
-
-        priority_num = _PRIORITY_VALUES.get(priority, _PRIORITY_VALUES[QueuePriority.NORMAL])
-
-        loop = asyncio.get_event_loop()
-        future: asyncio.Future[Any] = loop.create_future()
-
-        with self._lock:
-            self._sequence += 1
-            seq = self._sequence
-
-        request = QueuedRequest(
-            priority_num=priority_num,
-            sequence=seq,
-            method=method,
-            path=path,
-            params=params or {},
-            data=data or {},
-            priority=priority,
-            request_id=request_id,
-            future=future,
-        )
-
-        await self._queue.put(request)
-
-        with self._lock:
-            self._stats.total_enqueued += 1
-            depth = self._queue.qsize()
-            self._stats.current_depth = depth
-            self._stats.max_depth = max(self._stats.max_depth, depth)
-            self._stats.priority_counts[priority] = self._stats.priority_counts.get(priority, 0) + 1
-
-        return await future
-
-    def enqueue_nowait(
-        self,
-        method: str,
-        path: str,
-        params: dict[str, Any] | None = None,
-        data: dict[str, Any] | None = None,
-        priority: str = QueuePriority.NORMAL,
-        request_id: str = "",
-    ) -> asyncio.Future[Any]:
-        """Enqueue a request without waiting for the result.
-
-        Returns a Future that will be resolved when the request is processed.
-
-        Args:
-            method: HTTP method.
-            path: API endpoint path.
-            params: Query parameters.
-            data: Request body.
-            priority: Priority level.
-            request_id: Optional caller-assigned identifier.
-
-        Returns:
-            A Future that will contain the result.
-
-        Raises:
-            RuntimeError: If the queue is full.
-        """
-        if self._max_queue_size > 0 and self._queue.qsize() >= self._max_queue_size:
-            raise RuntimeError(f"Queue is full ({self._max_queue_size} items)")
-
-        priority_num = _PRIORITY_VALUES.get(priority, _PRIORITY_VALUES[QueuePriority.NORMAL])
-
-        loop = asyncio.get_event_loop()
-        future: asyncio.Future[Any] = loop.create_future()
-
-        with self._lock:
-            self._sequence += 1
-            seq = self._sequence
-
-        request = QueuedRequest(
-            priority_num=priority_num,
-            sequence=seq,
-            method=method,
-            path=path,
-            params=params or {},
-            data=data or {},
-            priority=priority,
-            request_id=request_id,
-            future=future,
-        )
-
-        self._queue.put_nowait(request)
-
-        with self._lock:
-            self._stats.total_enqueued += 1
-            depth = self._queue.qsize()
-            self._stats.current_depth = depth
-            self._stats.max_depth = max(self._stats.max_depth, depth)
-            self._stats.priority_counts[priority] = self._stats.priority_counts.get(priority, 0) + 1
-
-        return future
-
-    def get_stats(self) -> AsyncQueueStats:
-        """Get current queue statistics.
-
-        Returns:
-            A copy of the current AsyncQueueStats.
-        """
-        with self._lock:
-            self._stats.current_depth = self._queue.qsize()
-            return AsyncQueueStats(
-                **{k: dict(v) if isinstance(v, dict) else v for k, v in self._stats.__dict__.items()}
-            )
-
-    @property
-    def depth(self) -> int:
-        """Current number of items in the queue."""
-        return self._queue.qsize()
-
-    @property
-    def is_running(self) -> bool:
-        """Whether the queue workers are running."""
-        return self._running
-
-    async def close(self) -> None:
-        """Close the queue, stopping workers and cancelling pending requests."""
-        await self.stop()
-
-
 # ── Configuration Validation ───────────────────────────────
 
 
@@ -3796,7 +3698,7 @@ class FailoverManager:
         self._lb = load_balancer
         self.config = config or FailoverConfig()
         self._circuit_breakers: dict[str, CircuitBreakerState] = {}
-        self._lock = threading.RLock()  # Reentrant for nested calls
+        self._lock = threading.Lock()
         self._recovery_task: asyncio.Task | None = None
         self._failure_history: list[dict[str, Any]] = []
 
@@ -3813,17 +3715,14 @@ class FailoverManager:
             self._lb.record_success(url, latency_ms)
             self._lb.mark_healthy(url)
 
-            # Update circuit breaker
+            # Reset circuit breaker
             cb = self._circuit_breakers.get(url)
             if cb:
+                cb.failure_count = 0
                 cb.success_count += 1
                 if cb.is_open:
                     cb.is_open = False
-                    cb.failure_count = 0
                     logger.info(f"Failover: circuit breaker closed for {url}")
-
-            # Check if circuit breaker should open (even on success, to evaluate rate)
-            self._check_circuit_breaker_on_success(url)
 
     def report_failure(self, url: str, error: str = "") -> None:
         """Report a failed request to an endpoint.
@@ -3854,14 +3753,13 @@ class FailoverManager:
                     "failure_count": node.failure_count,
                 }
             )
-            # Keep history bounded (trim to last 500 when exceeding 500)
-            if len(self._failure_history) > 500:
+            # Keep history bounded
+            if len(self._failure_history) > 1000:
                 self._failure_history = self._failure_history[-500:]
 
-            # Mark unhealthy if max failures exceeded (directly, avoid double-count)
-            if node.failure_count >= self.config.max_failures and node.is_healthy:
-                node.is_healthy = False
-                logger.warning(f"Load balancer: endpoint {url} marked unhealthy " f"(failures={node.failure_count})")
+            # Mark unhealthy if max failures exceeded
+            if node.failure_count >= self.config.max_failures:
+                self._lb.mark_unhealthy(url)
 
             # Check circuit breaker
             self._check_circuit_breaker(url)
@@ -3883,7 +3781,7 @@ class FailoverManager:
             cb = CircuitBreakerState(url=url)
             self._circuit_breakers[url] = cb
 
-        cb.failure_count += 1
+        cb.failure_count = node.failure_count
         cb.last_failure_time = time.time()
 
         total = cb.failure_count + cb.success_count
@@ -3892,32 +3790,7 @@ class FailoverManager:
             if failure_rate >= self.config.circuit_breaker_threshold and not cb.is_open:
                 cb.is_open = True
                 cb.opened_at = time.time()
-                # Mark unhealthy directly to avoid double-counting
-                if node.is_healthy:
-                    node.is_healthy = False
-                logger.warning(f"Failover: circuit breaker OPENED for {url} " f"(failure_rate={failure_rate:.2f})")
-
-    def _check_circuit_breaker_on_success(self, url: str) -> None:
-        """Check circuit breaker state after a success.
-
-        Evaluates if the circuit should open based on accumulated failure rate.
-
-        Args:
-            url: The endpoint URL.
-        """
-        cb = self._circuit_breakers.get(url)
-        if cb is None or cb.is_open:
-            return
-
-        total = cb.failure_count + cb.success_count
-        if total >= 5:  # Need at least 5 requests to evaluate
-            failure_rate = cb.failure_count / total
-            if failure_rate >= self.config.circuit_breaker_threshold:
-                cb.is_open = True
-                cb.opened_at = time.time()
-                node = self._lb._endpoints.get(url)
-                if node and node.is_healthy:
-                    node.is_healthy = False
+                self._lb.mark_unhealthy(url)
                 logger.warning(f"Failover: circuit breaker OPENED for {url} " f"(failure_rate={failure_rate:.2f})")
 
     def is_circuit_open(self, url: str) -> bool:

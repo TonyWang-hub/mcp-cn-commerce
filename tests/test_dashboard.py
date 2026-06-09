@@ -33,10 +33,8 @@ from dashboard import (
     CacheStatsTracker,
     DashboardAlert,
     MonitoringDashboard,
-    ResponseTimeBucket,
     ResponseTimeHistogram,
 )
-
 
 # ── CacheStats Tests ───────────────────────────────────────
 
@@ -352,11 +350,13 @@ class TestDashboardAlerts:
         for _ in range(10):
             collector.record_request("/api/test", 100.0, False, error_code=500)
         dashboard = MonitoringDashboard(metrics_collector=collector)
-        dashboard.add_alert_rule(AlertRule(
-            metric_name="api_calls.error_rate",
-            threshold=0.05,
-            severity=AlertSeverity.WARNING,
-        ))
+        dashboard.add_alert_rule(
+            AlertRule(
+                metric_name="api_calls.error_rate",
+                threshold=0.05,
+                severity=AlertSeverity.WARNING,
+            )
+        )
         snapshot = dashboard.get_snapshot()
         assert len(snapshot["alerts"]) >= 1
         assert snapshot["alerts"][0]["severity"] == "warning"
@@ -364,12 +364,14 @@ class TestDashboardAlerts:
     def test_alert_triggered_below_threshold(self):
         dashboard = MonitoringDashboard()
         dashboard.cache.record_miss()
-        dashboard.add_alert_rule(AlertRule(
-            metric_name="cache.hit_rate",
-            threshold=0.5,
-            severity=AlertSeverity.WARNING,
-            direction="below",
-        ))
+        dashboard.add_alert_rule(
+            AlertRule(
+                metric_name="cache.hit_rate",
+                threshold=0.5,
+                severity=AlertSeverity.WARNING,
+                direction="below",
+            )
+        )
         snapshot = dashboard.get_snapshot()
         # hit_rate is 0.0 (no hits), which is below 0.5
         assert len(snapshot["alerts"]) >= 1
@@ -378,10 +380,12 @@ class TestDashboardAlerts:
         collector = MetricsCollector()
         collector.record_request("/api/test", 100.0, True)
         dashboard = MonitoringDashboard(metrics_collector=collector)
-        dashboard.add_alert_rule(AlertRule(
-            metric_name="api_calls.error_rate",
-            threshold=0.5,
-        ))
+        dashboard.add_alert_rule(
+            AlertRule(
+                metric_name="api_calls.error_rate",
+                threshold=0.5,
+            )
+        )
         snapshot = dashboard.get_snapshot()
         error_alerts = [a for a in snapshot["alerts"] if a["metric_name"] == "api_calls.error_rate"]
         assert len(error_alerts) == 0
@@ -429,12 +433,19 @@ class TestDashboardAlerts:
             collector.record_request("/api/test", 100.0, False, error_code=500)
         dashboard = MonitoringDashboard(metrics_collector=collector)
         dashboard.cache.record_miss()
-        dashboard.add_alert_rule(AlertRule(
-            metric_name="api_calls.error_rate", threshold=0.05,
-        ))
-        dashboard.add_alert_rule(AlertRule(
-            metric_name="cache.hit_rate", threshold=0.5, direction="below",
-        ))
+        dashboard.add_alert_rule(
+            AlertRule(
+                metric_name="api_calls.error_rate",
+                threshold=0.05,
+            )
+        )
+        dashboard.add_alert_rule(
+            AlertRule(
+                metric_name="cache.hit_rate",
+                threshold=0.5,
+                direction="below",
+            )
+        )
         snapshot = dashboard.get_snapshot()
         metric_names = {a["metric_name"] for a in snapshot["alerts"]}
         assert "api_calls.error_rate" in metric_names

@@ -31,8 +31,8 @@ if not hasattr(_orig_server_cls, "tool"):
 
 
 # Now safe to import the module under test.
-servers.doudian.server as _srv  # noqa: E402 — the module itself (for patching)
-servers.doudian.server import (  # noqa: E402
+import servers.doudian.server as _srv  # noqa: E402 — the module itself (for patching)
+from servers.doudian.server import (  # noqa: E402
     ConfigError,
     DouDianAPIError,
     _safe_get,

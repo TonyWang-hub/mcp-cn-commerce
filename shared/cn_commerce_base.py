@@ -1202,10 +1202,7 @@ class RetryRequestQueue:
     def _cleanup_hashes(self) -> None:
         """Remove expired dedup hashes."""
         now = time.time()
-        expired = [
-            h for h, ts in self._dedup_hashes.items()
-            if (now - ts) >= self.config.dedup_window
-        ]
+        expired = [h for h, ts in self._dedup_hashes.items() if (now - ts) >= self.config.dedup_window]
         for h in expired:
             del self._dedup_hashes[h]
 
@@ -1339,10 +1336,7 @@ class RetryRequestQueue:
         now = time.time()
         with self._lock:
             before = len(self._queue)
-            self._queue = [
-                item for item in self._queue
-                if (now - item.created_at) < self.config.item_ttl
-            ]
+            self._queue = [item for item in self._queue if (now - item.created_at) < self.config.item_ttl]
             removed = before - len(self._queue)
             if removed:
                 self.stats.total_expired += removed
@@ -1367,24 +1361,28 @@ class RetryRequestQueue:
                     data=item.data,
                 )
                 self.complete(item.request_id, success=True)
-                results.append({
-                    "request_id": item.request_id,
-                    "success": True,
-                    "data": data,
-                })
+                results.append(
+                    {
+                        "request_id": item.request_id,
+                        "success": True,
+                        "data": data,
+                    }
+                )
             except Exception as exc:
                 completed = self.complete(
                     item.request_id,
                     success=False,
                     error=str(exc),
                 )
-                results.append({
-                    "request_id": item.request_id,
-                    "success": False,
-                    "error": str(exc),
-                    "retry_count": completed.retry_count if completed else 0,
-                    "status": completed.status if completed else "unknown",
-                })
+                results.append(
+                    {
+                        "request_id": item.request_id,
+                        "success": False,
+                        "error": str(exc),
+                        "retry_count": completed.retry_count if completed else 0,
+                        "status": completed.status if completed else "unknown",
+                    }
+                )
 
         return results
 
@@ -1605,10 +1603,7 @@ class RequestDeduplicator:
         now = time.time()
         with self._lock:
             before = len(self._hashes)
-            self._hashes = {
-                h: ts for h, ts in self._hashes.items()
-                if (now - ts) < self._window
-            }
+            self._hashes = {h: ts for h, ts in self._hashes.items() if (now - ts) < self._window}
             removed = before - len(self._hashes)
             self._stats.active_hashes = len(self._hashes)
             return removed

@@ -6,9 +6,11 @@ Provides unified auth signing, request handling, and error normalization.
 from __future__ import annotations
 
 import asyncio
+import csv
 import functools
 import hashlib
 import hmac
+import io
 import json
 import logging
 import os
@@ -16,9 +18,13 @@ import random
 import re
 import threading
 import time
+import uuid
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -1025,3 +1031,855 @@ def handle_tool_errors(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awa
             )
 
     return wrapper
+
+
+# ── Webhook Support ─────────────────────────────────────────
+
+
+class WebhookEventType(StrEnum):
+    """Supported webhook event types for e-commerce platforms.
+
+    Attributes:
+        ORDER_UPDATE: Order status changes (created, paid, shipped, completed, cancelled).
+        INVENTORY_CHANGE: Stock level updates (low stock, out of stock, restocked).
+        PRODUCT_UPDATE: Product information changes (price, description, images).
+        REFUND_REQUEST: Refund initiated or processed.
+        PAYMENT_RECEIVED: Payment confirmed for an order.
+        SHIPPING_UPDATE: Shipping status changes (shipped, in transit, delivered).
+        REVIEW_SUBMITTED: New customer review submitted.
+        COUPON_USED: Coupon or promotion code used.
+        CUSTOM: User-defined custom event type.
+    """
+
+    ORDER_UPDATE = "order_update"
+    INVENTORY_CHANGE = "inventory_change"
+    PRODUCT_UPDATE = "product_update"
+    REFUND_REQUEST = "refund_request"
+    PAYMENT_RECEIVED = "payment_received"
+    SHIPPING_UPDATE = "shipping_update"
+    REVIEW_SUBMITTED = "review_submitted"
+    COUPON_USED = "coupon_used"
+    CUSTOM = "custom"
+
+
+@dataclass
+class WebhookSubscription:
+    """Represents a registered webhook subscription.
+
+    Attributes:
+        subscription_id: Unique identifier for the subscription.
+        url: Callback URL where webhook events will be delivered.
+        event_types: List of event types this subscription listens to.
+        secret: Shared secret used for HMAC signature verification.
+        platform: Platform name this subscription belongs to.
+        is_active: Whether the subscription is currently active.
+        created_at: ISO 8601 timestamp when the subscription was created.
+        last_triggered_at: ISO 8601 timestamp of last event delivery.
+        failure_count: Number of consecutive delivery failures.
+        metadata: Optional key-value pairs for additional configuration.
+    """
+
+    subscription_id: str
+    url: str
+    event_types: list[str]
+    secret: str
+    platform: str = ""
+    is_active: bool = True
+    created_at: str = ""
+    last_triggered_at: str = ""
+    failure_count: int = 0
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.created_at:
+            self.created_at = datetime.now(UTC).isoformat()
+        if not self.subscription_id:
+            self.subscription_id = str(uuid.uuid4())
+        if not self.secret:
+            self.secret = hashlib.sha256(f"{self.subscription_id}:{self.url}:{time.time()}".encode()).hexdigest()
+
+
+@dataclass
+class WebhookEvent:
+    """Represents a webhook event to be delivered.
+
+    Attributes:
+        event_id: Unique identifier for this event instance.
+        event_type: Type of the event (must match WebhookEventType values).
+        platform: Platform that generated the event.
+        payload: Event data as a dictionary.
+        timestamp: ISO 8601 timestamp of when the event occurred.
+        source: Source identifier (e.g., order_id, product_id).
+        version: API version for the event format.
+    """
+
+    event_id: str = ""
+    event_type: str = ""
+    platform: str = ""
+    payload: dict[str, Any] = field(default_factory=dict)
+    timestamp: str = ""
+    source: str = ""
+    version: str = "1.0"
+
+    def __post_init__(self) -> None:
+        if not self.event_id:
+            self.event_id = str(uuid.uuid4())
+        if not self.timestamp:
+            self.timestamp = datetime.now(UTC).isoformat()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert event to a dictionary for JSON serialization."""
+        return {
+            "event_id": self.event_id,
+            "event_type": self.event_type,
+            "platform": self.platform,
+            "payload": self.payload,
+            "timestamp": self.timestamp,
+            "source": self.source,
+            "version": self.version,
+        }
+
+
+class WebhookSignatureVerifier:
+    """Verifies webhook signatures using HMAC-SHA256.
+
+    Used to ensure webhook payloads are authentic and have not been tampered with.
+    Implements the standard HMAC-based signature verification used by major platforms.
+
+    Usage:
+        verifier = WebhookSignatureVerifier(secret="your_secret")
+        is_valid = verifier.verify(payload_bytes, signature_header)
+    """
+
+    def __init__(self, secret: str, algorithm: str = "sha256") -> None:
+        """Initialize the verifier with a shared secret.
+
+        Args:
+            secret: The shared secret key for HMAC computation.
+            algorithm: Hash algorithm to use (default: sha256).
+        """
+        self.secret = secret
+        self.algorithm = algorithm
+
+    def sign(self, payload: bytes) -> str:
+        """Generate HMAC signature for a payload.
+
+        Args:
+            payload: Raw payload bytes to sign.
+
+        Returns:
+            Hex-encoded HMAC signature string.
+        """
+        hash_func = getattr(hashlib, self.algorithm)
+        return hmac.new(self.secret.encode(), payload, hash_func).hexdigest()
+
+    def verify(self, payload: bytes, signature: str) -> bool:
+        """Verify a payload signature.
+
+        Args:
+            payload: Raw payload bytes.
+            signature: Signature to verify (hex-encoded string).
+
+        Returns:
+            True if signature is valid, False otherwise.
+        """
+        if not signature:
+            return False
+        expected = self.sign(payload)
+        return hmac.compare_digest(expected, signature)
+
+    @staticmethod
+    def extract_signature(signature_header: str, prefix: str = "") -> str:
+        """Extract signature value from a header string.
+
+        Many platforms prefix signatures (e.g., "sha256=abc123").
+        This method strips such prefixes.
+
+        Args:
+            signature_header: Raw signature header value.
+            prefix: Optional prefix to strip (e.g., "sha256=").
+
+        Returns:
+            Cleaned signature string.
+        """
+        if prefix and signature_header.startswith(prefix):
+            return signature_header[len(prefix) :]
+        return signature_header
+
+
+class WebhookDeliveryError(Exception):
+    """Raised when webhook delivery fails.
+
+    Attributes:
+        subscription_id: ID of the failed subscription.
+        url: Target URL that failed.
+        status_code: HTTP status code (0 if connection failed).
+        message: Error description.
+    """
+
+    def __init__(
+        self,
+        subscription_id: str,
+        url: str,
+        status_code: int = 0,
+        message: str = "",
+    ) -> None:
+        self.subscription_id = subscription_id
+        self.url = url
+        self.status_code = status_code
+        self.message = message or f"Failed to deliver webhook to {url}"
+        super().__init__(self.message)
+
+
+@dataclass
+class WebhookDeliveryResult:
+    """Result of a webhook delivery attempt.
+
+    Attributes:
+        subscription_id: ID of the subscription.
+        event_id: ID of the event that was delivered.
+        success: Whether delivery succeeded.
+        status_code: HTTP response status code.
+        latency_ms: Delivery time in milliseconds.
+        error: Error message if delivery failed.
+        attempt: Which attempt number this was (1-based).
+    """
+
+    subscription_id: str
+    event_id: str
+    success: bool
+    status_code: int = 0
+    latency_ms: float = 0.0
+    error: str = ""
+    attempt: int = 1
+
+
+class WebhookManager:
+    """Manages webhook subscriptions and event delivery.
+
+    Provides a complete webhook lifecycle management system:
+    - Register and unregister webhook subscriptions
+    - Trigger events to matching subscriptions
+    - Verify webhook signatures
+    - Track delivery metrics and failures
+    - Automatic retry with exponential backoff
+
+    Usage:
+        manager = WebhookManager()
+        sub = manager.subscribe(
+            url="https://example.com/webhook",
+            event_types=["order_update", "inventory_change"],
+        )
+        await manager.trigger(WebhookEvent(event_type="order_update", payload={...}))
+    """
+
+    def __init__(
+        self,
+        max_delivery_retries: int = 3,
+        delivery_timeout: float = 30.0,
+        max_consecutive_failures: int = 10,
+    ) -> None:
+        """Initialize the webhook manager.
+
+        Args:
+            max_delivery_retries: Max retry attempts for failed deliveries.
+            delivery_timeout: HTTP request timeout in seconds.
+            max_consecutive_failures: Auto-disable subscription after this many failures.
+        """
+        self._subscriptions: dict[str, WebhookSubscription] = {}
+        self._event_history: list[WebhookEvent] = []
+        self._delivery_results: list[WebhookDeliveryResult] = []
+        self._delivery_callbacks: list[Callable[..., Awaitable[WebhookDeliveryResult]]] = []
+        self._max_delivery_retries = max_delivery_retries
+        self._delivery_timeout = delivery_timeout
+        self._max_consecutive_failures = max_consecutive_failures
+        self._lock = threading.Lock()
+
+    def subscribe(
+        self,
+        url: str,
+        event_types: list[str],
+        secret: str = "",
+        platform: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> WebhookSubscription:
+        """Register a new webhook subscription.
+
+        Args:
+            url: Callback URL for event delivery.
+            event_types: List of event type strings to subscribe to.
+            secret: Shared secret for signature verification (auto-generated if empty).
+            platform: Platform identifier.
+            metadata: Optional metadata for the subscription.
+
+        Returns:
+            The created WebhookSubscription.
+
+        Raises:
+            ValueError: If url is empty or event_types is empty.
+        """
+        if not url:
+            raise ValueError("Webhook URL cannot be empty")
+        if not event_types:
+            raise ValueError("At least one event type must be specified")
+
+        # Validate event types
+        valid_types = {e.value for e in WebhookEventType}
+        for et in event_types:
+            if et not in valid_types:
+                raise ValueError(f"Invalid event type: {et}")
+
+        subscription = WebhookSubscription(
+            subscription_id=str(uuid.uuid4()),
+            url=url,
+            event_types=event_types,
+            secret=secret,
+            platform=platform,
+            metadata=metadata or {},
+        )
+
+        with self._lock:
+            self._subscriptions[subscription.subscription_id] = subscription
+
+        logger.info(f"Webhook subscription created: {subscription.subscription_id} " f"for events {event_types}")
+        return subscription
+
+    def unsubscribe(self, subscription_id: str) -> bool:
+        """Remove a webhook subscription.
+
+        Args:
+            subscription_id: ID of the subscription to remove.
+
+        Returns:
+            True if subscription was found and removed, False otherwise.
+        """
+        with self._lock:
+            if subscription_id in self._subscriptions:
+                del self._subscriptions[subscription_id]
+                logger.info(f"Webhook subscription removed: {subscription_id}")
+                return True
+        return False
+
+    def get_subscription(self, subscription_id: str) -> WebhookSubscription | None:
+        """Get a subscription by ID.
+
+        Args:
+            subscription_id: ID of the subscription.
+
+        Returns:
+            The WebhookSubscription if found, None otherwise.
+        """
+        return self._subscriptions.get(subscription_id)
+
+    def list_subscriptions(
+        self,
+        event_type: str | None = None,
+        platform: str | None = None,
+        active_only: bool = True,
+    ) -> list[WebhookSubscription]:
+        """List subscriptions with optional filtering.
+
+        Args:
+            event_type: Filter by event type.
+            platform: Filter by platform.
+            active_only: Only return active subscriptions.
+
+        Returns:
+            List of matching subscriptions.
+        """
+        results = []
+        for sub in self._subscriptions.values():
+            if active_only and not sub.is_active:
+                continue
+            if event_type and event_type not in sub.event_types:
+                continue
+            if platform and sub.platform != platform:
+                continue
+            results.append(sub)
+        return results
+
+    def update_subscription(
+        self,
+        subscription_id: str,
+        url: str | None = None,
+        event_types: list[str] | None = None,
+        is_active: bool | None = None,
+        secret: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> WebhookSubscription | None:
+        """Update an existing subscription.
+
+        Args:
+            subscription_id: ID of the subscription to update.
+            url: New callback URL.
+            event_types: New event types list.
+            is_active: New active status.
+            secret: New shared secret.
+            metadata: New metadata dict.
+
+        Returns:
+            Updated WebhookSubscription if found, None otherwise.
+        """
+        with self._lock:
+            sub = self._subscriptions.get(subscription_id)
+            if not sub:
+                return None
+            if url is not None:
+                sub.url = url
+            if event_types is not None:
+                sub.event_types = event_types
+            if is_active is not None:
+                sub.is_active = is_active
+            if secret is not None:
+                sub.secret = secret
+            if metadata is not None:
+                sub.metadata = metadata
+            return sub
+
+    def add_delivery_callback(self, callback: Callable[..., Awaitable[WebhookDeliveryResult]]) -> None:
+        """Register a callback for webhook delivery.
+
+        This allows custom HTTP client injection for actual delivery.
+
+        Args:
+            callback: Async function that takes (subscription, event, payload_bytes, signature)
+                     and returns a WebhookDeliveryResult.
+        """
+        self._delivery_callbacks.append(callback)
+
+    def _prepare_delivery(self, subscription: WebhookSubscription, event: WebhookEvent) -> tuple[bytes, str]:
+        """Prepare payload and signature for delivery.
+
+        Args:
+            subscription: Target subscription.
+            event: Event to deliver.
+
+        Returns:
+            Tuple of (payload_bytes, signature_hex).
+        """
+        payload_dict = {
+            "event": event.to_dict(),
+            "subscription_id": subscription.subscription_id,
+            "delivery_timestamp": datetime.now(UTC).isoformat(),
+        }
+        payload_bytes = json.dumps(payload_dict, ensure_ascii=False, sort_keys=True).encode()
+        verifier = WebhookSignatureVerifier(secret=subscription.secret)
+        signature = verifier.sign(payload_bytes)
+        return payload_bytes, signature
+
+    async def _deliver_with_retry(
+        self,
+        subscription: WebhookSubscription,
+        event: WebhookEvent,
+    ) -> WebhookDeliveryResult:
+        """Attempt delivery with retry logic.
+
+        Args:
+            subscription: Target subscription.
+            event: Event to deliver.
+
+        Returns:
+            WebhookDeliveryResult with delivery status.
+        """
+        payload_bytes, signature = self._prepare_delivery(subscription, event)
+        last_error = ""
+
+        for attempt in range(1, self._max_delivery_retries + 1):
+            start_time = time.time()
+            result: WebhookDeliveryResult | None = None
+
+            for callback in self._delivery_callbacks:
+                try:
+                    result = await callback(subscription, event, payload_bytes, signature)
+                    result.attempt = attempt
+                    if result.success:
+                        with self._lock:
+                            subscription.last_triggered_at = datetime.now(UTC).isoformat()
+                            subscription.failure_count = 0
+                        return result
+                    last_error = result.error or f"HTTP {result.status_code}"
+                except Exception as exc:
+                    last_error = str(exc)
+                    result = WebhookDeliveryResult(
+                        subscription_id=subscription.subscription_id,
+                        event_id=event.event_id,
+                        success=False,
+                        error=last_error,
+                        attempt=attempt,
+                        latency_ms=(time.time() - start_time) * 1000,
+                    )
+
+            if attempt < self._max_delivery_retries:
+                delay = min(2**attempt, 30)
+                await asyncio.sleep(delay)
+
+        # All retries exhausted
+        with self._lock:
+            subscription.failure_count += 1
+            if subscription.failure_count >= self._max_consecutive_failures:
+                subscription.is_active = False
+                logger.warning(
+                    f"Webhook subscription {subscription.subscription_id} auto-disabled "
+                    f"after {subscription.failure_count} consecutive failures"
+                )
+
+        return WebhookDeliveryResult(
+            subscription_id=subscription.subscription_id,
+            event_id=event.event_id,
+            success=False,
+            status_code=0,
+            error=f"Max retries ({self._max_delivery_retries}) exhausted: {last_error}",
+            attempt=self._max_delivery_retries,
+        )
+
+    async def trigger(self, event: WebhookEvent) -> list[WebhookDeliveryResult]:
+        """Trigger a webhook event to all matching subscriptions.
+
+        Finds all active subscriptions matching the event type and delivers
+        the event to each one.
+
+        Args:
+            event: The WebhookEvent to deliver.
+
+        Returns:
+            List of WebhookDeliveryResult for each subscription.
+        """
+        if not event.event_type:
+            raise ValueError("Event type cannot be empty")
+
+        # Record event
+        self._event_history.append(event)
+
+        # Find matching subscriptions
+        matching = self.list_subscriptions(event_type=event.event_type, active_only=True)
+
+        if not matching:
+            logger.debug(f"No subscriptions for event type: {event.event_type}")
+            return []
+
+        # Deliver to all matching subscriptions
+        results: list[WebhookDeliveryResult] = []
+        for sub in matching:
+            result = await self._deliver_with_retry(sub, event)
+            results.append(result)
+            self._delivery_results.append(result)
+
+        succeeded = sum(1 for r in results if r.success)
+        logger.info(f"Webhook event {event.event_id} delivered: " f"{succeeded}/{len(results)} succeeded")
+        return results
+
+    def verify_signature(
+        self,
+        payload: bytes,
+        signature: str,
+        secret: str,
+        algorithm: str = "sha256",
+    ) -> bool:
+        """Verify a webhook payload signature.
+
+        Args:
+            payload: Raw request body bytes.
+            signature: Signature from the request header.
+            secret: Shared secret for verification.
+            algorithm: Hash algorithm (default: sha256).
+
+        Returns:
+            True if signature is valid.
+        """
+        verifier = WebhookSignatureVerifier(secret=secret, algorithm=algorithm)
+        return verifier.verify(payload, signature)
+
+    def get_delivery_stats(self) -> dict[str, Any]:
+        """Get webhook delivery statistics.
+
+        Returns:
+            Dictionary with delivery metrics.
+        """
+        total = len(self._delivery_results)
+        succeeded = sum(1 for r in self._delivery_results if r.success)
+        failed = total - succeeded
+        avg_latency = sum(r.latency_ms for r in self._delivery_results) / total if total > 0 else 0.0
+
+        return {
+            "total_deliveries": total,
+            "succeeded": succeeded,
+            "failed": failed,
+            "success_rate": round(succeeded / total, 4) if total > 0 else 0.0,
+            "avg_latency_ms": round(avg_latency, 2),
+            "active_subscriptions": len(self.list_subscriptions(active_only=True)),
+            "total_subscriptions": len(self._subscriptions),
+            "total_events": len(self._event_history),
+        }
+
+    def clear_history(self) -> None:
+        """Clear event history and delivery results."""
+        self._event_history.clear()
+        self._delivery_results.clear()
+
+
+# ── Batch Operations ──────────────────────────────────────
+
+
+@dataclass
+class ExportFormat(StrEnum):
+    """Supported export formats."""
+
+    CSV = "csv"
+    JSON = "json"
+    EXCEL = "excel"
+
+
+@dataclass
+class ExportConfig:
+    """Configuration for data export.
+
+    Attributes:
+        format: Export format (csv, json, excel).
+        fields: List of field names to include (None = all fields).
+        filename: Output filename (without extension).
+        output_dir: Directory to write the file.
+        page: Page number for paginated export (1-indexed, 0 = all data).
+        page_size: Number of items per page.
+        flatten_nested: Whether to flatten nested dicts (dot notation).
+        encoding: Character encoding for CSV output.
+    """
+
+    format: ExportFormat = field(default_factory=lambda: ExportFormat.CSV)
+    fields: list[str] | None = None
+    filename: str = "export"
+    output_dir: str = "."
+    page: int = 0
+    page_size: int = 1000
+    flatten_nested: bool = True
+    encoding: str = "utf-8"
+
+
+class DataExporter:
+    """Export e-commerce data to CSV, JSON, or Excel formats.
+
+    Supports custom field selection, pagination, and nested dict flattening.
+
+    Usage:
+        exporter = DataExporter()
+        result = exporter.export(data, ExportConfig(format=ExportFormat.CSV, fields=["id", "name"]))
+    """
+
+    @staticmethod
+    def _flatten_dict(d: dict[str, Any], parent_key: str = "", sep: str = ".") -> dict[str, Any]:
+        """Flatten a nested dictionary using dot notation.
+
+        Args:
+            d: Dictionary to flatten.
+            parent_key: Prefix for keys (used in recursion).
+            sep: Separator between nested keys.
+
+        Returns:
+            Flattened dictionary.
+        """
+        items: list[tuple[str, Any]] = []
+        for k, v in d.items():
+            new_key = f"{parent_key}{sep}{k}" if parent_key else k
+            if isinstance(v, dict):
+                items.extend(DataExporter._flatten_dict(v, new_key, sep=sep).items())
+            elif isinstance(v, list):
+                # Convert lists to JSON string for flat representation
+                items.append((new_key, json.dumps(v, ensure_ascii=False)))
+            else:
+                items.append((new_key, v))
+        return dict(items)
+
+    @staticmethod
+    def _select_fields(data: list[dict[str, Any]], fields: list[str] | None) -> list[dict[str, Any]]:
+        """Select specific fields from data records.
+
+        Args:
+            data: List of data records.
+            fields: List of field names to keep (None = keep all).
+
+        Returns:
+            List of records with only the selected fields.
+        """
+        if fields is None:
+            return data
+        return [{k: row.get(k) for k in fields} for row in data]
+
+    @staticmethod
+    def _paginate_data(
+        data: list[dict[str, Any]], page: int, page_size: int
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Apply pagination to data.
+
+        Args:
+            data: Full dataset.
+            page: Page number (1-indexed, 0 = return all).
+            page_size: Items per page.
+
+        Returns:
+            Tuple of (paginated_data, pagination_info).
+        """
+        total = len(data)
+        if page <= 0:
+            return data, {
+                "total": total,
+                "page": 0,
+                "page_size": total,
+                "total_pages": 1,
+                "has_next": False,
+                "has_prev": False,
+            }
+
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_data = data[start:end]
+
+        return page_data, {
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "has_next": page < total_pages,
+            "has_prev": page > 1,
+        }
+
+    @classmethod
+    def export(
+        cls,
+        data: list[dict[str, Any]],
+        config: ExportConfig | None = None,
+    ) -> dict[str, Any]:
+        """Export data to the specified format.
+
+        Args:
+            data: List of data records to export.
+            config: Export configuration. Uses defaults if not provided.
+
+        Returns:
+            Dict with ``file_path``, ``format``, ``record_count``,
+            ``fields``, and ``pagination`` keys.
+        """
+        if config is None:
+            config = ExportConfig()
+
+        # Flatten nested dicts if requested
+        if config.flatten_nested:
+            data = [cls._flatten_dict(row) for row in data]
+
+        # Apply pagination
+        page_data, pagination = cls._paginate_data(data, config.page, config.page_size)
+
+        # Select fields
+        page_data = cls._select_fields(page_data, config.fields)
+
+        # Determine fields used
+        if page_data:
+            actual_fields = list(page_data[0].keys())
+        else:
+            actual_fields = config.fields or []
+
+        # Build output path
+        ext = config.format.value
+        output_dir = Path(config.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        file_path = output_dir / f"{config.filename}.{ext}"
+
+        # Export based on format
+        if config.format == ExportFormat.CSV:
+            cls._export_csv(page_data, actual_fields, file_path, config.encoding)
+        elif config.format == ExportFormat.JSON:
+            cls._export_json(page_data, file_path)
+        elif config.format == ExportFormat.EXCEL:
+            cls._export_excel(page_data, actual_fields, file_path)
+
+        logger.info(f"Exported {len(page_data)} records to {file_path}")
+
+        return {
+            "file_path": str(file_path),
+            "format": config.format.value,
+            "record_count": len(page_data),
+            "fields": actual_fields,
+            "pagination": pagination,
+        }
+
+    @staticmethod
+    def _export_csv(
+        data: list[dict[str, Any]],
+        fields: list[str],
+        file_path: Path,
+        encoding: str = "utf-8",
+    ) -> None:
+        """Export data to CSV file."""
+        with open(file_path, "w", newline="", encoding=encoding) as f:
+            writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(data)
+
+    @staticmethod
+    def _export_json(data: list[dict[str, Any]], file_path: Path) -> None:
+        """Export data to JSON file."""
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2, default=str)
+
+    @staticmethod
+    def _export_excel(
+        data: list[dict[str, Any]],
+        fields: list[str],
+        file_path: Path,
+    ) -> None:
+        """Export data to Excel (.xlsx) file."""
+        try:
+            import openpyxl
+        except ImportError:
+            raise ImportError("openpyxl is required for Excel export. Install it with: pip install openpyxl")
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        if ws is None:
+            ws = wb.create_sheet()
+
+        # Write header
+        ws.append(fields)
+
+        # Write data rows
+        for row in data:
+            ws.append([row.get(f) for f in fields])
+
+        wb.save(str(file_path))
+
+    @classmethod
+    def export_to_string(
+        cls,
+        data: list[dict[str, Any]],
+        format: ExportFormat = ExportFormat.JSON,
+        fields: list[str] | None = None,
+        flatten_nested: bool = True,
+    ) -> str:
+        """Export data to an in-memory string (no file written).
+
+        Args:
+            data: List of data records.
+            format: Export format (csv or json; excel not supported for strings).
+            fields: Fields to include (None = all).
+            flatten_nested: Whether to flatten nested dicts.
+
+        Returns:
+            Exported data as a string.
+        """
+        if flatten_nested:
+            data = [cls._flatten_dict(row) for row in data]
+
+        data = cls._select_fields(data, fields)
+
+        if format == ExportFormat.CSV:
+            if not data:
+                return ""
+            actual_fields = list(data[0].keys())
+            output = io.StringIO()
+            writer = csv.DictWriter(output, fieldnames=actual_fields, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(data)
+            return output.getvalue()
+        elif format == ExportFormat.JSON:
+            return json.dumps(data, ensure_ascii=False, indent=2, default=str)
+        else:
+            raise ValueError("export_to_string does not support Excel format")

@@ -159,18 +159,27 @@ disable = [
     "C0116",  # missing-function-docstring
     "C0301",  # line-too-long (handled by black)
     "C0302",  # too-many-lines
+    "C0413",  # wrong-import-position
+    "C0415",  # import-outside-toplevel
     "R0902",  # too-many-instance-attributes
     "R0903",  # too-few-public-methods
     "R0913",  # too-many-arguments
     "R0914",  # too-many-local-variables
+    "R0917",  # too-many-positional-arguments
     "R0801",  # duplicate-code
     "W0511",  # fixme
+    "W0621",  # redefined-outer-name
+    "W0622",  # redefined-builtin
+    "W0707",  # raise-missing-from
+    "W0718",  # broad-exception-caught
+    "W1203",  # logging-fstring-interpolation
     "E0401",  # import-error (handled by mypy)
     "W0212",  # protected-access
     "R0904",  # too-many-public-methods
     "R0911",  # too-many-return-statements
     "R0912",  # too-many-branches
     "R0915",  # too-many-statements
+    "R1705",  # no-else-return
     "W0237",  # arguments-differ
 ]
 

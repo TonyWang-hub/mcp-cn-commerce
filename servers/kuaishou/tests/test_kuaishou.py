@@ -29,7 +29,6 @@ from servers.kuaishou.server import (  # noqa: E402
     list_logistics_companies,
     list_promotions,
 )
-
 from shared.cn_commerce_base import CommerceAPIError  # noqa: E402
 
 # ── Helpers ─────────────────────────────────────────────────────────────────

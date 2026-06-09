@@ -28,7 +28,6 @@ from servers.weixin_store.server import (
     list_categories,
     list_coupons,
 )
-
 from shared.cn_commerce_base import CommerceAPIError
 
 # ── Helpers ─────────────────────────────────────────────────────────────────

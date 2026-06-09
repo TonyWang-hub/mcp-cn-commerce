@@ -94,7 +94,6 @@ import servers.pinduoduo.server as pinduoduo_server  # noqa: E402
 import servers.taobao.server as taobao_server  # noqa: E402
 import servers.weixin_store.server as weixin_store_server  # noqa: E402
 import servers.xiaohongshu.server as xiaohongshu_server  # noqa: E402
-
 from shared.cn_commerce_base import CommerceMCPBase  # noqa: E402
 
 COMMON_TOOLS = {"get_metrics", "get_traces", "get_alerts", "export_data"}

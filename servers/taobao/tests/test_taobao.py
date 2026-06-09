@@ -30,7 +30,6 @@ from servers.taobao.server import (
     list_promotions,
     taobao,
 )
-
 from shared.cn_commerce_base import CommerceAPIError
 
 # ── Helpers ─────────────────────────────────────────────────────────────────────

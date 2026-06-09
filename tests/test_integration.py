@@ -1314,7 +1314,7 @@ class TestPinduoduoFullRequestFlow:
             if "servers.pinduoduo.server" in sys.modules:
                 importlib.reload(sys.modules["servers.pinduoduo.server"])
             else:
-                servers.pinduoduo.server  # noqa: F401
+                import servers.pinduoduo.server  # noqa: F401
             pdd_mod = sys.modules["servers.pinduoduo.server"]
             pinduoduo_cls = pdd_mod.PinduoduoMCP
 

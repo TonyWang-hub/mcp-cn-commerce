@@ -30,7 +30,6 @@ from servers.xiaohongshu.server import (
     list_promotions,
     xhs,
 )
-
 from shared.cn_commerce_base import CommerceAPIError
 
 # ── Helpers ─────────────────────────────────────────────────────────────────────

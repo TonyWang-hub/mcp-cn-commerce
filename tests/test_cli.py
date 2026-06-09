@@ -89,10 +89,6 @@ class TestBuildPythonpath:
         pp = build_pythonpath(["oceanengine"])
         assert "shared" in pp
 
-    def test_includes_shared_dir(self):
-        pp = build_pythonpath(["oceanengine"])
-        assert "shared" in pp
-
     def test_multiple_platforms(self):
         pp = build_pythonpath(["oceanengine", "jd"])
         assert "shared" in pp

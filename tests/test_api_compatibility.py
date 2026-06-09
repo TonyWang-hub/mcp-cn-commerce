@@ -537,7 +537,7 @@ class TestVersionNegotiationCompatibility:
             if "servers.xiaohongshu.server" in sys.modules:
                 importlib.reload(sys.modules["servers.xiaohongshu.server"])
             else:
-                servers.xiaohongshu.server  # noqa: F401
+                import servers.xiaohongshu.server  # noqa: F401
             xhs_mod = sys.modules["servers.xiaohongshu.server"]
             client = xhs_mod.XiaohongshuMCP(app_key="k", app_secret="s", access_token="t")
             assert "xiaohongshu.com" in client.BASE_URL
@@ -557,7 +557,7 @@ class TestVersionNegotiationCompatibility:
             if "servers.weixin_store.server" in sys.modules:
                 importlib.reload(sys.modules["servers.weixin_store.server"])
             else:
-                servers.weixin_store.server  # noqa: F401
+                import servers.weixin_store.server  # noqa: F401
             wx_mod = sys.modules["servers.weixin_store.server"]
             client = wx_mod.WeixinStoreMCP(app_key="k", app_secret="s", access_token="t")
             assert "weixin.qq.com" in client.BASE_URL
@@ -581,7 +581,7 @@ class TestVersionNegotiationCompatibility:
             if "servers.pinduoduo.server" in sys.modules:
                 importlib.reload(sys.modules["servers.pinduoduo.server"])
             else:
-                servers.pinduoduo.server  # noqa: F401
+                import servers.pinduoduo.server  # noqa: F401
             pdd_mod = sys.modules["servers.pinduoduo.server"]
             client = pdd_mod.PinduoduoMCP(app_key="k", app_secret="s", access_token="t")
             assert "pinduoduo.com" in client.BASE_URL
@@ -864,7 +864,7 @@ class TestCrossPlatformInterfaceConsistency:
             if "servers.weixin_store.server" in sys.modules:
                 importlib.reload(sys.modules["servers.weixin_store.server"])
             else:
-                servers.weixin_store.server  # noqa: F401
+                import servers.weixin_store.server  # noqa: F401
             wx_mod = sys.modules["servers.weixin_store.server"]
             base_names = [c.__name__ for c in wx_mod.WeixinStoreMCP.__mro__]
             assert "CommerceMCPBase" in base_names

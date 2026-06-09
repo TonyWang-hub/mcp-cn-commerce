@@ -32,7 +32,6 @@ from servers.jd.server import (
     list_coupons,
     list_promotions,
 )
-
 from shared.cn_commerce_base import CommerceAPIError
 
 # ── Helpers ─────────────────────────────────────────────────────────────────

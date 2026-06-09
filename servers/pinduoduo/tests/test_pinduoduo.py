@@ -30,7 +30,6 @@ from servers.pinduoduo.server import (
     search_affiliate_goods,
     search_products,
 )
-
 from shared.cn_commerce_base import CommerceAPIError
 
 # ── Helpers ─────────────────────────────────────────────────────────────────

@@ -2919,9 +2919,7 @@ class AsyncRequestQueue:
                 error_name = type(exc).__name__
                 with self._lock:
                     self._stats.total_failed += 1
-                    self._stats.processing_errors[error_name] = (
-                        self._stats.processing_errors.get(error_name, 0) + 1
-                    )
+                    self._stats.processing_errors[error_name] = self._stats.processing_errors.get(error_name, 0) + 1
                 logger.warning(f"Queue worker error for {request.method} {request.path}: {exc}")
 
             finally:
@@ -3099,10 +3097,9 @@ class AsyncRequestQueue:
         """
         with self._lock:
             self._stats.current_depth = self._queue.qsize()
-            return AsyncQueueStats(**{
-                k: dict(v) if isinstance(v, dict) else v
-                for k, v in self._stats.__dict__.items()
-            })
+            return AsyncQueueStats(
+                **{k: dict(v) if isinstance(v, dict) else v for k, v in self._stats.__dict__.items()}
+            )
 
     @property
     def depth(self) -> int:
@@ -3117,8 +3114,6 @@ class AsyncRequestQueue:
     async def close(self) -> None:
         """Close the queue, stopping workers and cancelling pending requests."""
         await self.stop()
-
-
 
 
 # ── Configuration Validation ───────────────────────────────
@@ -3559,10 +3554,7 @@ class LoadBalancer:
                 node.failure_count += 1
                 node.total_failures += 1
                 node.last_failure_time = time.time()
-                logger.warning(
-                    f"Load balancer: endpoint {url} marked unhealthy "
-                    f"(failures={node.failure_count})"
-                )
+                logger.warning(f"Load balancer: endpoint {url} marked unhealthy " f"(failures={node.failure_count})")
 
     def record_success(self, url: str, latency_ms: float = 0.0) -> None:
         """Record a successful request to an endpoint.
@@ -3854,12 +3846,14 @@ class FailoverManager:
             node.total_requests += 1
 
             # Record in history
-            self._failure_history.append({
-                "url": url,
-                "error": error,
-                "timestamp": time.time(),
-                "failure_count": node.failure_count,
-            })
+            self._failure_history.append(
+                {
+                    "url": url,
+                    "error": error,
+                    "timestamp": time.time(),
+                    "failure_count": node.failure_count,
+                }
+            )
             # Keep history bounded (trim to last 500 when exceeding 500)
             if len(self._failure_history) > 500:
                 self._failure_history = self._failure_history[-500:]
@@ -3867,18 +3861,12 @@ class FailoverManager:
             # Mark unhealthy if max failures exceeded (directly, avoid double-count)
             if node.failure_count >= self.config.max_failures and node.is_healthy:
                 node.is_healthy = False
-                logger.warning(
-                    f"Load balancer: endpoint {url} marked unhealthy "
-                    f"(failures={node.failure_count})"
-                )
+                logger.warning(f"Load balancer: endpoint {url} marked unhealthy " f"(failures={node.failure_count})")
 
             # Check circuit breaker
             self._check_circuit_breaker(url)
 
-            logger.warning(
-                f"Failover: failure reported for {url} "
-                f"(count={node.failure_count}, error={error})"
-            )
+            logger.warning(f"Failover: failure reported for {url} " f"(count={node.failure_count}, error={error})")
 
     def _check_circuit_breaker(self, url: str) -> None:
         """Check and update circuit breaker state.
@@ -3907,10 +3895,7 @@ class FailoverManager:
                 # Mark unhealthy directly to avoid double-counting
                 if node.is_healthy:
                     node.is_healthy = False
-                logger.warning(
-                    f"Failover: circuit breaker OPENED for {url} "
-                    f"(failure_rate={failure_rate:.2f})"
-                )
+                logger.warning(f"Failover: circuit breaker OPENED for {url} " f"(failure_rate={failure_rate:.2f})")
 
     def _check_circuit_breaker_on_success(self, url: str) -> None:
         """Check circuit breaker state after a success.
@@ -3933,10 +3918,7 @@ class FailoverManager:
                 node = self._lb._endpoints.get(url)
                 if node and node.is_healthy:
                     node.is_healthy = False
-                logger.warning(
-                    f"Failover: circuit breaker OPENED for {url} "
-                    f"(failure_rate={failure_rate:.2f})"
-                )
+                logger.warning(f"Failover: circuit breaker OPENED for {url} " f"(failure_rate={failure_rate:.2f})")
 
     def is_circuit_open(self, url: str) -> bool:
         """Check if the circuit breaker is open for an endpoint.
@@ -4017,10 +3999,7 @@ class FailoverManager:
             while True:
                 try:
                     await asyncio.sleep(self.config.recovery_check_interval)
-                    unhealthy = [
-                        url for url, node in self._lb._endpoints.items()
-                        if not node.is_healthy
-                    ]
+                    unhealthy = [url for url, node in self._lb._endpoints.items() if not node.is_healthy]
                     for url in unhealthy:
                         await self.check_recovery(url)
                 except asyncio.CancelledError:

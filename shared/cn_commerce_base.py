@@ -2451,6 +2451,453 @@ class CacheWarmer:
         ]
 
 
+# ── Request Result Cache ───────────────────────────────────
+
+
+@dataclass
+class RequestCacheConfig:
+    """Configuration for API request result caching.
+
+    Attributes:
+        enabled: Whether request result caching is active.
+        max_size: Maximum number of cached entries (LRU eviction).
+        default_ttl_seconds: Default time-to-live for cached entries.
+        cacheable_methods: HTTP methods eligible for caching.
+        key_include_headers: Whether to include headers in cache key.
+        exclude_error_responses: Whether to skip caching error responses.
+    """
+
+    enabled: bool = True
+    max_size: int = 512
+    default_ttl_seconds: float = 300.0
+    cacheable_methods: tuple[str, ...] = ("GET",)
+    key_include_headers: bool = False
+    exclude_error_responses: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        return {
+            "enabled": self.enabled,
+            "max_size": self.max_size,
+            "default_ttl_seconds": self.default_ttl_seconds,
+            "cacheable_methods": list(self.cacheable_methods),
+            "key_include_headers": self.key_include_headers,
+            "exclude_error_responses": self.exclude_error_responses,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RequestCacheConfig:
+        """Deserialize from a dictionary."""
+        return cls(
+            enabled=data.get("enabled", True),
+            max_size=data.get("max_size", 512),
+            default_ttl_seconds=data.get("default_ttl_seconds", 300.0),
+            cacheable_methods=tuple(data.get("cacheable_methods", ("GET",))),
+            key_include_headers=data.get("key_include_headers", False),
+            exclude_error_responses=data.get("exclude_error_responses", True),
+        )
+
+
+@dataclass
+class RequestCacheStats:
+    """Statistics for request result caching.
+
+    Attributes:
+        total_requests: Total requests checked against the cache.
+        cache_hits: Number of requests served from cache.
+        cache_misses: Number of requests that missed the cache.
+        total_stored: Number of responses stored in cache.
+        total_evicted: Number of entries evicted due to LRU or TTL.
+        total_invalidated: Number of entries manually invalidated.
+        total_bytes_cached: Total bytes of cached response data.
+    """
+
+    total_requests: int = 0
+    cache_hits: int = 0
+    cache_misses: int = 0
+    total_stored: int = 0
+    total_evicted: int = 0
+    total_invalidated: int = 0
+    total_bytes_cached: int = 0
+
+    @property
+    def hit_rate(self) -> float:
+        """Cache hit rate as a fraction (0.0 to 1.0)."""
+        if self.total_requests == 0:
+            return 0.0
+        return self.cache_hits / self.total_requests
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert stats to a dictionary."""
+        return {
+            "total_requests": self.total_requests,
+            "cache_hits": self.cache_hits,
+            "cache_misses": self.cache_misses,
+            "hit_rate": round(self.hit_rate, 4),
+            "total_stored": self.total_stored,
+            "total_evicted": self.total_evicted,
+            "total_invalidated": self.total_invalidated,
+            "total_bytes_cached": self.total_bytes_cached,
+        }
+
+    def reset(self) -> None:
+        """Reset all collected statistics."""
+        self.total_requests = 0
+        self.cache_hits = 0
+        self.cache_misses = 0
+        self.total_stored = 0
+        self.total_evicted = 0
+        self.total_invalidated = 0
+        self.total_bytes_cached = 0
+
+
+class RequestResultCache:
+    """LRU + TTL cache for API request results.
+
+    Caches GET (and optionally other method) responses to avoid redundant
+    API calls.  Uses an OrderedDict for O(1) LRU eviction and supports
+    per-entry TTL.
+
+    Usage::
+
+        cache = RequestResultCache(RequestCacheConfig(max_size=256))
+        key = cache.make_key("GET", "/api/products", params={"page": 1})
+        cached = cache.get(key)
+        if cached is None:
+            result = await client._request("GET", "/api/products", params={"page": 1})
+            cache.set(key, result)
+        else:
+            result = cached
+
+    Thread-safe: all public methods acquire an internal lock.
+    """
+
+    def __init__(self, config: RequestCacheConfig | None = None) -> None:
+        """Initialize the request result cache.
+
+        Args:
+            config: Cache configuration. Uses defaults if None.
+        """
+        self.config = config or RequestCacheConfig()
+        self._cache: OrderedDict[str, tuple[float, float, dict[str, Any]]] = OrderedDict()
+        self._stats = RequestCacheStats()
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def make_key(
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> str:
+        """Generate a cache key for a request.
+
+        Args:
+            method: HTTP method.
+            path: API endpoint path.
+            params: Query parameters.
+            data: Request body data.
+
+        Returns:
+            A hex-encoded cache key string.
+        """
+        key_parts = [
+            method.upper(),
+            path,
+            json.dumps(params or {}, sort_keys=True, ensure_ascii=False),
+            json.dumps(data or {}, sort_keys=True, ensure_ascii=False),
+        ]
+        raw = "|".join(key_parts)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def get(self, key: str) -> dict[str, Any] | None:
+        """Retrieve a cached response if it exists and is not expired.
+
+        Moves the entry to the end of the LRU order on access.
+
+        Args:
+            key: The cache key.
+
+        Returns:
+            Cached response dict, or None if missing/expired.
+        """
+        with self._lock:
+            self._stats.total_requests += 1
+            entry = self._cache.get(key)
+            if entry is None:
+                self._stats.cache_misses += 1
+                return None
+
+            stored_at, ttl, result = entry
+            if time.time() - stored_at > ttl:
+                # Expired -- remove
+                del self._cache[key]
+                self._stats.total_evicted += 1
+                self._stats.cache_misses += 1
+                return None
+
+            # Move to end (most recently used)
+            self._cache.move_to_end(key)
+            self._stats.cache_hits += 1
+            return result
+
+    def set(
+        self,
+        key: str,
+        result: dict[str, Any],
+        ttl_seconds: float | None = None,
+    ) -> None:
+        """Store a response in the cache.
+
+        If the cache is full, the least-recently-used entry is evicted.
+
+        Args:
+            key: The cache key.
+            result: The response data to cache.
+            ttl_seconds: TTL override (uses default if None).
+        """
+        ttl = ttl_seconds if ttl_seconds is not None else self.config.default_ttl_seconds
+        now = time.time()
+
+        with self._lock:
+            if key in self._cache:
+                # Update existing
+                self._cache[key] = (now, ttl, result)
+                self._cache.move_to_end(key)
+                return
+
+            # Evict LRU if at capacity
+            while len(self._cache) >= self.config.max_size:
+                _, _ = self._cache.popitem(last=False)
+                self._stats.total_evicted += 1
+
+            self._cache[key] = (now, ttl, result)
+            self._stats.total_stored += 1
+            self._stats.total_bytes_cached += len(json.dumps(result, ensure_ascii=False).encode())
+
+    def invalidate(self, key: str | None = None) -> int:
+        """Invalidate cache entries.
+
+        Args:
+            key: Specific key to invalidate, or None to clear all.
+
+        Returns:
+            Number of entries invalidated.
+        """
+        with self._lock:
+            if key is None:
+                count = len(self._cache)
+                self._cache.clear()
+                self._stats.total_invalidated += count
+                return count
+            if key in self._cache:
+                del self._cache[key]
+                self._stats.total_invalidated += 1
+                return 1
+            return 0
+
+    def cleanup_expired(self) -> int:
+        """Remove all expired entries.
+
+        Returns:
+            Number of entries removed.
+        """
+        now = time.time()
+        with self._lock:
+            expired_keys = [
+                k for k, (stored_at, ttl, _) in self._cache.items()
+                if now - stored_at > ttl
+            ]
+            for k in expired_keys:
+                del self._cache[k]
+            self._stats.total_evicted += len(expired_keys)
+            return len(expired_keys)
+
+    @property
+    def size(self) -> int:
+        """Current number of entries in the cache."""
+        with self._lock:
+            return len(self._cache)
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get cache statistics.
+
+        Returns:
+            Dict with hit rate, counts, and configuration.
+        """
+        with self._lock:
+            stats = self._stats.to_dict()
+            stats["current_size"] = len(self._cache)
+            stats["max_size"] = self.config.max_size
+            stats["config"] = self.config.to_dict()
+            return stats
+
+    def reset_stats(self) -> None:
+        """Reset collected statistics."""
+        with self._lock:
+            self._stats = RequestCacheStats()
+
+    def clear(self) -> None:
+        """Clear all cached entries and reset statistics."""
+        with self._lock:
+            self._cache.clear()
+            self._stats = RequestCacheStats()
+
+
+# ── Response Decompression ─────────────────────────────────
+
+
+@dataclass
+class DecompressionStats:
+    """Statistics for response body decompression.
+
+    Attributes:
+        total_responses: Total responses processed.
+        decompressed_responses: Number of responses that were decompressed.
+        total_compressed_bytes: Total bytes received (compressed).
+        total_decompressed_bytes: Total bytes after decompression.
+        decompression_errors: Number of decompression failures.
+    """
+
+    total_responses: int = 0
+    decompressed_responses: int = 0
+    total_compressed_bytes: int = 0
+    total_decompressed_bytes: int = 0
+    decompression_errors: int = 0
+
+    @property
+    def decompression_rate(self) -> float:
+        """Fraction of responses that required decompression."""
+        if self.total_responses == 0:
+            return 0.0
+        return self.decompressed_responses / self.total_responses
+
+    @property
+    def avg_compression_ratio(self) -> float:
+        """Average compression ratio (lower = better compression)."""
+        if self.total_compressed_bytes == 0:
+            return 0.0
+        return self.total_decompressed_bytes / self.total_compressed_bytes
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert stats to a dictionary."""
+        return {
+            "total_responses": self.total_responses,
+            "decompressed_responses": self.decompressed_responses,
+            "decompression_rate": round(self.decompression_rate, 4),
+            "total_compressed_bytes": self.total_compressed_bytes,
+            "total_decompressed_bytes": self.total_decompressed_bytes,
+            "bytes_saved": self.total_decompressed_bytes - self.total_compressed_bytes,
+            "avg_compression_ratio": round(self.avg_compression_ratio, 4),
+            "decompression_errors": self.decompression_errors,
+        }
+
+    def reset(self) -> None:
+        """Reset all collected statistics."""
+        self.total_responses = 0
+        self.decompressed_responses = 0
+        self.total_compressed_bytes = 0
+        self.total_decompressed_bytes = 0
+        self.decompression_errors = 0
+
+
+class ResponseDecompressor:
+    """Decompresses HTTP response bodies based on Content-Encoding header.
+
+    Supports gzip and deflate decompression.  Tracks statistics for
+    monitoring compression effectiveness.
+
+    Usage::
+
+        decompressor = ResponseDecompressor()
+        body = decompressor.decompress(response_bytes, content_encoding="gzip")
+    """
+
+    def __init__(self) -> None:
+        """Initialize the response decompressor."""
+        self._stats = DecompressionStats()
+        self._lock = threading.Lock()
+
+    def decompress(
+        self,
+        body: bytes,
+        content_encoding: str = "",
+    ) -> bytes:
+        """Decompress a response body if it is compressed.
+
+        Args:
+            body: Raw response body bytes.
+            content_encoding: The Content-Encoding header value
+                (e.g. "gzip", "deflate", "identity").
+
+        Returns:
+            Decompressed body bytes.  If decompression fails or is not
+            applicable, the original body is returned.
+        """
+        with self._lock:
+            self._stats.total_responses += 1
+            self._stats.total_compressed_bytes += len(body)
+
+        encoding = content_encoding.strip().lower()
+
+        if not encoding or encoding in ("identity", "none"):
+            with self._lock:
+                self._stats.total_decompressed_bytes += len(body)
+            return body
+
+        try:
+            if encoding in ("gzip", "x-gzip"):
+                decompressed = gzip.decompress(body)
+            elif encoding == "deflate":
+                decompressed = zlib.decompress(body)
+            elif encoding == "br":
+                # Brotli -- attempt if available
+                try:
+                    import brotli
+                    decompressed = brotli.decompress(body)
+                except ImportError:
+                    logger.warning("Brotli decompression requested but brotli not installed")
+                    with self._lock:
+                        self._stats.total_decompressed_bytes += len(body)
+                    return body
+            else:
+                logger.warning(f"Unsupported Content-Encoding: {encoding}")
+                with self._lock:
+                    self._stats.total_decompressed_bytes += len(body)
+                return body
+
+            with self._lock:
+                self._stats.decompressed_responses += 1
+                self._stats.total_decompressed_bytes += len(decompressed)
+
+            logger.debug(
+                f"Decompressed {len(body)} -> {len(decompressed)} bytes "
+                f"(encoding={encoding})"
+            )
+            return decompressed
+
+        except Exception as exc:
+            logger.warning(f"Response decompression failed ({encoding}): {exc}")
+            with self._lock:
+                self._stats.decompression_errors += 1
+                self._stats.total_decompressed_bytes += len(body)
+            return body
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get decompression statistics.
+
+        Returns:
+            Dict with decompression counts, ratios, and bytes.
+        """
+        with self._lock:
+            return self._stats.to_dict()
+
+    def reset_stats(self) -> None:
+        """Reset all collected statistics."""
+        with self._lock:
+            self._stats = DecompressionStats()
+
+
 # ── Request Compression ────────────────────────────────────
 
 
@@ -2653,6 +3100,527 @@ class RequestCompressor:
             self._total_compressed_bytes = 0
 
 
+# ── Request Encryption ──────────────────────────────────────
+
+
+class EncryptionMethod(StrEnum):
+    """Supported request body encryption algorithms.
+
+    Attributes:
+        NONE: No encryption.
+        AES_256_CBC: AES-256 in CBC mode with PKCS7 padding.
+        XOR_CIPHER: Simple XOR cipher (for testing / non-production use).
+    """
+
+    NONE = "none"
+    AES_256_CBC = "aes_256_cbc"
+    XOR_CIPHER = "xor_cipher"
+
+
+@dataclass
+class EncryptionConfig:
+    """Configuration for request/response body encryption.
+
+    Attributes:
+        method: Encryption algorithm to use.
+        encryption_key: Hex-encoded encryption key (32 bytes for AES-256).
+        include_encrypted_header: Whether to set the X-Encrypted header.
+        header_name: Name of the header to signal encryption.
+    """
+
+    method: EncryptionMethod = EncryptionMethod.NONE
+    encryption_key: str = ""
+    include_encrypted_header: bool = True
+    header_name: str = "X-Encrypted"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary (key is masked)."""
+        return {
+            "method": self.method.value,
+            "encryption_key": mask_sensitive_value(self.encryption_key) if self.encryption_key else "",
+            "include_encrypted_header": self.include_encrypted_header,
+            "header_name": self.header_name,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EncryptionConfig:
+        """Deserialize from a dictionary."""
+        return cls(
+            method=EncryptionMethod(data.get("method", "none")),
+            encryption_key=data.get("encryption_key", ""),
+            include_encrypted_header=data.get("include_encrypted_header", True),
+            header_name=data.get("header_name", "X-Encrypted"),
+        )
+
+
+class RequestEncryptor:
+    """Encrypts request bodies and decrypts response bodies.
+
+    Supports AES-256-CBC (requires ``pyaes`` package) and XOR cipher
+    (built-in, for testing only).
+
+    Usage::
+
+        config = EncryptionConfig(
+            method=EncryptionMethod.AES_256_CBC,
+            encryption_key="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
+        encryptor = RequestEncryptor(config)
+        encrypted, headers = encryptor.encrypt(b'{"data": "..."}')
+        decrypted = encryptor.decrypt(encrypted)
+    """
+
+    def __init__(self, config: EncryptionConfig | None = None) -> None:
+        """Initialize the encryptor.
+
+        Args:
+            config: Encryption configuration. Uses defaults (NONE) if None.
+        """
+        self.config = config or EncryptionConfig()
+        self._stats_lock = threading.Lock()
+        self._total_encrypted = 0
+        self._total_decrypted = 0
+        self._total_bytes_encrypted = 0
+        self._total_bytes_decrypted = 0
+
+    def encrypt(self, body: bytes) -> tuple[bytes, dict[str, str]]:
+        """Encrypt a request body.
+
+        Args:
+            body: Raw request body bytes.
+
+        Returns:
+            Tuple of (encrypted_body, extra_headers).
+            If encryption method is NONE, returns (original_body, {}).
+
+        Raises:
+            ValueError: If the encryption key is missing or invalid.
+        """
+        if self.config.method == EncryptionMethod.NONE:
+            return body, {}
+
+        if not self.config.encryption_key:
+            raise ValueError("Encryption key is required")
+
+        encrypted = self._do_encrypt(body)
+
+        headers: dict[str, str] = {}
+        if self.config.include_encrypted_header:
+            headers[self.config.header_name] = self.config.method.value
+
+        with self._stats_lock:
+            self._total_encrypted += 1
+            self._total_bytes_encrypted += len(body)
+
+        logger.debug(
+            f"Encrypted {len(body)} bytes using {self.config.method.value}"
+        )
+        return encrypted, headers
+
+    def decrypt(self, data: bytes) -> bytes:
+        """Decrypt a response body.
+
+        Args:
+            data: Encrypted response body bytes.
+
+        Returns:
+            Decrypted body bytes.
+
+        Raises:
+            ValueError: If the encryption key is missing or invalid.
+        """
+        if self.config.method == EncryptionMethod.NONE:
+            return data
+
+        if not self.config.encryption_key:
+            raise ValueError("Encryption key is required")
+
+        decrypted = self._do_decrypt(data)
+
+        with self._stats_lock:
+            self._total_decrypted += 1
+            self._total_bytes_decrypted += len(decrypted)
+
+        logger.debug(
+            f"Decrypted {len(data)} -> {len(decrypted)} bytes using {self.config.method.value}"
+        )
+        return decrypted
+
+    def _do_encrypt(self, body: bytes) -> bytes:
+        """Perform the actual encryption."""
+        method = self.config.method
+        key = bytes.fromhex(self.config.encryption_key)
+
+        if method == EncryptionMethod.AES_256_CBC:
+            return self._aes_encrypt(body, key)
+        elif method == EncryptionMethod.XOR_CIPHER:
+            return self._xor_encrypt(body, key)
+        else:
+            raise ValueError(f"Unsupported encryption method: {method}")
+
+    def _do_decrypt(self, data: bytes) -> bytes:
+        """Perform the actual decryption."""
+        method = self.config.method
+        key = bytes.fromhex(self.config.encryption_key)
+
+        if method == EncryptionMethod.AES_256_CBC:
+            return self._aes_decrypt(data, key)
+        elif method == EncryptionMethod.XOR_CIPHER:
+            return self._xor_decrypt(data, key)
+        else:
+            raise ValueError(f"Unsupported encryption method: {method}")
+
+    @staticmethod
+    def _pkcs7_pad(data: bytes, block_size: int = 16) -> bytes:
+        """Apply PKCS7 padding."""
+        padding_len = block_size - (len(data) % block_size)
+        return data + bytes([padding_len] * padding_len)
+
+    @staticmethod
+    def _pkcs7_unpad(data: bytes) -> bytes:
+        """Remove PKCS7 padding."""
+        if not data:
+            raise ValueError("Cannot unpad empty data")
+        padding_len = data[-1]
+        if padding_len < 1 or padding_len > 16:
+            raise ValueError(f"Invalid PKCS7 padding length: {padding_len}")
+        if data[-padding_len:] != bytes([padding_len] * padding_len):
+            raise ValueError("Invalid PKCS7 padding")
+        return data[:-padding_len]
+
+    def _aes_encrypt(self, body: bytes, key: bytes) -> bytes:
+        """Encrypt using AES-256-CBC with PKCS7 padding."""
+        if len(key) != 32:
+            raise ValueError(f"AES-256 requires a 32-byte key, got {len(key)} bytes")
+
+        try:
+            import pyaes
+        except ImportError:
+            raise ImportError(
+                "pyaes is required for AES encryption. "
+                "Install it with: pip install pyaes"
+            )
+
+        iv = os.urandom(16)
+        padded = self._pkcs7_pad(body, 16)
+
+        aes_cbc = pyaes.AESModeOfOperationCBC(key, iv=iv)
+        ciphertext = b""
+        for i in range(0, len(padded), 16):
+            block = padded[i : i + 16]
+            ciphertext += aes_cbc.encrypt(block)
+
+        return iv + ciphertext
+
+    def _aes_decrypt(self, data: bytes, key: bytes) -> bytes:
+        """Decrypt AES-256-CBC ciphertext with PKCS7 unpadding."""
+        if len(key) != 32:
+            raise ValueError(f"AES-256 requires a 32-byte key, got {len(key)} bytes")
+        if len(data) < 32:
+            raise ValueError(f"Encrypted data too short: {len(data)} bytes")
+
+        try:
+            import pyaes
+        except ImportError:
+            raise ImportError(
+                "pyaes is required for AES decryption. "
+                "Install it with: pip install pyaes"
+            )
+
+        iv = data[:16]
+        ciphertext = data[16:]
+
+        aes_cbc = pyaes.AESModeOfOperationCBC(key, iv=iv)
+        plaintext = b""
+        for i in range(0, len(ciphertext), 16):
+            block = ciphertext[i : i + 16]
+            plaintext += aes_cbc.decrypt(block)
+
+        return self._pkcs7_unpad(plaintext)
+
+    @staticmethod
+    def _xor_encrypt(body: bytes, key: bytes) -> bytes:
+        """Encrypt using XOR cipher (for testing only)."""
+        if not key:
+            raise ValueError("XOR key cannot be empty")
+        return bytes(b ^ key[i % len(key)] for i, b in enumerate(body))
+
+    @staticmethod
+    def _xor_decrypt(data: bytes, key: bytes) -> bytes:
+        """Decrypt XOR cipher (symmetric operation)."""
+        if not key:
+            raise ValueError("XOR key cannot be empty")
+        return bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get encryption statistics."""
+        with self._stats_lock:
+            return {
+                "method": self.config.method.value,
+                "total_encrypted": self._total_encrypted,
+                "total_decrypted": self._total_decrypted,
+                "total_bytes_encrypted": self._total_bytes_encrypted,
+                "total_bytes_decrypted": self._total_bytes_decrypted,
+            }
+
+    def reset_stats(self) -> None:
+        """Reset all collected statistics."""
+        with self._stats_lock:
+            self._total_encrypted = 0
+            self._total_decrypted = 0
+            self._total_bytes_encrypted = 0
+            self._total_bytes_decrypted = 0
+
+
+# ── Request Audit ───────────────────────────────────────────
+
+
+@dataclass
+class AuditEntry:
+    """A single audit log entry for an API request.
+
+    Attributes:
+        audit_id: Unique identifier for this audit entry.
+        request_id: Correlation ID for the request.
+        method: HTTP method (GET, POST).
+        path: API endpoint path.
+        platform: Platform identifier.
+        timestamp: ISO 8601 timestamp of the request.
+        status_code: HTTP response status code (0 if not completed).
+        latency_ms: Request duration in milliseconds.
+        encrypted: Whether the request body was encrypted.
+        error: Error message if the request failed.
+        metadata: Additional context (user_id, ip, etc.).
+    """
+
+    audit_id: str = ""
+    request_id: str = ""
+    method: str = ""
+    path: str = ""
+    platform: str = ""
+    timestamp: str = ""
+    status_code: int = 0
+    latency_ms: float = 0.0
+    encrypted: bool = False
+    error: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.audit_id:
+            self.audit_id = str(uuid.uuid4())
+        if not self.timestamp:
+            self.timestamp = datetime.now(UTC).isoformat()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to a dictionary."""
+        return {
+            "audit_id": self.audit_id,
+            "request_id": self.request_id,
+            "method": self.method,
+            "path": self.path,
+            "platform": self.platform,
+            "timestamp": self.timestamp,
+            "status_code": self.status_code,
+            "latency_ms": round(self.latency_ms, 2),
+            "encrypted": self.encrypted,
+            "error": self.error,
+            "metadata": self.metadata,
+        }
+
+
+class AuditLog:
+    """Thread-safe audit log for API requests.
+
+    Provides:
+    - Request logging with metadata
+    - Query by time range, platform, method, status
+    - Export to CSV or JSON
+    - Configurable maximum log size
+
+    Usage::
+
+        audit = AuditLog(max_entries=10000)
+        audit.log(AuditEntry(method="GET", path="/api/order", platform="TAOBAO"))
+
+        # Query recent entries
+        entries = audit.query(platform="TAOBAO", limit=50)
+
+        # Export
+        json_str = audit.export_json()
+        csv_str = audit.export_csv()
+    """
+
+    def __init__(self, max_entries: int = 50000) -> None:
+        """Initialize the audit log.
+
+        Args:
+            max_entries: Maximum number of entries to retain (oldest dropped first).
+        """
+        self._max_entries = max_entries
+        self._entries: list[AuditEntry] = []
+        self._lock = threading.Lock()
+
+    @property
+    def entry_count(self) -> int:
+        """Number of entries currently in the log."""
+        with self._lock:
+            return len(self._entries)
+
+    def log(self, entry: AuditEntry) -> None:
+        """Add an audit entry to the log."""
+        with self._lock:
+            self._entries.append(entry)
+            if len(self._entries) > self._max_entries:
+                excess = len(self._entries) - self._max_entries
+                self._entries = self._entries[excess:]
+        logger.debug(f"Audit: logged {entry.method} {entry.path} [{entry.status_code}]")
+
+    def query(
+        self,
+        start_time: str | None = None,
+        end_time: str | None = None,
+        platform: str | None = None,
+        method: str | None = None,
+        path: str | None = None,
+        status_code: int | None = None,
+        min_latency_ms: float | None = None,
+        max_latency_ms: float | None = None,
+        encrypted_only: bool = False,
+        errors_only: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Query audit entries with filters."""
+        with self._lock:
+            results = self._entries
+
+        filtered: list[AuditEntry] = []
+        for entry in results:
+            if start_time and entry.timestamp < start_time:
+                continue
+            if end_time and entry.timestamp > end_time:
+                continue
+            if platform and entry.platform != platform:
+                continue
+            if method and entry.method.upper() != method.upper():
+                continue
+            if path and path not in entry.path:
+                continue
+            if status_code is not None and entry.status_code != status_code:
+                continue
+            if min_latency_ms is not None and entry.latency_ms < min_latency_ms:
+                continue
+            if max_latency_ms is not None and entry.latency_ms > max_latency_ms:
+                continue
+            if encrypted_only and not entry.encrypted:
+                continue
+            if errors_only and not entry.error:
+                continue
+            filtered.append(entry)
+
+        filtered.reverse()
+        page = filtered[offset : offset + limit]
+        return [e.to_dict() for e in page]
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get audit log statistics."""
+        with self._lock:
+            total = len(self._entries)
+            if total == 0:
+                return {
+                    "total_entries": 0,
+                    "max_entries": self._max_entries,
+                    "error_count": 0,
+                    "encrypted_count": 0,
+                    "platforms": {},
+                    "methods": {},
+                }
+
+            error_count = sum(1 for e in self._entries if e.error)
+            encrypted_count = sum(1 for e in self._entries if e.encrypted)
+            platforms: dict[str, int] = {}
+            methods: dict[str, int] = {}
+            for e in self._entries:
+                if e.platform:
+                    platforms[e.platform] = platforms.get(e.platform, 0) + 1
+                methods[e.method] = methods.get(e.method, 0) + 1
+
+            return {
+                "total_entries": total,
+                "max_entries": self._max_entries,
+                "error_count": error_count,
+                "encrypted_count": encrypted_count,
+                "platforms": platforms,
+                "methods": methods,
+            }
+
+    def export_json(self, limit: int = 0) -> str:
+        """Export audit entries as a JSON string."""
+        with self._lock:
+            entries = self._entries
+            if limit > 0:
+                entries = entries[-limit:]
+            return json.dumps(
+                [e.to_dict() for e in entries],
+                ensure_ascii=False,
+                indent=2,
+            )
+
+    def export_csv(self, limit: int = 0) -> str:
+        """Export audit entries as a CSV string."""
+        with self._lock:
+            entries = self._entries
+            if limit > 0:
+                entries = entries[-limit:]
+
+        if not entries:
+            return ""
+
+        fields = [
+            "audit_id", "request_id", "method", "path",
+            "platform", "timestamp", "status_code",
+            "latency_ms", "encrypted", "error",
+        ]
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        for entry in entries:
+            row = entry.to_dict()
+            row["metadata"] = json.dumps(row.get("metadata", {}), ensure_ascii=False)
+            writer.writerow(row)
+        return output.getvalue()
+
+    def export_to_file(
+        self,
+        file_path: str,
+        format: str = "json",
+        limit: int = 0,
+    ) -> str:
+        """Export audit entries to a file."""
+        path = Path(file_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        if format == "json":
+            content = self.export_json(limit=limit)
+        elif format == "csv":
+            content = self.export_csv(limit=limit)
+        else:
+            raise ValueError(f"Unsupported export format: {format}")
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        logger.info(f"Audit: exported to {path}")
+        return str(path)
+
+    def clear(self) -> int:
+        """Clear all audit entries."""
+        with self._lock:
+            count = len(self._entries)
+            self._entries.clear()
+            return count
+
+
 class CommerceMCPBase:
     """Base class for Chinese e-commerce platform MCP servers.
 
@@ -2678,6 +3646,9 @@ class CommerceMCPBase:
         reconnect_config: ReconnectConfig | None = None,
         compression_config: CompressionConfig | None = None,
         rate_limit_config: RateLimitConfig | None = None,
+        cache_config: RequestCacheConfig | None = None,
+        encryption_config: EncryptionConfig | None = None,
+        audit_max_entries: int = 50000,
     ) -> None:
         self.app_key = app_key
         self.app_secret = app_secret
@@ -2688,8 +3659,12 @@ class CommerceMCPBase:
         self._health_cache = HealthCheckCache(ttl_seconds=30.0)
         self.cache_warmer = CacheWarmer()
         self._compressor = RequestCompressor(compression_config)
+        self._decompressor = ResponseDecompressor()
+        self._result_cache = RequestResultCache(cache_config)
         self._configurable_limiter = ConfigurableRateLimiter(rate_limit_config)
         self._priority_scheduler = PriorityScheduler(rate_limiter=self._configurable_limiter)
+        self._encryptor = RequestEncryptor(encryption_config)
+        self._audit_log = AuditLog(max_entries=audit_max_entries)
 
     def _get_client(self) -> httpx.AsyncClient:
         """Get or create an HTTP client with connection pooling.
@@ -2816,8 +3791,11 @@ class CommerceMCPBase:
         params: dict | None = None,
         data: dict | None = None,
         retry_config: RetryConfig | None = None,
+        use_cache: bool = True,
+        cache_ttl: float | None = None,
     ) -> dict[str, Any]:
-        """Make a signed API request with optional retry support.
+        """Make a signed API request with optional retry, caching, decompression,
+        encryption, and audit logging.
 
         Args:
             method: HTTP method ("GET" or "POST").
@@ -2825,6 +3803,8 @@ class CommerceMCPBase:
             params: Query parameters.
             data: Request body (JSON).
             retry_config: If provided, retry failed requests according to this config.
+            use_cache: Whether to check/store in the result cache.
+            cache_ttl: Override TTL for this specific request's cache entry.
 
         Returns:
             Parsed JSON response as a dict.
@@ -2835,6 +3815,22 @@ class CommerceMCPBase:
         """
         params = params or {}
         data = data or {}
+
+        # ── Audit: record request start ──
+        request_start = time.time()
+        request_id = str(uuid.uuid4())
+        is_encrypted = self._encryptor.config.method != EncryptionMethod.NONE
+
+        # ── Check result cache ──
+        cache_cfg = self._result_cache.config
+        if use_cache and cache_cfg.enabled and method.upper() in cache_cfg.cacheable_methods:
+            cache_key = RequestResultCache.make_key(method, path, params, data)
+            cached = self._result_cache.get(cache_key)
+            if cached is not None:
+                logger.debug(f"Cache hit: {method} {path}")
+                return cached
+        else:
+            cache_key = ""
 
         # Snapshot auth params for retry (timestamp must be regenerated each attempt)
         auth_params: dict[str, str] = {}
@@ -2864,9 +3860,32 @@ class CommerceMCPBase:
                 if method == "GET":
                     resp = await client.get(url, params={**attempt_params, **data})
                 else:
-                    # Compress POST body if configured
+                    # Encrypt and/or compress POST body if configured
                     extra_headers: dict[str, str] = {}
-                    if self._compressor.config.method != CompressionMethod.NONE and data:
+
+                    # Apply encryption first (on raw JSON bytes)
+                    if is_encrypted and data:
+                        body_bytes = json.dumps(data, ensure_ascii=False).encode("utf-8")
+                        encrypted_body, enc_headers = self._encryptor.encrypt(body_bytes)
+                        extra_headers.update(enc_headers)
+                        # Then apply compression on encrypted bytes
+                        if self._compressor.config.method != CompressionMethod.NONE:
+                            compressed_body, comp_headers = self._compressor.compress(encrypted_body)
+                            extra_headers.update(comp_headers)
+                            resp = await client.post(
+                                url,
+                                params=attempt_params,
+                                content=compressed_body,
+                                headers={**extra_headers, "Content-Type": "application/json"},
+                            )
+                        else:
+                            resp = await client.post(
+                                url,
+                                params=attempt_params,
+                                content=encrypted_body,
+                                headers={**extra_headers, "Content-Type": "application/json"},
+                            )
+                    elif self._compressor.config.method != CompressionMethod.NONE and data:
                         body_bytes = json.dumps(data, ensure_ascii=False).encode("utf-8")
                         compressed_body, extra_headers = self._compressor.compress(body_bytes)
                         if extra_headers:
@@ -2881,7 +3900,24 @@ class CommerceMCPBase:
                     else:
                         resp = await client.post(url, params=attempt_params, json=data)
 
-                result = resp.json()
+                # ── Response decompression ──
+                content_encoding = resp.headers.get("content-encoding", "")
+                if content_encoding:
+                    raw_body = resp.content
+                    decompressed = self._decompressor.decompress(raw_body, content_encoding)
+                    if decompressed is not raw_body:
+                        result = json.loads(decompressed)
+                    else:
+                        result = resp.json()
+                else:
+                    result = resp.json()
+
+                # ── Response decryption ──
+                if is_encrypted and resp.headers.get(self._encryptor.config.header_name):
+                    resp_body = json.dumps(result, ensure_ascii=False).encode("utf-8")
+                    decrypted_body = self._encryptor.decrypt(resp_body)
+                    result = json.loads(decompressed if content_encoding else decrypted_body)
+
                 if "error_response" in result:
                     error_code = result["error_response"].get("code", -1)
                     error_msg = result["error_response"].get("msg", "unknown")
@@ -2889,10 +3925,40 @@ class CommerceMCPBase:
                     raise CommerceAPIError(code=error_code, msg=error_msg)
 
                 logger.debug(f"Response: {resp.status_code}")
+
+                # ── Store in result cache ──
+                if use_cache and cache_key and cache_cfg.enabled:
+                    if method.upper() in cache_cfg.cacheable_methods:
+                        self._result_cache.set(cache_key, result, ttl_seconds=cache_ttl)
+
+                # ── Audit: log successful request ──
+                self._audit_log.log(AuditEntry(
+                    request_id=request_id,
+                    method=method.upper(),
+                    path=path,
+                    platform=self.__class__.__name__.upper(),
+                    status_code=resp.status_code,
+                    latency_ms=(time.time() - request_start) * 1000,
+                    encrypted=is_encrypted,
+                ))
+
                 return result
 
             except Exception as exc:
                 last_exc = exc
+
+                # ── Audit: log failed request ──
+                self._audit_log.log(AuditEntry(
+                    request_id=request_id,
+                    method=method.upper(),
+                    path=path,
+                    platform=self.__class__.__name__.upper(),
+                    status_code=getattr(exc, "status_code", 0),
+                    latency_ms=(time.time() - request_start) * 1000,
+                    encrypted=is_encrypted,
+                    error=str(exc),
+                ))
+
                 # If no retry config or not retryable, re-raise immediately
                 if not retry_config or not retry_config.should_retry_exception(exc):
                     raise
@@ -3126,6 +4192,119 @@ class CommerceMCPBase:
             Dict with compression metrics.
         """
         return self._compressor.get_stats()
+
+    def get_decompression_stats(self) -> dict[str, Any]:
+        """Get response decompression statistics.
+
+        Returns:
+            Dict with decompression metrics.
+        """
+        return self._decompressor.get_stats()
+
+    def get_result_cache_stats(self) -> dict[str, Any]:
+        """Get request result cache statistics.
+
+        Returns:
+            Dict with cache hit rate, counts, and configuration.
+        """
+        return self._result_cache.get_stats()
+
+    def invalidate_result_cache(self, key: str | None = None) -> int:
+        """Invalidate request result cache entries.
+
+        Args:
+            key: Specific cache key to invalidate, or None to clear all.
+
+        Returns:
+            Number of entries invalidated.
+        """
+        return self._result_cache.invalidate(key)
+
+    # ── Encryption Convenience ────────────────────────────
+
+    def get_encryption_stats(self) -> dict[str, Any]:
+        """Get request encryption statistics.
+
+        Returns:
+            Dict with encryption method and byte counts.
+        """
+        return self._encryptor.get_stats()
+
+    def get_encryption_config(self) -> dict[str, Any]:
+        """Get current encryption configuration (key is masked).
+
+        Returns:
+            Dict with encryption configuration.
+        """
+        return self._encryptor.config.to_dict()
+
+    # ── Audit Convenience ─────────────────────────────────
+
+    def get_audit_log(self) -> AuditLog:
+        """Get the audit log instance.
+
+        Returns:
+            The AuditLog for direct access.
+        """
+        return self._audit_log
+
+    def get_audit_stats(self) -> dict[str, Any]:
+        """Get audit log statistics.
+
+        Returns:
+            Dict with audit entry counts and breakdowns.
+        """
+        return self._audit_log.get_stats()
+
+    def query_audit(
+        self,
+        platform: str | None = None,
+        method: str | None = None,
+        path: str | None = None,
+        errors_only: bool = False,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Query audit log entries.
+
+        Args:
+            platform: Filter by platform name.
+            method: Filter by HTTP method.
+            path: Filter by API path (substring match).
+            errors_only: Only return entries with errors.
+            limit: Maximum number of results.
+
+        Returns:
+            List of matching audit entry dicts.
+        """
+        return self._audit_log.query(
+            platform=platform,
+            method=method,
+            path=path,
+            errors_only=errors_only,
+            limit=limit,
+        )
+
+    def export_audit_json(self, limit: int = 0) -> str:
+        """Export audit entries as JSON.
+
+        Args:
+            limit: Maximum entries to export (0 = all).
+
+        Returns:
+            JSON string.
+        """
+        return self._audit_log.export_json(limit=limit)
+
+    def export_audit_csv(self, limit: int = 0) -> str:
+        """Export audit entries as CSV.
+
+        Args:
+            limit: Maximum entries to export (0 = all).
+
+        Returns:
+            CSV string.
+        """
+        return self._audit_log.export_csv(limit=limit)
 
     # ── Priority Scheduling Convenience ────────────────────
 

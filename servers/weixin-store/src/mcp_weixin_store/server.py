@@ -14,20 +14,18 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import time
-from pathlib import Path
 from typing import Any
 
 import httpx
 from mcp.server.fastmcp import FastMCP
 
-# Let the server find the shared base class at <repo-root>/shared/
-_project_root = Path(__file__).resolve().parents[4]
-if str(_project_root) not in sys.path:
-    sys.path.insert(0, str(_project_root))
-
-from shared.cn_commerce_base import CommerceAPIError, CommerceMCPBase, ConfigValidationError
+from shared.cn_commerce_base import (
+    CommerceAPIError,
+    CommerceMCPBase,
+    ConfigValidationError,
+    register_common_tools,
+)
 
 # ── WeChat Store client ───────────────────────────────────────────────────────
 
@@ -390,6 +388,10 @@ async def list_categories(parent_id: int = 0) -> str:
     data = {"parent_id": parent_id}
     result = await _wx._request("POST", "/channels/ec/category/list/get", data=data)
     return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+# ── Cross-platform operational tools (get_metrics/get_traces/get_alerts/export_data) ──
+register_common_tools(mcp, _wx)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

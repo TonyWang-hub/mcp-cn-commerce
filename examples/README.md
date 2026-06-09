@@ -95,6 +95,22 @@ export JD_ACCESS_TOKEN="your_access_token"
 - [安全建议](best-practices/security.md) - 安全配置和权限管理
 - [错误处理](best-practices/error-handling.md) - 常见错误和解决方案
 
+### 可运行脚本（Runnable scripts）
+
+无需真实凭证、不联网即可运行的 Python 示例：
+
+- [observability_demo.py](best-practices/observability_demo.py) - 演示默认开启的
+  请求计量（`get_metrics_summary()`）与追踪（`get_trace_summary()`）、内置告警
+  规则评估（`get_alerts()`），以及数据导出（`export_data()`）。这些能力同时通过
+  `get_metrics` / `get_traces` / `get_alerts` / `export_data` 这 4 个跨平台 MCP
+  工具暴露给客户端。
+
+  运行方式（在仓库根目录执行）：
+
+  ```bash
+  python3 examples/best-practices/observability_demo.py
+  ```
+
 ## 相关资源
 
 - [项目文档](../docs/) - 完整文档

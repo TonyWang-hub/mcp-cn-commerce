@@ -2,6 +2,15 @@
 
 mcp-cn-commerce provides built-in load balancing and failover capabilities for distributing API requests across multiple endpoints and handling endpoint failures gracefully.
 
+## Status: opt-in
+
+`LoadBalancer` and `FailoverManager` are **opt-in** building blocks in
+`shared.cn_commerce_base`. The base client makes its requests against a single
+`BASE_URL`; it does *not* route through a load balancer automatically, and these
+classes are not exposed as MCP tools. Wire them in yourself -- the
+[Integration with CommerceMCPBase](#integration-with-commercemcpbase) section
+below shows a subclass that does exactly that.
+
 ## Overview
 
 The load balancing system consists of two main components:

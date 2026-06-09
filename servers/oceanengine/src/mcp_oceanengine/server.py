@@ -9,21 +9,16 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import sys
-from pathlib import Path
 
-# Ensure the shared base module is importable from ../../shared/
-_SHARED_DIR = Path(__file__).resolve().parents[4] / "shared"
-if str(_SHARED_DIR) not in sys.path:
-    sys.path.insert(0, str(_SHARED_DIR))
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
 
-from cn_commerce_base import (
+from shared.cn_commerce_base import (
     CommerceMCPBase,
     ConfigValidationError,
     handle_tool_errors,
-)  # noqa: E402
-from mcp.server import Server  # noqa: E402
-from mcp.server.stdio import stdio_server  # noqa: E402
+    register_common_tools,
+)
 
 # ── Ocean Engine API Client ──────────────────────────────
 
@@ -585,6 +580,12 @@ async def get_diagnosis(advertiser_id: str, campaign_id: str) -> dict:
             "campaign_id": int(campaign_id),
         },
     )
+
+
+# ── Cross-platform operational tools ─────────────────────
+# (get_metrics/get_traces/get_alerts/export_data)
+
+register_common_tools(server, _get_client)
 
 
 # ── Entry Point ──────────────────────────────────────────

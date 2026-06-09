@@ -250,8 +250,8 @@ class MonitoringDashboard:
     WebhookManager into a single dashboard view.
 
     Usage:
-        from cn_commerce_base import CommerceMCPBase, WebhookManager
-        from dashboard import MonitoringDashboard
+        from shared.cn_commerce_base import CommerceMCPBase, WebhookManager
+        from shared.dashboard import MonitoringDashboard
 
         client = CommerceMCPBase(app_key="...", app_secret="...")
         webhook_mgr = WebhookManager()

@@ -7,6 +7,16 @@ ensure that high-priority operations are served first, even under heavy load.
 Combined with dynamic rate limiting, you can build self-tuning e-commerce
 integrations that adapt to platform throttling in real time.
 
+## Status: opt-in
+
+Every `CommerceMCPBase` instance already owns a `PriorityScheduler` and a
+`ConfigurableRateLimiter` (accessible via `client.priority_scheduler` and
+`client.configurable_limiter`). However, the **plain `_request()` path does not
+go through the priority scheduler** -- to get priority-aware dispatch you must
+explicitly call `client.prioritized_request(...)` (shown
+[below](#using-priority-with-commercemcpbase)). All the APIs on this page are
+reachable today; none of them are exposed as MCP tools.
+
 ## Request Priority Levels
 
 Four priority levels are available, ordered from highest to lowest:

@@ -135,6 +135,7 @@ def build_pythonpath(platforms: list[str]) -> str:
 
 # ── Health Check ───────────────────────────────────────────
 
+
 def check_server_health(platform: str) -> dict[str, Any]:
     """Check health of a single platform server.
 
@@ -215,6 +216,7 @@ def check_all_health() -> list[dict[str, Any]]:
 
 
 # ── Server Launch ──────────────────────────────────────────
+
 
 def start_server(platform: str) -> None:
     """Start a single MCP server as a subprocess.
@@ -323,6 +325,7 @@ def start_servers(platforms: list[str]) -> None:
 
 # ── Version ────────────────────────────────────────────────
 
+
 def show_version(verbose: bool = False) -> None:
     """Print version information.
 
@@ -343,6 +346,7 @@ def show_version(verbose: bool = False) -> None:
 
 # ── List Platforms ─────────────────────────────────────────
 
+
 def list_platforms() -> None:
     """Print a formatted list of available platforms."""
     print("Available MCP servers:\n")
@@ -354,6 +358,7 @@ def list_platforms() -> None:
 
 
 # ── CLI Argument Parser ────────────────────────────────────
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser.
@@ -376,7 +381,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to configuration file (JSON)",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Enable verbose output",
     )
@@ -471,6 +477,7 @@ def format_health_output(results: list[dict[str, Any]], as_json: bool = False) -
 
 
 # ── Main Entry Point ───────────────────────────────────────
+
 
 def main(argv: list[str] | None = None) -> None:
     """Main CLI entry point.

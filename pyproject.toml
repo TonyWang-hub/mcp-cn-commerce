@@ -89,3 +89,125 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 ignore = ["E501", "E402"]  # Line too long - handled by black; Module level import not at top of file
+
+# ── mypy ───────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.11"
+explicit_package_bases = true
+warn_return_any = false
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = false
+check_untyped_defs = false
+disallow_untyped_defs = false
+ignore_missing_imports = true
+no_implicit_optional = true
+strict_optional = false
+# Start lenient; tighten incrementally
+disable_error_code = [
+    "call-arg",
+    "return-value",
+    "assignment",
+    "arg-type",
+    "attr-defined",
+    "union-attr",
+    "override",
+]
+exclude = [
+    "\\.egg-info/",
+    "htmlcov/",
+    "__pycache__/",
+    "\\.ruff_cache/",
+    "\\.mypy_cache/",
+    "build/",
+    "dist/",
+    "docs/",
+    "examples/",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "mcp.*",
+    "mcp.server.*",
+    "mcp.server.stdio",
+]
+ignore_missing_imports = true
+# mcp library lacks proper type stubs for Server.tool decorator
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = "shared.*"
+ignore_missing_imports = true
+
+# ── pylint ─────────────────────────────────────────────────
+[tool.pylint.main]
+py-version = "3.11"
+load-plugins = []
+ignore-paths = [
+    "\\.egg-info/",
+    "htmlcov/",
+    "build/",
+    "dist/",
+    "docs/",
+    "examples/",
+]
+
+[tool.pylint.messages_control]
+disable = [
+    "C0114",  # missing-module-docstring
+    "C0115",  # missing-class-docstring
+    "C0116",  # missing-function-docstring
+    "C0301",  # line-too-long (handled by black)
+    "C0302",  # too-many-lines
+    "R0902",  # too-many-instance-attributes
+    "R0903",  # too-few-public-methods
+    "R0913",  # too-many-arguments
+    "R0914",  # too-many-local-variables
+    "R0801",  # duplicate-code
+    "W0511",  # fixme
+    "E0401",  # import-error (handled by mypy)
+    "W0212",  # protected-access
+    "R0904",  # too-many-public-methods
+    "R0911",  # too-many-return-statements
+    "R0912",  # too-many-branches
+    "R0915",  # too-many-statements
+    "W0237",  # arguments-differ
+]
+
+[tool.pylint.format]
+max-line-length = 120
+
+[tool.pylint.basic]
+good-names = ["i", "j", "k", "v", "e", "f", "ep", "ts", "h", "fn", "df"]
+
+[tool.pylint.typecheck]
+ignored-modules = ["mcp", "mcp.server", "mcp.server.stdio"]
+ignored-classes = ["Server"]
+
+# ── bandit ─────────────────────────────────────────────────
+[tool.bandit]
+targets = ["servers", "shared"]
+exclude_dirs = [
+    "tests",
+    "examples",
+    "docs",
+    ".egg-info",
+    "htmlcov",
+    "build",
+    "dist",
+]
+skips = [
+    "B101",  # assert used — we use asserts in tests
+    "B311",  # random module — used for jitter in retry logic, not security
+    "B324",  # hashlib md5 — used for e-commerce API signing, not security
+    "B404",  # subprocess import — used in CLI
+    "B601",  # paramiko calls — not used
+    "B602",  # subprocess with shell=True — not used
+    "B603",  # subprocess without shell=False — not used
+    "B604",  # any_other_function_with_shell_equals_true
+    "B607",  # start_process_with_partial_path
+    "B107",  # hardcoded_password_default — empty string defaults for config
+]
+# Only flag high-severity issues by default
+severity = "medium"
+confidence = "medium"

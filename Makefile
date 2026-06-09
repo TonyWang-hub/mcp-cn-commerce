@@ -1,4 +1,4 @@
-.PHONY: help install test test-cov lint format clean type-check
+.PHONY: help install test test-cov lint format clean type-check pylint bandit quality
 
 # PYTHONPATH for all platform server source directories
 PYTHONPATH_SOURCES := servers/oceanengine/src:servers/doudian/src:servers/jd/src:servers/taobao/src:servers/pinduoduo/src:servers/kuaishou/src:servers/xiaohongshu/src:servers/weixin-store/src
@@ -13,7 +13,10 @@ help:
 	@echo "  make test-cov   - Run tests with coverage report (HTML + terminal)"
 	@echo "  make lint       - Check code style (black --check + ruff check)"
 	@echo "  make format     - Auto-format code (black + ruff fix)"
-	@echo "  make type-check - Run type checking with mypy (if installed)"
+	@echo "  make type-check - Run type checking with mypy"
+	@echo "  make pylint     - Run pylint code quality check"
+	@echo "  make bandit     - Run bandit security check"
+	@echo "  make quality    - Run all quality checks (lint + type-check + pylint + bandit)"
 	@echo "  make clean      - Remove __pycache__, .pytest_cache, .egg-info, .coverage, htmlcov"
 	@echo ""
 
@@ -49,9 +52,20 @@ format:
 	black .
 	ruff check --fix .
 
-# Type checking (optional - only runs if mypy is installed)
+# Type checking with mypy
 type-check:
-	@mypy --version >/dev/null 2>&1 && mypy servers/ shared/ tests/ || echo "mypy not installed, skipping type check"
+	mypy servers/ shared/ tests/ --config-file=pyproject.toml
+
+# Pylint code quality check
+pylint:
+	pylint --rcfile=pyproject.toml --disable=import-error servers/ shared/
+
+# Bandit security check
+bandit:
+	bandit -c pyproject.toml -r servers/ shared/
+
+# Run all quality checks
+quality: lint type-check pylint bandit
 
 # Clean cache files
 clean:

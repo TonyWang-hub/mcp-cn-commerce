@@ -39,10 +39,15 @@ from cn_commerce_base import (
     EndpointRateLimit,
     MetricsCollector,
     PlatformRateLimitConfig,
+    PriorityQueue,
+    PriorityScheduler,
+    PrioritizedRequest,
+    PriorityStats,
     RateLimitConfig,
     RateLimiter,
     RateLimitStats,
     RequestCompressor,
+    RequestPriority,
     RetryableError,
     RetryConfig,
     SensitiveDataFilter,
@@ -3059,3 +3064,609 @@ class TestRequestCompressorConcurrency:
         assert errors == []
         stats = compressor.get_stats()
         assert stats["total_requests"] == 200
+
+
+# ── RequestPriority Tests ──────────────────────────────────
+
+
+class TestRequestPriority:
+    """Tests for RequestPriority enum."""
+
+    def test_critical_value(self):
+        assert RequestPriority.CRITICAL == "critical"
+
+    def test_high_value(self):
+        assert RequestPriority.HIGH == "high"
+
+    def test_normal_value(self):
+        assert RequestPriority.NORMAL == "normal"
+
+    def test_low_value(self):
+        assert RequestPriority.LOW == "low"
+
+    def test_is_str_enum(self):
+        assert isinstance(RequestPriority.CRITICAL, str)
+
+
+# ── PrioritizedRequest Tests ───────────────────────────────
+
+
+class TestPrioritizedRequest:
+    """Tests for PrioritizedRequest dataclass."""
+
+    def test_default_values(self):
+        req = PrioritizedRequest()
+        assert req.priority == RequestPriority.NORMAL
+        assert req.method == ""
+        assert req.path == ""
+        assert req.params == {}
+        assert req.data == {}
+        assert req.request_id == ""
+        assert req.platform == ""
+
+    def test_custom_values(self):
+        req = PrioritizedRequest(
+            priority=RequestPriority.HIGH,
+            method="GET",
+            path="/api/orders",
+            params={"page": 1},
+            data={"filter": "active"},
+            request_id="req-1",
+            platform="OCEANENGINE",
+        )
+        assert req.priority == RequestPriority.HIGH
+        assert req.method == "GET"
+        assert req.path == "/api/orders"
+        assert req.params == {"page": 1}
+        assert req.data == {"filter": "active"}
+        assert req.request_id == "req-1"
+        assert req.platform == "OCEANENGINE"
+
+    def test_priority_weight_critical(self):
+        req = PrioritizedRequest(priority=RequestPriority.CRITICAL)
+        assert req.priority_weight == 0
+
+    def test_priority_weight_high(self):
+        req = PrioritizedRequest(priority=RequestPriority.HIGH)
+        assert req.priority_weight == 1
+
+    def test_priority_weight_normal(self):
+        req = PrioritizedRequest(priority=RequestPriority.NORMAL)
+        assert req.priority_weight == 2
+
+    def test_priority_weight_low(self):
+        req = PrioritizedRequest(priority=RequestPriority.LOW)
+        assert req.priority_weight == 3
+
+    def test_created_at_auto_set(self):
+        req = PrioritizedRequest()
+        assert req.created_at > 0
+
+    def test_params_default_factory(self):
+        a = PrioritizedRequest()
+        b = PrioritizedRequest()
+        a.params["key"] = "val"
+        assert "key" not in b.params
+
+
+# ── PriorityQueue Tests ────────────────────────────────────
+
+
+class TestPriorityQueue:
+    """Tests for PriorityQueue."""
+
+    def test_enqueue_dequeue_order(self):
+        pq = PriorityQueue()
+        low = PrioritizedRequest(priority=RequestPriority.LOW, path="/low")
+        high = PrioritizedRequest(priority=RequestPriority.HIGH, path="/high")
+        normal = PrioritizedRequest(priority=RequestPriority.NORMAL, path="/normal")
+        critical = PrioritizedRequest(priority=RequestPriority.CRITICAL, path="/critical")
+
+        pq.enqueue(low)
+        pq.enqueue(high)
+        pq.enqueue(normal)
+        pq.enqueue(critical)
+
+        assert pq.dequeue().path == "/critical"
+        assert pq.dequeue().path == "/high"
+        assert pq.dequeue().path == "/normal"
+        assert pq.dequeue().path == "/low"
+
+    def test_fifo_within_same_priority(self):
+        pq = PriorityQueue()
+        r1 = PrioritizedRequest(priority=RequestPriority.NORMAL, path="/first", created_at=1.0)
+        r2 = PrioritizedRequest(priority=RequestPriority.NORMAL, path="/second", created_at=2.0)
+        r3 = PrioritizedRequest(priority=RequestPriority.NORMAL, path="/third", created_at=3.0)
+
+        pq.enqueue(r1)
+        pq.enqueue(r2)
+        pq.enqueue(r3)
+
+        assert pq.dequeue().path == "/first"
+        assert pq.dequeue().path == "/second"
+        assert pq.dequeue().path == "/third"
+
+    def test_empty_queue_returns_none(self):
+        pq = PriorityQueue()
+        assert pq.dequeue() is None
+
+    def test_peek_does_not_remove(self):
+        pq = PriorityQueue()
+        req = PrioritizedRequest(priority=RequestPriority.HIGH, path="/test")
+        pq.enqueue(req)
+        peeked = pq.peek()
+        assert peeked is not None
+        assert peeked.path == "/test"
+        assert pq.size == 1
+        pq.dequeue()
+
+    def test_peek_empty_returns_none(self):
+        pq = PriorityQueue()
+        assert pq.peek() is None
+
+    def test_size(self):
+        pq = PriorityQueue()
+        assert pq.size == 0
+        pq.enqueue(PrioritizedRequest(path="/a"))
+        assert pq.size == 1
+        pq.enqueue(PrioritizedRequest(path="/b"))
+        assert pq.size == 2
+        pq.dequeue()
+        assert pq.size == 1
+
+    def test_is_empty(self):
+        pq = PriorityQueue()
+        assert pq.is_empty is True
+        pq.enqueue(PrioritizedRequest(path="/a"))
+        assert pq.is_empty is False
+        pq.dequeue()
+        assert pq.is_empty is True
+
+    def test_max_size_enforced(self):
+        pq = PriorityQueue(max_size=2)
+        pq.enqueue(PrioritizedRequest(path="/a"))
+        pq.enqueue(PrioritizedRequest(path="/b"))
+        with pytest.raises(RuntimeError, match="full"):
+            pq.enqueue(PrioritizedRequest(path="/c"))
+
+    def test_clear(self):
+        pq = PriorityQueue()
+        pq.enqueue(PrioritizedRequest(path="/a"))
+        pq.enqueue(PrioritizedRequest(path="/b"))
+        pq.clear()
+        assert pq.size == 0
+        assert pq.is_empty is True
+        assert pq.dequeue() is None
+
+    def test_get_priority_distribution(self):
+        pq = PriorityQueue()
+        pq.enqueue(PrioritizedRequest(priority=RequestPriority.HIGH, path="/h"))
+        pq.enqueue(PrioritizedRequest(priority=RequestPriority.HIGH, path="/h2"))
+        pq.enqueue(PrioritizedRequest(priority=RequestPriority.LOW, path="/l"))
+        pq.enqueue(PrioritizedRequest(priority=RequestPriority.NORMAL, path="/n"))
+        dist = pq.get_priority_distribution()
+        assert dist["high"] == 2
+        assert dist["low"] == 1
+        assert dist["normal"] == 1
+        assert "critical" not in dist
+
+
+class TestPriorityQueueConcurrency:
+    """Thread-safety tests for PriorityQueue."""
+
+    def test_concurrent_enqueue_dequeue(self):
+        import threading
+        pq = PriorityQueue()
+        dequeued = []
+        errors = []
+
+        def producer():
+            try:
+                for i in range(100):
+                    pq.enqueue(PrioritizedRequest(priority=RequestPriority.NORMAL, path=f"/{i}"))
+            except Exception as e:
+                errors.append(e)
+
+        def consumer():
+            try:
+                for _ in range(100):
+                    req = pq.dequeue()
+                    if req is not None:
+                        dequeued.append(req)
+            except Exception as e:
+                errors.append(e)
+
+        t1 = threading.Thread(target=producer)
+        t2 = threading.Thread(target=consumer)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        assert errors == []
+
+    def test_concurrent_multiple_priorities(self):
+        import threading
+        pq = PriorityQueue()
+
+        def enqueue_batch(priority, count):
+            for i in range(count):
+                pq.enqueue(PrioritizedRequest(priority=priority, path=f"/{priority.value}_{i}"))
+
+        threads = [
+            threading.Thread(target=enqueue_batch, args=(RequestPriority.CRITICAL, 50)),
+            threading.Thread(target=enqueue_batch, args=(RequestPriority.HIGH, 50)),
+            threading.Thread(target=enqueue_batch, args=(RequestPriority.NORMAL, 50)),
+            threading.Thread(target=enqueue_batch, args=(RequestPriority.LOW, 50)),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert pq.size == 200
+        results = []
+        while not pq.is_empty:
+            results.append(pq.dequeue())
+
+        critical = [r for r in results if r.priority == RequestPriority.CRITICAL]
+        high = [r for r in results if r.priority == RequestPriority.HIGH]
+        normal = [r for r in results if r.priority == RequestPriority.NORMAL]
+        low = [r for r in results if r.priority == RequestPriority.LOW]
+        assert len(critical) == 50
+        assert len(high) == 50
+        assert len(normal) == 50
+        assert len(low) == 50
+
+
+# ── PriorityStats Tests ────────────────────────────────────
+
+
+class TestPriorityStats:
+    """Tests for PriorityStats dataclass."""
+
+    def test_default_values(self):
+        stats = PriorityStats()
+        assert stats.total_dispatched == 0
+        assert stats.by_priority == {}
+        assert stats.total_delayed == 0
+        assert stats.total_reordered == 0
+
+    def test_record_dispatch(self):
+        stats = PriorityStats()
+        stats.record_dispatch("high", queue_time_ms=50.0)
+        assert stats.total_dispatched == 1
+        assert stats.by_priority["high"] == 1
+        assert stats.total_delayed == 1
+        assert stats.max_queue_time_ms == 50.0
+
+    def test_record_dispatch_zero_queue_time(self):
+        stats = PriorityStats()
+        stats.record_dispatch("normal", queue_time_ms=0.0)
+        assert stats.total_dispatched == 1
+        assert stats.total_delayed == 0
+
+    def test_record_dispatch_reordered(self):
+        stats = PriorityStats()
+        stats.record_dispatch("critical", queue_time_ms=10.0, reordered=True)
+        assert stats.total_reordered == 1
+
+    def test_avg_queue_time_ms(self):
+        stats = PriorityStats()
+        assert stats.avg_queue_time_ms == 0.0
+        stats.record_dispatch("high", queue_time_ms=100.0)
+        stats.record_dispatch("high", queue_time_ms=200.0)
+        assert stats.avg_queue_time_ms == pytest.approx(150.0)
+
+    def test_max_queue_time_ms(self):
+        stats = PriorityStats()
+        stats.record_dispatch("high", queue_time_ms=50.0)
+        stats.record_dispatch("high", queue_time_ms=200.0)
+        stats.record_dispatch("high", queue_time_ms=100.0)
+        assert stats.max_queue_time_ms == 200.0
+
+    def test_get_summary(self):
+        stats = PriorityStats()
+        stats.record_dispatch("high", queue_time_ms=50.0)
+        stats.record_dispatch("low", queue_time_ms=100.0, reordered=True)
+        summary = stats.get_summary()
+        assert summary["total_dispatched"] == 2
+        assert summary["by_priority"]["high"] == 1
+        assert summary["by_priority"]["low"] == 1
+        assert summary["total_delayed"] == 2
+        assert summary["total_reordered"] == 1
+
+    def test_reset(self):
+        stats = PriorityStats()
+        stats.record_dispatch("high", queue_time_ms=50.0, reordered=True)
+        stats.reset()
+        assert stats.total_dispatched == 0
+        assert stats.by_priority == {}
+        assert stats.total_delayed == 0
+        assert stats.total_reordered == 0
+
+    def test_multiple_priorities_tracked(self):
+        stats = PriorityStats()
+        stats.record_dispatch("critical", 10.0)
+        stats.record_dispatch("high", 20.0)
+        stats.record_dispatch("normal", 30.0)
+        stats.record_dispatch("low", 40.0)
+        assert stats.by_priority["critical"] == 1
+        assert stats.by_priority["high"] == 1
+        assert stats.by_priority["normal"] == 1
+        assert stats.by_priority["low"] == 1
+
+
+# ── PriorityScheduler Tests ────────────────────────────────
+
+
+class TestPriorityScheduler:
+    """Tests for PriorityScheduler."""
+
+    def test_init(self):
+        scheduler = PriorityScheduler()
+        assert scheduler.queue_size == 0
+        assert scheduler.queue_empty is True
+
+    def test_init_with_rate_limiter(self):
+        limiter = ConfigurableRateLimiter()
+        scheduler = PriorityScheduler(rate_limiter=limiter)
+        assert scheduler._rate_limiter is limiter
+
+    def test_enqueue_dequeue(self):
+        scheduler = PriorityScheduler()
+        req = PrioritizedRequest(priority=RequestPriority.HIGH, path="/test")
+        scheduler.enqueue(req)
+        assert scheduler.queue_size == 1
+        dequeued = scheduler.dequeue()
+        assert dequeued is not None
+        assert dequeued.path == "/test"
+
+    @pytest.mark.asyncio
+    async def test_schedule_and_execute(self):
+        scheduler = PriorityScheduler()
+        req = PrioritizedRequest(
+            priority=RequestPriority.HIGH, method="GET", path="/api/orders", params={"page": 1},
+        )
+
+        async def mock_execute(r):
+            return {"result": "ok", "path": r.path}
+
+        result = await scheduler.schedule_and_execute(req, mock_execute)
+        assert result["result"] == "ok"
+        assert result["path"] == "/api/orders"
+        assert scheduler.stats.total_dispatched == 1
+
+    @pytest.mark.asyncio
+    async def test_schedule_with_rate_limiter(self):
+        limiter = ConfigurableRateLimiter(RateLimitConfig(enabled=False))
+        scheduler = PriorityScheduler(rate_limiter=limiter)
+        req = PrioritizedRequest(
+            priority=RequestPriority.NORMAL, method="GET", path="/api/test", platform="TEST",
+        )
+
+        async def mock_execute(r):
+            return {"ok": True}
+
+        result = await scheduler.schedule_and_execute(req, mock_execute)
+        assert result["ok"] is True
+
+    def test_get_queue_distribution(self):
+        scheduler = PriorityScheduler()
+        scheduler.enqueue(PrioritizedRequest(priority=RequestPriority.HIGH, path="/h"))
+        scheduler.enqueue(PrioritizedRequest(priority=RequestPriority.LOW, path="/l"))
+        scheduler.enqueue(PrioritizedRequest(priority=RequestPriority.HIGH, path="/h2"))
+        dist = scheduler.get_queue_distribution()
+        assert dist["high"] == 2
+        assert dist["low"] == 1
+
+    def test_get_stats_summary(self):
+        scheduler = PriorityScheduler()
+        summary = scheduler.get_stats_summary()
+        assert "queue_size" in summary
+        assert "queue_distribution" in summary
+        assert "stats" in summary
+
+    def test_reset_stats(self):
+        scheduler = PriorityScheduler()
+        scheduler.stats.record_dispatch("high", 100.0)
+        scheduler.reset_stats()
+        assert scheduler.stats.total_dispatched == 0
+
+    def test_clear_queue(self):
+        scheduler = PriorityScheduler()
+        scheduler.enqueue(PrioritizedRequest(path="/a"))
+        scheduler.enqueue(PrioritizedRequest(path="/b"))
+        scheduler.clear_queue()
+        assert scheduler.queue_size == 0
+
+
+# ── Dynamic Rate Limiting Tests ────────────────────────────
+
+
+class TestDynamicRateLimiting:
+    """Tests for ConfigurableRateLimiter dynamic adjustment methods."""
+
+    def test_set_platform_rps_existing(self):
+        config = RateLimitConfig(
+            platforms={"TEST": PlatformRateLimitConfig(platform="TEST", default_requests_per_second=10.0)},
+        )
+        limiter = ConfigurableRateLimiter(config)
+        limiter.set_platform_rps("TEST", 25.0)
+        assert limiter.config.platforms["TEST"].default_requests_per_second == 25.0
+
+    def test_set_platform_rps_creates_platform(self):
+        limiter = ConfigurableRateLimiter()
+        limiter.set_platform_rps("NEW", 5.0)
+        assert "NEW" in limiter.config.platforms
+        assert limiter.config.platforms["NEW"].default_requests_per_second == 5.0
+
+    def test_set_endpoint_rps(self):
+        config = RateLimitConfig(
+            platforms={"TEST": PlatformRateLimitConfig(platform="TEST", default_requests_per_second=10.0)},
+        )
+        limiter = ConfigurableRateLimiter(config)
+        limiter.set_endpoint_rps("TEST", "/api/slow", 1.0)
+        assert limiter.config.platforms["TEST"].endpoints["/api/slow"].requests_per_second == 1.0
+
+    def test_enable_platform(self):
+        config = RateLimitConfig(
+            platforms={"TEST": PlatformRateLimitConfig(platform="TEST", enabled=False)},
+        )
+        limiter = ConfigurableRateLimiter(config)
+        limiter.enable_platform("TEST")
+        assert limiter.config.platforms["TEST"].enabled is True
+
+    def test_disable_platform(self):
+        config = RateLimitConfig(
+            platforms={"TEST": PlatformRateLimitConfig(platform="TEST", enabled=True)},
+        )
+        limiter = ConfigurableRateLimiter(config)
+        limiter.disable_platform("TEST")
+        assert limiter.config.platforms["TEST"].enabled is False
+
+    def test_enable_disable_nonexistent_platform(self):
+        limiter = ConfigurableRateLimiter()
+        limiter.enable_platform("UNKNOWN")
+        limiter.disable_platform("UNKNOWN")
+
+    def test_auto_adjust_scale_down(self):
+        config = RateLimitConfig(
+            platforms={
+                "TEST": PlatformRateLimitConfig(
+                    platform="TEST",
+                    default_requests_per_second=10.0,
+                    endpoints={"/api/slow": EndpointRateLimit(endpoint="/api/slow", requests_per_second=10.0)},
+                ),
+            },
+        )
+        limiter = ConfigurableRateLimiter(config)
+        for _ in range(8):
+            limiter.stats.record_request("TEST", "/api/slow")
+        for _ in range(5):
+            limiter.stats.record_throttle("TEST", "/api/slow", 100.0)
+
+        adjustments = limiter.auto_adjust_from_stats(throttle_threshold=0.3)
+        assert "TEST:/api/slow" in adjustments["endpoints"]
+        adj = adjustments["endpoints"]["TEST:/api/slow"]
+        assert adj["action"] == "scale_down"
+        assert adj["new_rps"] < 10.0
+
+    def test_auto_adjust_scale_up(self):
+        config = RateLimitConfig(
+            platforms={
+                "TEST": PlatformRateLimitConfig(
+                    platform="TEST",
+                    default_requests_per_second=10.0,
+                    endpoints={"/api/fast": EndpointRateLimit(endpoint="/api/fast", requests_per_second=10.0)},
+                ),
+            },
+        )
+        limiter = ConfigurableRateLimiter(config)
+        for _ in range(30):
+            limiter.stats.record_request("TEST", "/api/fast")
+
+        adjustments = limiter.auto_adjust_from_stats(throttle_threshold=0.3)
+        if "TEST:/api/fast" in adjustments["endpoints"]:
+            adj = adjustments["endpoints"]["TEST:/api/fast"]
+            assert adj["action"] == "scale_up"
+            assert adj["new_rps"] > 10.0
+
+    def test_auto_adjust_insufficient_data(self):
+        limiter = ConfigurableRateLimiter()
+        for _ in range(3):
+            limiter.stats.record_request("TEST", "/api/test")
+        adjustments = limiter.auto_adjust_from_stats()
+        assert adjustments["endpoints"] == {}
+
+
+# ── CommerceMCPBase Priority Integration Tests ─────────────
+
+
+class TestCommerceMCPBasePriority:
+    """Tests for CommerceMCPBase priority and rate limit integration."""
+
+    def test_has_priority_scheduler(self):
+        client = CommerceMCPBase()
+        assert isinstance(client._priority_scheduler, PriorityScheduler)
+
+    def test_has_configurable_limiter(self):
+        client = CommerceMCPBase()
+        assert isinstance(client._configurable_limiter, ConfigurableRateLimiter)
+
+    def test_priority_scheduler_property(self):
+        client = CommerceMCPBase()
+        assert client.priority_scheduler is client._priority_scheduler
+
+    def test_configurable_limiter_property(self):
+        client = CommerceMCPBase()
+        assert client.configurable_limiter is client._configurable_limiter
+
+    def test_custom_rate_limit_config(self):
+        config = RateLimitConfig(default_requests_per_second=5.0)
+        client = CommerceMCPBase(rate_limit_config=config)
+        assert client._configurable_limiter.config.default_requests_per_second == 5.0
+
+    def test_get_priority_stats(self):
+        client = CommerceMCPBase()
+        stats = client.get_priority_stats()
+        assert "queue_size" in stats
+        assert "queue_distribution" in stats
+        assert "stats" in stats
+
+    def test_get_rate_limit_stats(self):
+        client = CommerceMCPBase()
+        stats = client.get_rate_limit_stats()
+        assert "config" in stats
+        assert "stats" in stats
+
+    def test_auto_adjust_rate_limits(self):
+        client = CommerceMCPBase()
+        result = client.auto_adjust_rate_limits()
+        assert "platforms" in result
+        assert "endpoints" in result
+
+    @pytest.mark.asyncio
+    async def test_prioritized_request_basic(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": {"id": 1}}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client.prioritized_request("GET", "/api/test", priority=RequestPriority.HIGH)
+        assert result == {"result": {"id": 1}}
+
+    @pytest.mark.asyncio
+    async def test_prioritized_request_with_params(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": "ok"}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client.prioritized_request(
+                "GET", "/api/orders", priority=RequestPriority.CRITICAL, params={"order_id": "12345"},
+            )
+        assert result == {"result": "ok"}
+
+    @pytest.mark.asyncio
+    async def test_prioritized_request_tracks_stats(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": "ok"}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            await client.prioritized_request("GET", "/api/test", priority=RequestPriority.HIGH)
+        stats = client.get_priority_stats()
+        assert stats["stats"]["total_dispatched"] == 1
+        assert stats["stats"]["by_priority"]["high"] == 1

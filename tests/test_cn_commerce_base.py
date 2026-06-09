@@ -4237,7 +4237,8 @@ class TestAlertNotifier:
 
     def test_remove_callback(self):
         notifier = AlertNotifier()
-        cb = lambda alert: None
+        def cb(alert):
+            return None
         notifier.add_callback(cb)
         assert notifier.remove_callback(cb) is True
         assert len(notifier._callbacks) == 0
@@ -4389,12 +4390,14 @@ class TestAlertManager:
 
     def test_evaluate_metrics_triggers_alert(self):
         manager = AlertManager(include_default_rules=False)
-        manager.add_rule(AlertRule(
-            name="high_error_rate",
-            metric_path="global.error_rate",
-            threshold=0.1,
-            comparison="gt",
-        ))
+        manager.add_rule(
+            AlertRule(
+                name="high_error_rate",
+                metric_path="global.error_rate",
+                threshold=0.1,
+                comparison="gt",
+            )
+        )
         metrics_summary = {
             "global": {
                 "error_rate": 0.25,
@@ -4408,12 +4411,14 @@ class TestAlertManager:
 
     def test_evaluate_metrics_no_trigger(self):
         manager = AlertManager(include_default_rules=False)
-        manager.add_rule(AlertRule(
-            name="high_error_rate",
-            metric_path="global.error_rate",
-            threshold=0.1,
-            comparison="gt",
-        ))
+        manager.add_rule(
+            AlertRule(
+                name="high_error_rate",
+                metric_path="global.error_rate",
+                threshold=0.1,
+                comparison="gt",
+            )
+        )
         metrics_summary = {
             "global": {
                 "error_rate": 0.05,
@@ -4424,13 +4429,15 @@ class TestAlertManager:
 
     def test_evaluate_metrics_cooldown(self):
         manager = AlertManager(include_default_rules=False)
-        manager.add_rule(AlertRule(
-            name="test",
-            metric_path="global.error_rate",
-            threshold=0.1,
-            comparison="gt",
-            cooldown_seconds=999999.0,  # Very long cooldown
-        ))
+        manager.add_rule(
+            AlertRule(
+                name="test",
+                metric_path="global.error_rate",
+                threshold=0.1,
+                comparison="gt",
+                cooldown_seconds=999999.0,  # Very long cooldown
+            )
+        )
         metrics_summary = {"global": {"error_rate": 0.5}}
 
         # First evaluation fires
@@ -4443,26 +4450,30 @@ class TestAlertManager:
 
     def test_evaluate_metrics_disabled_rule_skipped(self):
         manager = AlertManager(include_default_rules=False)
-        manager.add_rule(AlertRule(
-            name="disabled",
-            metric_path="global.error_rate",
-            threshold=0.1,
-            comparison="gt",
-            enabled=False,
-        ))
+        manager.add_rule(
+            AlertRule(
+                name="disabled",
+                metric_path="global.error_rate",
+                threshold=0.1,
+                comparison="gt",
+                enabled=False,
+            )
+        )
         metrics_summary = {"global": {"error_rate": 0.5}}
         alerts = manager.evaluate_metrics(metrics_summary)
         assert len(alerts) == 0
 
     def test_evaluate_metrics_platform_filter(self):
         manager = AlertManager(include_default_rules=False)
-        manager.add_rule(AlertRule(
-            name="platform_specific",
-            metric_path="global.error_rate",
-            threshold=0.1,
-            comparison="gt",
-            platform="OCEANENGINE",
-        ))
+        manager.add_rule(
+            AlertRule(
+                name="platform_specific",
+                metric_path="global.error_rate",
+                threshold=0.1,
+                comparison="gt",
+                platform="OCEANENGINE",
+            )
+        )
         metrics_summary = {"global": {"error_rate": 0.5}}
 
         # Wrong platform
@@ -4475,11 +4486,13 @@ class TestAlertManager:
 
     def test_evaluate_metrics_invalid_metric_path(self):
         manager = AlertManager(include_default_rules=False)
-        manager.add_rule(AlertRule(
-            name="bad_path",
-            metric_path="nonexistent.path.here",
-            threshold=0.1,
-        ))
+        manager.add_rule(
+            AlertRule(
+                name="bad_path",
+                metric_path="nonexistent.path.here",
+                threshold=0.1,
+            )
+        )
         metrics_summary = {"global": {"error_rate": 0.5}}
         alerts = manager.evaluate_metrics(metrics_summary)
         assert len(alerts) == 0
@@ -4494,7 +4507,7 @@ class TestAlertManager:
 
         manager.notifier.add_callback(on_alert)
         alert = Alert(rule_name="test", message="test alert")
-        result = await manager.fire_alert(alert)
+        await manager.fire_alert(alert)
 
         assert len(received) == 1
         assert len(manager.get_firing_alerts()) == 1
@@ -4581,10 +4594,12 @@ class TestDefaultAlertRules:
 
     def test_default_rules_count(self):
         from cn_commerce_base import DEFAULT_ALERT_RULES
+
         assert len(DEFAULT_ALERT_RULES) == 4
 
     def test_default_high_error_rate(self):
         from cn_commerce_base import DEFAULT_ALERT_RULES
+
         rule = next(r for r in DEFAULT_ALERT_RULES if r.name == "high_error_rate")
         assert rule.threshold == 0.1
         assert rule.severity == AlertSeverity.HIGH
@@ -4592,18 +4607,21 @@ class TestDefaultAlertRules:
 
     def test_default_critical_error_rate(self):
         from cn_commerce_base import DEFAULT_ALERT_RULES
+
         rule = next(r for r in DEFAULT_ALERT_RULES if r.name == "critical_error_rate")
         assert rule.threshold == 0.5
         assert rule.severity == AlertSeverity.CRITICAL
 
     def test_default_high_latency(self):
         from cn_commerce_base import DEFAULT_ALERT_RULES
+
         rule = next(r for r in DEFAULT_ALERT_RULES if r.name == "high_latency")
         assert rule.threshold == 5000.0
         assert rule.severity == AlertSeverity.MEDIUM
 
     def test_default_critical_latency(self):
         from cn_commerce_base import DEFAULT_ALERT_RULES
+
         rule = next(r for r in DEFAULT_ALERT_RULES if r.name == "critical_latency")
         assert rule.threshold == 30000.0
         assert rule.severity == AlertSeverity.HIGH
@@ -4622,13 +4640,15 @@ class TestCommerceMCPBaseAlerting:
     def test_evaluate_alerts(self):
         client = CommerceMCPBase()
         # Add a rule that will trigger
-        client.alert_manager.add_rule(AlertRule(
-            name="test",
-            metric_path="global.total_requests",
-            threshold=0,
-            comparison="gt",
-            cooldown_seconds=0,
-        ))
+        client.alert_manager.add_rule(
+            AlertRule(
+                name="test",
+                metric_path="global.total_requests",
+                threshold=0,
+                comparison="gt",
+                cooldown_seconds=0,
+            )
+        )
         # Record a request so there's a metric
         client.metrics.record_request("/api/test", latency_ms=100.0, success=True)
         alerts = client.evaluate_alerts()
@@ -4652,13 +4672,15 @@ class TestCommerceMCPBaseAlerting:
             received.append(alert)
 
         client.alert_manager.notifier.add_callback(on_alert)
-        client.alert_manager.add_rule(AlertRule(
-            name="always_fire",
-            metric_path="global.total_requests",
-            threshold=-1,
-            comparison="gt",
-            cooldown_seconds=0,
-        ))
+        client.alert_manager.add_rule(
+            AlertRule(
+                name="always_fire",
+                metric_path="global.total_requests",
+                threshold=-1,
+                comparison="gt",
+                cooldown_seconds=0,
+            )
+        )
         client.metrics.record_request("/api/test", latency_ms=10.0, success=True)
         results = await client.check_and_fire_alerts()
         assert len(results) >= 1

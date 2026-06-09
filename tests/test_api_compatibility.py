@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -60,7 +59,6 @@ from cn_commerce_base import (  # noqa: E402
     CommerceMCPBase,
     ConfigValidationError,
     MetricsCollector,
-    RateLimiter,
     RetryConfig,
     SignMethod,
     format_error_response,
@@ -68,7 +66,6 @@ from cn_commerce_base import (  # noqa: E402
     handle_tool_errors,
     with_retry,
 )
-
 
 # ── Compatibility Test Results Collector ─────────────────────────
 
@@ -141,7 +138,7 @@ class TestBackwardCompatibilityOldResponseFormats:
         """OceanEngine: old API responses without page_info field should parse."""
         from mcp_oceanengine.server import OceanEngine
 
-        client = OceanEngine(app_key="k", app_secret="s", access_token="t")
+        OceanEngine(app_key="k", app_secret="s", access_token="t")
 
         # V1 format: no page_info, flat data list
         old_response = {
@@ -153,9 +150,7 @@ class TestBackwardCompatibilityOldResponseFormats:
         }
         assert old_response["code"] == 0
         assert len(old_response["data"]["list"]) == 1
-        _compat_results.add(
-            "backward_compat", "oceanengine_v1_no_page_info", "oceanengine", True
-        )
+        _compat_results.add("backward_compat", "oceanengine_v1_no_page_info", "oceanengine", True)
 
     def test_oceanengine_error_response_legacy_format(self):
         """OceanEngine: legacy error_response format (code + msg) still works."""
@@ -185,13 +180,9 @@ class TestBackwardCompatibilityOldResponseFormats:
             }
         }
         assert "jd_pop_order_search_response" in legacy_response
-        orders = legacy_response["jd_pop_order_search_response"][
-            "searchorderinfo_result"
-        ]["orderInfoList"]
+        orders = legacy_response["jd_pop_order_search_response"]["searchorderinfo_result"]["orderInfoList"]
         assert len(orders) == 1
-        _compat_results.add(
-            "backward_compat", "jd_legacy_flat_structure", "jd", True
-        )
+        _compat_results.add("backward_compat", "jd_legacy_flat_structure", "jd", True)
 
     def test_taobao_error_response_legacy_format(self):
         """Taobao: legacy error_response with code + msg + sub_code."""
@@ -229,9 +220,7 @@ class TestBackwardCompatibilityOldResponseFormats:
         # Older PDD APIs used snake_case differently
         legacy_response = {
             "order_list_get_response": {
-                "order_list": [
-                    {"order_sn": "PDD001", "status": 1, "goods_amount": 9900}
-                ],
+                "order_list": [{"order_sn": "PDD001", "status": 1, "goods_amount": 9900}],
                 "total_count": 1,
             }
         }
@@ -327,9 +316,7 @@ class TestForwardCompatibilityUnknownFields:
             "request_id": "abc-123",
         }
         mock_http = AsyncMock()
-        mock_http.get.return_value = MagicMock(
-            json=lambda: future_response, status_code=200
-        )
+        mock_http.get.return_value = MagicMock(json=lambda: future_response, status_code=200)
         mock_http.is_closed = False
 
         with patch.object(client, "_ensure_client", return_value=mock_http):
@@ -366,21 +353,15 @@ class TestForwardCompatibilityUnknownFields:
             }
         }
         mock_http = AsyncMock()
-        mock_http.post.return_value = MagicMock(
-            json=lambda: future_order, status_code=200
-        )
+        mock_http.post.return_value = MagicMock(json=lambda: future_order, status_code=200)
         mock_http.is_closed = False
 
         with patch.object(client, "_ensure_client", return_value=mock_http):
             result = await client._request("POST", "", data={})
 
-        orders = result["jd_pop_order_search_response"]["searchorderinfo_result"][
-            "orderInfoList"
-        ]
+        orders = result["jd_pop_order_search_response"]["searchorderinfo_result"]["orderInfoList"]
         assert orders[0]["new_ai_field"] == "value"
-        assert "pagination_cursor" in result["jd_pop_order_search_response"][
-            "searchorderinfo_result"
-        ]
+        assert "pagination_cursor" in result["jd_pop_order_search_response"]["searchorderinfo_result"]
         _compat_results.add(
             "forward_compat",
             "jd_new_order_fields",
@@ -409,9 +390,7 @@ class TestForwardCompatibilityUnknownFields:
             }
         }
         mock_http = AsyncMock()
-        mock_http.post.return_value = MagicMock(
-            json=lambda: future_product, status_code=200
-        )
+        mock_http.post.return_value = MagicMock(json=lambda: future_product, status_code=200)
         mock_http.is_closed = False
 
         with patch.object(client, "_ensure_client", return_value=mock_http):
@@ -438,9 +417,7 @@ class TestForwardCompatibilityUnknownFields:
             "another_new": None,
         }
         mock_http = AsyncMock()
-        mock_http.get.return_value = MagicMock(
-            json=lambda: response_with_nulls, status_code=200
-        )
+        mock_http.get.return_value = MagicMock(json=lambda: response_with_nulls, status_code=200)
         mock_http.is_closed = False
 
         with patch.object(client, "_ensure_client", return_value=mock_http):
@@ -479,9 +456,7 @@ class TestForwardCompatibilityUnknownFields:
             },
         }
         mock_http = AsyncMock()
-        mock_http.get.return_value = MagicMock(
-            json=lambda: deeply_nested, status_code=200
-        )
+        mock_http.get.return_value = MagicMock(json=lambda: deeply_nested, status_code=200)
         mock_http.is_closed = False
 
         with patch.object(client, "_ensure_client", return_value=mock_http):
@@ -550,7 +525,7 @@ class TestVersionNegotiationCompatibility:
         """Doudian uses a specific API gateway URL."""
         from mcp_doudian.server import DouDianClient
 
-        client = DouDianClient(app_key="k", app_secret="s", access_token="t")
+        DouDianClient(app_key="k", app_secret="s", access_token="t")
         assert "jinritemai.com" in "https://openapi-fxg.jinritemai.com/"
         _compat_results.add(
             "version_negotiation",
@@ -693,9 +668,7 @@ class TestSigningMethodCompatibility:
         assert len(sig) == 32
         assert sig == sig.upper()
         assert all(c in "0123456789ABCDEF" for c in sig)
-        _compat_results.add(
-            "signing_compat", "jd_hmac_md5_format", "jd", True
-        )
+        _compat_results.add("signing_compat", "jd_hmac_md5_format", "jd", True)
 
     def test_doudian_md5_sign_format(self):
         """Doudian MD5 produces 32-char hex (lowercase)."""
@@ -705,17 +678,13 @@ class TestSigningMethodCompatibility:
         sig = client._sign({"order_id": "123"})
         assert len(sig) == 32
         assert all(c in "0123456789abcdef" for c in sig)
-        _compat_results.add(
-            "signing_compat", "doudian_md5_format", "doudian", True
-        )
+        _compat_results.add("signing_compat", "doudian_md5_format", "doudian", True)
 
     def test_kuaishou_sign_uses_sign_secret(self):
         """Kuaishou signing uses sign_secret, not app_secret."""
         from mcp_kuaishou.server import KuaishouMCP
 
-        client = KuaishouMCP(
-            app_key="k", app_secret="s", sign_secret="ss", access_token="t"
-        )
+        client = KuaishouMCP(app_key="k", app_secret="s", sign_secret="ss", access_token="t")
         sig = client._sign({"app_key": "k", "timestamp": "123"})
         assert len(sig) == 32
         assert sig == sig.upper()
@@ -900,22 +869,21 @@ class TestCrossPlatformInterfaceConsistency:
 
     def test_all_platforms_extend_commerce_mcp_base(self):
         """All platform clients extend CommerceMCPBase (checked via MRO names)."""
-        from mcp_oceanengine.server import OceanEngine
         from mcp_jd.server import JDMCP
-        from mcp_taobao.server import TaobaoMCP
         from mcp_kuaishou.server import KuaishouMCP
+        from mcp_oceanengine.server import OceanEngine
+        from mcp_taobao.server import TaobaoMCP
 
         # Use MRO class names to avoid cross-module import path issues
         for cls in [OceanEngine, JDMCP, TaobaoMCP, KuaishouMCP]:
             base_names = [c.__name__ for c in cls.__mro__]
-            assert "CommerceMCPBase" in base_names, (
-                f"{cls.__name__} should extend CommerceMCPBase, MRO: {base_names}"
-            )
+            assert "CommerceMCPBase" in base_names, f"{cls.__name__} should extend CommerceMCPBase, MRO: {base_names}"
 
         # WeixinStore needs env vars to import
         env = {"WX_APP_ID": "wx_id", "WX_APP_SECRET": "wx_secret"}
         with patch.dict(os.environ, env, clear=False):
             import importlib
+
             if "mcp_weixin_store.server" in sys.modules:
                 importlib.reload(sys.modules["mcp_weixin_store.server"])
             else:
@@ -933,10 +901,10 @@ class TestCrossPlatformInterfaceConsistency:
 
     def test_all_platform_clients_have_base_url(self):
         """All platform clients define a BASE_URL."""
-        from mcp_oceanengine.server import OceanEngine
         from mcp_jd.server import JDMCP
-        from mcp_taobao.server import TaobaoMCP
         from mcp_kuaishou.server import KuaishouMCP
+        from mcp_oceanengine.server import OceanEngine
+        from mcp_taobao.server import TaobaoMCP
 
         clients = [
             OceanEngine(app_key="k", app_secret="s"),
@@ -946,9 +914,7 @@ class TestCrossPlatformInterfaceConsistency:
         ]
         for client in clients:
             assert client.BASE_URL, f"{type(client).__name__} missing BASE_URL"
-            assert client.BASE_URL.startswith("http"), (
-                f"{type(client).__name__} BASE_URL should be a URL"
-            )
+            assert client.BASE_URL.startswith("http"), f"{type(client).__name__} BASE_URL should be a URL"
 
         _compat_results.add(
             "interface_consistency",
@@ -959,10 +925,10 @@ class TestCrossPlatformInterfaceConsistency:
 
     def test_all_base_clients_have_request_method(self):
         """All platform clients have _request method from base class."""
-        from mcp_oceanengine.server import OceanEngine
         from mcp_jd.server import JDMCP
-        from mcp_taobao.server import TaobaoMCP
         from mcp_kuaishou.server import KuaishouMCP
+        from mcp_oceanengine.server import OceanEngine
+        from mcp_taobao.server import TaobaoMCP
 
         for cls in [OceanEngine, JDMCP, TaobaoMCP, KuaishouMCP]:
             assert hasattr(cls, "_request"), f"{cls.__name__} missing _request"
@@ -978,8 +944,8 @@ class TestCrossPlatformInterfaceConsistency:
 
     def test_all_platforms_have_health_check(self):
         """All CommerceMCPBase subclasses have health_check."""
-        from mcp_oceanengine.server import OceanEngine
         from mcp_jd.server import JDMCP
+        from mcp_oceanengine.server import OceanEngine
         from mcp_taobao.server import TaobaoMCP
 
         for cls in [OceanEngine, JDMCP, TaobaoMCP]:
@@ -994,8 +960,8 @@ class TestCrossPlatformInterfaceConsistency:
 
     def test_all_platforms_have_metrics(self):
         """All CommerceMCPBase subclasses have metrics collector."""
-        from mcp_oceanengine.server import OceanEngine
         from mcp_jd.server import JDMCP
+        from mcp_oceanengine.server import OceanEngine
         from mcp_taobao.server import TaobaoMCP
 
         for cls in [OceanEngine, JDMCP, TaobaoMCP]:
@@ -1013,8 +979,8 @@ class TestCrossPlatformInterfaceConsistency:
 
     def test_all_platforms_have_rate_limiter(self):
         """All CommerceMCPBase subclasses have rate_limiter."""
-        from mcp_oceanengine.server import OceanEngine
         from mcp_jd.server import JDMCP
+        from mcp_oceanengine.server import OceanEngine
         from mcp_taobao.server import TaobaoMCP
 
         for cls in [OceanEngine, JDMCP, TaobaoMCP]:
@@ -1032,8 +998,8 @@ class TestCrossPlatformInterfaceConsistency:
 
     def test_all_platforms_support_close(self):
         """All CommerceMCPBase subclasses support close()."""
-        from mcp_oceanengine.server import OceanEngine
         from mcp_jd.server import JDMCP
+        from mcp_oceanengine.server import OceanEngine
         from mcp_taobao.server import TaobaoMCP
 
         for cls in [OceanEngine, JDMCP, TaobaoMCP]:
@@ -1074,9 +1040,7 @@ class TestResponseFormatNormalization:
         result = format_response([1, 2, 3])
         parsed = json.loads(result)
         assert parsed == [1, 2, 3]
-        _compat_results.add(
-            "response_format", "format_response_list", "shared", True
-        )
+        _compat_results.add("response_format", "format_response_list", "shared", True)
 
     def test_format_response_string_passthrough(self):
         """format_response returns strings unchanged."""
@@ -1092,9 +1056,7 @@ class TestResponseFormatNormalization:
         """format_response handles None."""
         result = format_response(None)
         assert result == "null"
-        _compat_results.add(
-            "response_format", "format_response_none", "shared", True
-        )
+        _compat_results.add("response_format", "format_response_none", "shared", True)
 
     def test_format_response_nested_structure(self):
         """format_response handles deeply nested structures."""
@@ -1337,9 +1299,7 @@ class TestMetricsCompatibility:
         collector.reset()
         assert collector.get_global_metrics().request_count == 0
         assert collector.get_all_metrics() == {}
-        _compat_results.add(
-            "metrics_compat", "metrics_reset", "shared", True
-        )
+        _compat_results.add("metrics_compat", "metrics_reset", "shared", True)
 
     def test_metrics_concurrent_access(self):
         """MetricsCollector handles concurrent access safely."""
@@ -1396,8 +1356,7 @@ class TestCompatibilityResultsOutput:
 
         # All tests in this file should have passed
         assert summary["failed"] == 0, (
-            f"Compatibility test failures: "
-            f"{[r for r in summary['details'] if not r['passed']]}"
+            f"Compatibility test failures: " f"{[r for r in summary['details'] if not r['passed']]}"
         )
 
         # Print summary for CI output

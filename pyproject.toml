@@ -79,7 +79,7 @@ include = ["shared*"]
 
 [tool.black]
 line-length = 120
-target-version = ["py311", "py312", "py313"]
+target-version = ["py311", "py312"]
 
 [tool.ruff]
 line-length = 120

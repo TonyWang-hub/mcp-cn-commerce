@@ -2,6 +2,14 @@
 
 Real-time event notifications for e-commerce platform updates.
 
+## Status: opt-in
+
+Webhooks are an **opt-in** capability. Unlike metrics and tracing (which run on
+every request automatically), `WebhookManager` is *not* wired into the platform
+servers and is *not* exposed as an MCP tool. To use it you construct a
+`WebhookManager` yourself, as shown below. The class lives in
+`shared.cn_commerce_base` and has no dependency on the MCP server layer.
+
 ## Overview
 
 Webhooks allow your application to receive real-time notifications when events occur on connected e-commerce platforms. Instead of polling for changes, webhooks push data to your endpoint as events happen.

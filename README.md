@@ -96,7 +96,22 @@ See [Docker documentation](docs/docker.md) for full usage, MCP client configurat
 
 ### Installation
 
-#### From GitHub Releases (recommended — no registration needed)
+#### From PyPI (recommended)
+
+```bash
+# Install base package
+pip install mcp-cn-commerce
+
+# Install single platform
+pip install mcp-cn-commerce[doudian]      # Douyin Shop
+pip install mcp-cn-commerce[jd]           # JD.com
+pip install mcp-cn-commerce[oceanengine]  # Ocean Engine
+
+# Install all platforms
+pip install mcp-cn-commerce[all]
+```
+
+#### From GitHub Releases
 
 ```bash
 # Visit the latest Release and download the .whl file
@@ -179,10 +194,10 @@ mcp-cn-commerce/
 ├── shared/                           # Shared auth/signing/pagination
 │   └── cn_commerce_base.py           # CommerceMCPBase — extend for new platforms
 ├── servers/
-│   ├── oceanengine/  17 tools        ├── doudian/    20 tools
-│   ├── jd/           14 tools        ├── taobao/     13 tools
-│   ├── pinduoduo/    13 tools        ├── kuaishou/   12 tools
-│   ├── xiaohongshu/  12 tools        └── weixin-store/ 11 tools
+│   ├── oceanengine/  22 tools        ├── doudian/    24 tools
+│   ├── jd/           19 tools        ├── taobao/     17 tools
+│   ├── pinduoduo/    17 tools        ├── kuaishou/   16 tools
+│   ├── xiaohongshu/  17 tools        └── weixin-store/ 15 tools
 ├── docs/platforms.md                 # 8-platform API comparison & auth matrix
 ├── docs/docker.md                    # Docker deployment guide
 ├── Dockerfile                        # Multi-platform MCP server image
@@ -197,15 +212,20 @@ Each `servers/<platform>/` is an **independent MCP server**. Users install only 
 
 | Server | Tools | Categories |
 |---|---|---|
-| oceanengine | 17 | Ads, Qianchuan, Star, Creative, Audience, Optimization |
-| doudian | 20 | Orders, Products, Refunds, Logistics, Reviews, Live, Traffic, Marketing, Billing, Shop |
-| jd | 14 | Orders, Products, After-Sale, Logistics, Reviews, Pricing, Inventory, Marketing, Shop |
-| taobao | 13 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Categories |
-| pinduoduo | 13 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Affiliate |
-| kuaishou | 12 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing |
-| xiaohongshu | 12 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Inventory, Finance |
-| weixin-store | 11 | Orders, Products, Refunds, Logistics, Shop, Marketing, Supply Chain, Categories |
-| **Total** | **112** | All read-only by default |
+| oceanengine | 22 | Ads, Qianchuan, Star, Creative, Audience, Optimization |
+| doudian | 24 | Orders, Products, Refunds, Logistics, Reviews, Live, Traffic, Marketing, Billing, Shop |
+| jd | 19 | Orders, Products, After-Sale, Logistics, Reviews, Pricing, Inventory, Marketing, Shop |
+| taobao | 17 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Categories |
+| pinduoduo | 17 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Affiliate |
+| kuaishou | 16 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing |
+| xiaohongshu | 17 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Inventory, Finance |
+| weixin-store | 15 | Orders, Products, Refunds, Logistics, Shop, Marketing, Supply Chain, Categories |
+| **Total** | **147** | Platform tools + 4 shared operational tools each |
+
+Every server also exposes **4 cross-platform operational tools** (counted above): `get_metrics`
+(per-endpoint latency / success / error stats), `get_traces` (recent request traces),
+`get_alerts` (alert-rule evaluation against live metrics), and `export_data` (export records
+to CSV/JSON). Request tracing and metrics are collected automatically on every call.
 
 For full tool details, see the source code in each `servers/<platform>/src/` directory.
 | `get_product_list` | Product catalog with pricing and stock | `/product/list` |
@@ -217,7 +237,7 @@ This project handles sensitive e-commerce API credentials. Our security guarante
 
 - 🔒 **Runs locally** — API keys and secrets never leave your machine
 - 📖 **Open source** — every line of code is auditable
-- 👁️ **Read-only by default** — all 112 tools only read data; zero write/modify/delete operations
+- 👁️ **Read-only by default** — all platform tools only read data; zero write/modify/delete operations
 - 📡 **No telemetry** — no usage data is collected, tracked, or transmitted
 - 🖥️ **Direct API calls** — connects directly to platform APIs; no intermediate server or proxy
 - 🔑 **Env-var config** — credentials are loaded from environment variables, never hardcoded
@@ -256,16 +276,11 @@ If you use mcp-cn-commerce in your research or project:
 
 ```bibtex
 @software{mcp-cn-commerce,
-  author = {Wang, Zhuo},
   title = {mcp-cn-commerce: MCP Servers for Chinese E-Commerce Platforms},
   year = {2026},
   url = {https://github.com/TonyWang-hub/mcp-cn-commerce}
 }
 ```
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=TonyWang-hub/mcp-cn-commerce&type=Date)](https://star-history.com/#TonyWang-hub/mcp-cn-commerce&Date)
 
 ## License
 

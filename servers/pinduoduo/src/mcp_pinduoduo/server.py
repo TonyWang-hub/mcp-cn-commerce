@@ -10,19 +10,18 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import time
-from pathlib import Path
 
 import httpx
 from mcp.server.fastmcp import FastMCP
 
-# Let the server find the shared base class at <repo-root>/shared/
-_project_root = Path(__file__).resolve().parents[4]
-if str(_project_root) not in sys.path:
-    sys.path.insert(0, str(_project_root))
-
-from shared.cn_commerce_base import CommerceAPIError, CommerceMCPBase, ConfigValidationError, SignMethod
+from shared.cn_commerce_base import (
+    CommerceAPIError,
+    CommerceMCPBase,
+    ConfigValidationError,
+    SignMethod,
+    register_common_tools,
+)
 
 # ── Pinduoduo client ────────────────────────────────────────────────────────
 
@@ -84,8 +83,8 @@ def _create_pinduoduo_client() -> PinduoduoMCP:
     except ConfigValidationError:
         # Fallback to direct instantiation for backward compatibility
         return PinduoduoMCP(
-            client_id=os.environ.get("PINDUODUO_CLIENT_ID", ""),
-            client_secret=os.environ.get("PINDUODUO_CLIENT_SECRET", ""),
+            app_key=os.environ.get("PINDUODUO_CLIENT_ID", ""),
+            app_secret=os.environ.get("PINDUODUO_CLIENT_SECRET", ""),
             access_token=os.environ.get("PINDUODUO_ACCESS_TOKEN", ""),
         )
 
@@ -359,6 +358,10 @@ async def search_affiliate_goods(
     }
     result = await pdd._call("pdd.ddk.goods.search", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+# ── Cross-platform operational tools (get_metrics/get_traces/get_alerts/export_data) ──
+register_common_tools(mcp, pdd)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

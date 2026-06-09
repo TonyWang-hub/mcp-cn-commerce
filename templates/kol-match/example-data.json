@@ -1,0 +1,80 @@
+{
+  "campaign_type": "短视频带货",
+  "category": "女装",
+  "budget_range": "5000-20000",
+  "target_audience": {
+    "gender": "female",
+    "age_range": "18-35",
+    "cities": ["上海", "北京", "杭州", "成都", "广州"],
+    "interests": ["穿搭", "时尚", "美妆"]
+  },
+  "matched_kols": [
+    {
+      "kol_id": "STAR2026001",
+      "name": "小美穿搭日记",
+      "platform": "douyin",
+      "followers": 1250000,
+      "category": "女装穿搭",
+      "avg_views": 350000,
+      "avg_likes": 28000,
+      "avg_comments": 1500,
+      "engagement_rate": 0.085,
+      "gpm": 185000,
+      "price_per_video": 800000,
+      "roi_estimate": 2.3,
+      "audience": {
+        "female_ratio": 0.82,
+        "age_18_30": 0.65,
+        "top_cities": ["上海", "北京", "杭州", "成都"]
+      },
+      "recent_works": [
+        {"title": "夏季通勤穿搭3套", "views": 420000, "likes": 35000, "gmv": 12600000},
+        {"title": "平价连衣裙合集", "views": 380000, "likes": 31000, "gmv": 9500000}
+      ]
+    },
+    {
+      "kol_id": "STAR2026002",
+      "name": "阿杰好物分享",
+      "platform": "douyin",
+      "followers": 680000,
+      "category": "全品类好物",
+      "avg_views": 210000,
+      "avg_likes": 15000,
+      "avg_comments": 800,
+      "engagement_rate": 0.072,
+      "gpm": 220000,
+      "price_per_video": 500000,
+      "roi_estimate": 3.1,
+      "audience": {
+        "female_ratio": 0.55,
+        "age_25_40": 0.70,
+        "top_cities": ["广州", "深圳", "东莞", "佛山"]
+      },
+      "recent_works": [
+        {"title": "百元好物分享10件", "views": 280000, "likes": 22000, "gmv": 8800000}
+      ]
+    },
+    {
+      "kol_id": "STAR2026003",
+      "name": "甜甜的衣橱",
+      "platform": "douyin",
+      "followers": 420000,
+      "category": "少女穿搭",
+      "avg_views": 150000,
+      "avg_likes": 12000,
+      "avg_comments": 600,
+      "engagement_rate": 0.080,
+      "gpm": 160000,
+      "price_per_video": 300000,
+      "roi_estimate": 2.8,
+      "audience": {
+        "female_ratio": 0.90,
+        "age_18_25": 0.75,
+        "top_cities": ["成都", "重庆", "武汉", "长沙"]
+      },
+      "recent_works": [
+        {"title": "学生党平价穿搭", "views": 180000, "likes": 15000, "gmv": 5400000}
+      ]
+    }
+  ]
+}

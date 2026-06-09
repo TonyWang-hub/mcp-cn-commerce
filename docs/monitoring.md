@@ -2,6 +2,33 @@
 
 mcp-cn-commerce provides built-in monitoring, health check, and alerting capabilities in the shared base module.
 
+## What's wired in (always on)
+
+Metrics collection is **enabled by default** on every `CommerceMCPBase` instance
+-- and therefore on every platform server. You don't configure anything: each
+`_request()` call is recorded by a `MetricsCollector` (latency, success/error,
+per endpoint). See [tracing.md](tracing.md) for the request tracing that runs
+alongside it.
+
+Every platform server also exposes the following cross-platform MCP tools (registered via
+`shared.cn_commerce_base.register_common_tools(mcp, client)`):
+
+| MCP tool | Backing method | Returns |
+|---|---|---|
+| `get_metrics` | `client.get_metrics_summary()` | Per-endpoint + global request metrics |
+| `get_traces` | `client.get_trace_summary()` | Summary of the most recent request trace |
+| `get_alerts` | `client.get_alerts()` | Alert rules evaluated against current metrics |
+| `export_data` | `client.export_data(records, fmt)` | CSV/JSON string export of records |
+
+`client.get_alerts()` is the always-on convenience that evaluates the built-in
+alert rules and returns `{"firing": [...], "stats": {...}}`. The richer
+`AlertManager` API below (custom rules, notifications, firing/resolve lifecycle)
+is opt-in -- reach it via `client.alert_manager`.
+
+For a runnable end-to-end demo (mocked, offline) of `get_metrics_summary()`,
+`get_trace_summary()`, `get_alerts()`, and `export_data()`, see
+[`examples/best-practices/observability_demo.py`](../examples/best-practices/observability_demo.py).
+
 ## MetricsCollector
 
 Tracks request counts, latency, and error rates per endpoint and globally.

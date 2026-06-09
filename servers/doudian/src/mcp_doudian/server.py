@@ -22,49 +22,72 @@ import os
 import time
 from typing import Any
 
-import httpx
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 
-logger = logging.getLogger(__name__)
+from shared.cn_commerce_base import (
+    CommerceAPIError,
+    CommerceMCPBase,
+    ConfigValidationError,
+    SignMethod,
+    canonicalize_sign_value,
+    handle_tool_errors,  # noqa: F401  (re-exported for tool authors / parity with siblings)
+)
 
-BASE_URL = "https://openapi-fxg.jinritemai.com/"
+logger = logging.getLogger(__name__)
 
 server = Server("mcp-cn-doudian")
 
 # ── Exceptions ──────────────────────────────────────────────
 
 
-class DouDianAPIError(Exception):
-    """Normalized API error for Douyin shop."""
+class DouDianAPIError(CommerceAPIError):
+    """Normalized API error for Douyin shop.
+
+    Subclasses the shared :class:`CommerceAPIError` so the base class's
+    error handling (and ``handle_tool_errors``) recognises it, while still
+    carrying Doudian's ``sub_code``/``sub_msg`` detail.
+    """
 
     def __init__(self, code: int, msg: str, sub_code: str = "", sub_msg: str = ""):
-        self.code = code
-        self.msg = msg
         self.sub_code = sub_code
         self.sub_msg = sub_msg
-        detail = f"[{code}] {msg}"
+        super().__init__(code=code, msg=msg)
+        # Enrich the rendered message with sub-error detail when present.
         if sub_code:
-            detail += f" (sub: [{sub_code}] {sub_msg})"
-        super().__init__(detail)
+            self.args = (f"[{code}] {msg} (sub: [{sub_code}] {sub_msg})",)
 
 
-class ConfigError(Exception):
-    """Missing required configuration."""
+class ConfigError(ConfigValidationError):
+    """Missing required configuration.
+
+    Kept as a thin alias over the shared :class:`ConfigValidationError` so
+    existing callers/tests that expect a plain message string continue to work.
+    """
+
+    def __init__(self, message: str):
+        Exception.__init__(self, message)
+        self.platform = "DOUDIAN"
+        self.missing_vars = []
 
 
 # ── HTTP Client ─────────────────────────────────────────────
 
 
-class DouDianClient:
+class DouDianClient(CommerceMCPBase):
     """HTTP client for the Doudian Open API.
 
-    Implements Douyin-shop-specific MD5 signing:
+    Inherits the shared :class:`CommerceMCPBase` for connection pooling,
+    auto-reconnect, rate limiting and input validation, and overrides the
+    Doudian-specific signing scheme:
 
-    1. Sort business params alphabetically by key.
-    2. Serialize to compact JSON (no spaces).
-    3. Compute MD5(app_key + param_json + app_secret).
+    1. Filter out None/empty business params.
+    2. Sort alphabetically by key and serialize to compact JSON.
+    3. Compute ``MD5(app_key + param_json + app_secret)``.
     """
+
+    BASE_URL = "https://openapi-fxg.jinritemai.com/"
+    sign_method = SignMethod.MD5
 
     def __init__(
         self,
@@ -73,26 +96,27 @@ class DouDianClient:
         access_token: str,
         shop_id: str = "",
     ):
-        self.app_key = app_key
-        self.app_secret = app_secret
-        self.access_token = access_token
+        super().__init__(
+            app_key=app_key,
+            app_secret=app_secret,
+            access_token=access_token,
+        )
         self.shop_id = shop_id
 
     # ── Signing ─────────────────────────────────────────
 
-    def _sign(self, params: dict) -> str:
-        """Generate Doudian MD5 signature.
+    def _sign(self, params: dict[str, Any]) -> str:
+        """Generate Doudian's MD5 signature over the business params.
 
-        Filters out None/empty values, sorts alphabetically, serializes
-        to compact JSON, then signs with MD5.
+        Overrides the base scheme. Empty/``None`` values are dropped, the
+        remaining params are sorted by key and serialised to compact JSON,
+        then signed as ``MD5(app_key + json + app_secret)``. Values are run
+        through :func:`canonicalize_sign_value` so dict/list/bool params
+        serialise deterministically (matching the base class guarantee).
         """
-        # Remove empty values so they don't affect the signature
-        clean = {k: v for k, v in params.items() if v is not None and v != ""}
-        # Sort by key alphabetically
+        clean = {k: canonicalize_sign_value(v) for k, v in params.items() if v is not None and v != ""}
         sorted_params = dict(sorted(clean.items()))
-        # Compact JSON (no spaces, no ASCII escaping)
         param_json = json.dumps(sorted_params, separators=(",", ":"), ensure_ascii=False)
-        # Build the sign string: app_key + JSON + app_secret
         sign_str = f"{self.app_key}{param_json}{self.app_secret}"
         return hashlib.md5(sign_str.encode()).hexdigest()
 
@@ -103,38 +127,47 @@ class DouDianClient:
         method: str,
         params: dict | None = None,
     ) -> dict[str, Any]:
-        """Make a signed POST request to Doudian Open API.
+        """Make a signed POST request to the Doudian Open API.
+
+        Reuses the base class HTTP client (``_ensure_client``), rate limiter
+        and input validation, but keeps Doudian's wire format: common auth
+        params (``app_key``/``timestamp``/``v``/``sign_method``/``access_token``
+        and the business-param ``sign``) go in the query string, the business
+        params go in the JSON body, and success is signalled by ``code == 10000``.
 
         Args:
-            method: API method name, e.g. "order/list".
-            params: Business parameters (placed in POST body as JSON).
+            method: API method name, e.g. ``"order/list"``.
+            params: Business parameters (placed in the POST body as JSON).
 
         Returns:
-            Parsed response data dict.
+            Parsed response ``data`` dict.
 
         Raises:
             DouDianAPIError: When the API returns a non-success code.
         """
         params = params or {}
 
-        url = f"{BASE_URL.rstrip('/')}/{method.lstrip('/')}"
+        if self.validate_input:
+            self._validate_params(params)
 
-        # Common params go in the query string
+        if self.rate_limiter:
+            await self.rate_limiter.acquire()
+
+        url = f"{self.BASE_URL.rstrip('/')}/{method.lstrip('/')}"
+
         common = {
             "app_key": self.app_key,
             "timestamp": str(int(time.time())),
             "v": "2",
-            "sign_method": "md5",
+            "sign_method": self.sign_method,
             "access_token": self.access_token,
+            "sign": self._sign(params),
         }
-
-        # Sign only the business params
-        common["sign"] = self._sign(params)
 
         logger.debug("Request: %s %s", method, params)
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(url, params=common, json=params)
+        client = await self._ensure_client()
+        resp = await client.post(url, params=common, json=params)
 
         logger.debug("Response status: %s", resp.status_code)
 

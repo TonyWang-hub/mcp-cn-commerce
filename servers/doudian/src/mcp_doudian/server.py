@@ -31,7 +31,6 @@ from shared.cn_commerce_base import (
     ConfigValidationError,
     SignMethod,
     canonicalize_sign_value,
-    handle_tool_errors,  # noqa: F401  (re-exported for tool authors / parity with siblings)
     register_common_tools,
 )
 
@@ -66,8 +65,10 @@ class ConfigError(ConfigValidationError):
     existing callers/tests that expect a plain message string continue to work.
     """
 
-    def __init__(self, message: str):
-        Exception.__init__(self, message)
+    def __init__(self, message: str):  # pylint: disable=super-init-not-called
+        # The parent's __init__(platform, missing_vars) signature is intentionally
+        # bypassed: ConfigError is a message-based alias for backward compatibility.
+        Exception.__init__(self, message)  # pylint: disable=non-parent-init-called
         self.platform = "DOUDIAN"
         self.missing_vars = []
 

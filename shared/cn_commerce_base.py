@@ -2719,6 +2719,11 @@ class CommerceMCPBase:
         self._alert_manager = AlertManager()
         # Live request observability: every _request is traced and metered.
         self._tracer = RequestTracer(self.__class__.__name__)
+        # Opt-in capabilities, lazily constructed on first access (see properties).
+        self._webhook_manager: WebhookManager | None = None
+        self._load_balancer: LoadBalancer | None = None
+        self._request_recorder: RequestRecorder | None = None
+        self._deduplicator: RequestDeduplicator | None = None
 
     def _get_client(self) -> httpx.AsyncClient:
         """Get or create an HTTP client with connection pooling.

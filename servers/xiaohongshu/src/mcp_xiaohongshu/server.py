@@ -85,8 +85,8 @@ def _create_xiaohongshu_client() -> XiaohongshuMCP:
     except ConfigValidationError:
         # Fallback to direct instantiation for backward compatibility
         return XiaohongshuMCP(
-            client_id=os.environ.get("XHS_CLIENT_ID", ""),
-            client_secret=os.environ.get("XHS_CLIENT_SECRET", ""),
+            app_key=os.environ.get("XHS_CLIENT_ID", ""),
+            app_secret=os.environ.get("XHS_CLIENT_SECRET", ""),
             access_token=os.environ.get("XHS_ACCESS_TOKEN", ""),
         )
 

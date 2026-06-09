@@ -83,8 +83,8 @@ def _create_pinduoduo_client() -> PinduoduoMCP:
     except ConfigValidationError:
         # Fallback to direct instantiation for backward compatibility
         return PinduoduoMCP(
-            client_id=os.environ.get("PINDUODUO_CLIENT_ID", ""),
-            client_secret=os.environ.get("PINDUODUO_CLIENT_SECRET", ""),
+            app_key=os.environ.get("PINDUODUO_CLIENT_ID", ""),
+            app_secret=os.environ.get("PINDUODUO_CLIENT_SECRET", ""),
             access_token=os.environ.get("PINDUODUO_ACCESS_TOKEN", ""),
         )
 

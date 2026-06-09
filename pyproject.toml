@@ -194,7 +194,8 @@ disable = [
     "R0912",  # too-many-branches
     "R0915",  # too-many-statements
     "R1705",  # no-else-return
-    "W0237",  # arguments-differ
+    "W0221",  # arguments-differ (platform _request/_sign overrides differ by design)
+    "W0237",  # arguments-renamed
 ]
 
 [tool.pylint.format]

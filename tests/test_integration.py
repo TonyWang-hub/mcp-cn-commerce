@@ -7,7 +7,6 @@ cross-platform patterns.  All network calls are mocked.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import sys
@@ -25,8 +24,14 @@ _SHARED_DIR = _REPO_ROOT / "shared"
 
 # Add all server src dirs to sys.path so every platform module is importable.
 _ALL_PLATFORMS = [
-    "oceanengine", "doudian", "jd", "taobao",
-    "pinduoduo", "kuaishou", "xiaohongshu", "weixin-store",
+    "oceanengine",
+    "doudian",
+    "jd",
+    "taobao",
+    "pinduoduo",
+    "kuaishou",
+    "xiaohongshu",
+    "weixin-store",
 ]
 for _p in _ALL_PLATFORMS:
     _src = _REPO_ROOT / "servers" / _p / "src"
@@ -41,12 +46,22 @@ import mcp.server  # noqa: E402
 
 _orig_server_cls = mcp.server.Server
 if not hasattr(_orig_server_cls, "tool"):
+
     def _mock_tool(self, *args, **kwargs):
         def decorator(func):
             return func
+
         return decorator
+
     _orig_server_cls.tool = _mock_tool  # type: ignore[attr-defined]
 
+from cli import (  # noqa: E402
+    SERVER_REGISTRY,
+    build_pythonpath,
+    check_all_health,
+    check_server_health,
+    load_config,
+)
 from cn_commerce_base import (  # noqa: E402
     CommerceAPIError,
     CommerceMCPBase,
@@ -54,26 +69,18 @@ from cn_commerce_base import (  # noqa: E402
     MetricsCollector,
     RateLimiter,
     RetryConfig,
+    SensitiveDataFilter,
     SignMethod,
     format_error_response,
     format_response,
     handle_tool_errors,
-    with_retry,
-    mask_sensitive_value,
     mask_dict_sensitive_keys,
     mask_log_message,
-    SensitiveDataFilter,
-    validate_platform_name,
+    mask_sensitive_value,
     validate_api_param,
+    validate_platform_name,
+    with_retry,
 )
-from cli import (  # noqa: E402
-    SERVER_REGISTRY,
-    check_all_health,
-    check_server_health,
-    load_config,
-    build_pythonpath,
-)
-
 
 # ====================================================================
 #  1. Full Request Flow: Tool → Base._request → Mock HTTP
@@ -87,6 +94,7 @@ class TestOceanEngineFullRequestFlow:
     def oe_client(self):
         """Create a real OceanEngine instance (no env vars needed, all mocked)."""
         from mcp_oceanengine.server import OceanEngine
+
         return OceanEngine(app_key="test_key", app_secret="test_secret", access_token="tok")
 
     @pytest.mark.asyncio
@@ -95,11 +103,7 @@ class TestOceanEngineFullRequestFlow:
         mock_response = MagicMock()
         mock_response.json.return_value = {
             "code": 0,
-            "data": {
-                "list": [
-                    {"advertiser_id": 123, "advertiser_name": "Test", "status": "ENABLE"}
-                ]
-            },
+            "data": {"list": [{"advertiser_id": 123, "advertiser_name": "Test", "status": "ENABLE"}]},
         }
         mock_response.status_code = 200
 
@@ -151,9 +155,7 @@ class TestOceanEngineFullRequestFlow:
     async def test_api_error_response_raises_commerce_api_error(self, oe_client):
         """When the API returns error_response, _request raises CommerceAPIError."""
         mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "error_response": {"code": 40001, "msg": "Invalid advertiser"}
-        }
+        mock_response.json.return_value = {"error_response": {"code": 40001, "msg": "Invalid advertiser"}}
         mock_response.status_code = 200
 
         mock_http = AsyncMock()
@@ -177,6 +179,7 @@ class TestJDFlow:
     @pytest.fixture
     def jd_client(self):
         from mcp_jd.server import JDMCP
+
         return JDMCP(app_key="jd_key", app_secret="jd_secret", access_token="jd_tok")
 
     @pytest.mark.asyncio
@@ -200,6 +203,7 @@ class TestJDFlow:
         with patch("mcp_jd.server.jd", jd_client):
             with patch.object(jd_client, "_get_client", return_value=mock_http):
                 from mcp_jd.server import get_order_list
+
                 result = await get_order_list(
                     start_time="2024-01-01 00:00:00",
                     end_time="2024-01-31 23:59:59",
@@ -223,15 +227,14 @@ class TestTaobaoFlow:
     @pytest.fixture
     def taobao_client(self):
         from mcp_taobao.server import TaobaoMCP
+
         return TaobaoMCP(app_key="tb_key", app_secret="tb_secret", access_token="tb_tok")
 
     @pytest.mark.asyncio
     async def test_get_order_list_merges_system_and_biz_params(self, taobao_client):
         """Taobao _call merges system params (method, format, v) with biz params."""
         mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "trades_sold_get_response": {"trades": {"trade": []}, "total_results": 0}
-        }
+        mock_response.json.return_value = {"trades_sold_get_response": {"trades": {"trade": []}, "total_results": 0}}
         mock_response.status_code = 200
 
         mock_http = AsyncMock()
@@ -241,6 +244,7 @@ class TestTaobaoFlow:
         with patch("mcp_taobao.server.taobao", taobao_client):
             with patch.object(taobao_client, "_get_client", return_value=mock_http):
                 from mcp_taobao.server import get_order_list
+
                 result = await get_order_list(
                     start_time="2024-01-01 00:00:00",
                     end_time="2024-01-31 23:59:59",
@@ -368,6 +372,7 @@ class TestErrorHandlingFlow:
     @pytest.mark.asyncio
     async def test_error_response_json_structure_nested(self):
         """Verify the nested error JSON structure: {'error': {'code': ..., 'message': ...}}."""
+
         @handle_tool_errors
         async def failing_tool():
             raise CommerceAPIError(1001, "token expired")
@@ -484,7 +489,9 @@ class TestRetryMechanismIntegration:
         mock_http.get = mock_get
 
         retry_config = RetryConfig(
-            max_retries=2, base_delay=0.01, jitter=False,
+            max_retries=2,
+            base_delay=0.01,
+            jitter=False,
             retryable_api_codes={90001},
         )
 
@@ -580,9 +587,7 @@ class TestRateLimiterIntegration:
         client.rate_limiter.acquire = mock_acquire
 
         mock_http = AsyncMock()
-        mock_http.get.return_value = MagicMock(
-            json=lambda: {"code": 0}, status_code=200
-        )
+        mock_http.get.return_value = MagicMock(json=lambda: {"code": 0}, status_code=200)
         mock_http.is_closed = False
 
         with patch.object(client, "_get_client", return_value=mock_http):
@@ -602,8 +607,11 @@ class TestRateLimiterIntegration:
 
         # Simulate 1 failed call
         collector.record_request(
-            "/api/orders", latency_ms=100.0, success=False,
-            error_code=40001, error_msg="bad request",
+            "/api/orders",
+            latency_ms=100.0,
+            success=False,
+            error_code=40001,
+            error_msg="bad request",
         )
 
         orders = collector.get_endpoint_metrics("/api/orders")
@@ -828,6 +836,7 @@ class TestSigningIntegration:
     def test_jd_hmac_md5_sign_integration(self):
         """JD's HMAC-MD5 signing produces 32-char uppercase hex."""
         from mcp_jd.server import JDMCP
+
         client = JDMCP(app_key="jd_key", app_secret="jd_secret")
         sig = client._sign({"app_key": "jd_key", "method": "test"})
         assert len(sig) == 32
@@ -836,9 +845,12 @@ class TestSigningIntegration:
     def test_kuaishou_sign_uses_sign_secret(self):
         """Kuaishou signing uses sign_secret (not app_secret)."""
         from mcp_kuaishou.server import KuaishouMCP
+
         client = KuaishouMCP(
-            app_key="ks_key", app_secret="ks_secret",
-            sign_secret="ks_sign_secret", access_token="tok",
+            app_key="ks_key",
+            app_secret="ks_secret",
+            sign_secret="ks_sign_secret",
+            access_token="tok",
         )
         sig = client._sign({"app_key": "ks_key", "timestamp": "123"})
         assert len(sig) == 32
@@ -1038,9 +1050,7 @@ class TestEndToEndScenarios:
                 resp.json.return_value = {
                     "code": 0,
                     "data": {
-                        "list": [
-                            {"campaign_id": 1, "show_cnt": 10000, "click_cnt": 500}
-                        ],
+                        "list": [{"campaign_id": 1, "show_cnt": 10000, "click_cnt": 500}],
                         "page_info": {"page": 1, "total": 1},
                     },
                 }
@@ -1101,7 +1111,7 @@ class TestEndToEndScenarios:
     @pytest.mark.asyncio
     async def test_batch_operations_with_mixed_results(self):
         """Simulate batch operations where some succeed and some fail."""
-        from cn_commerce_base import BatchRequestItem, BatchSummary
+        from cn_commerce_base import BatchRequestItem
 
         client = CommerceMCPBase(app_key="k", app_secret="s")
         call_count = 0
@@ -1183,11 +1193,13 @@ class TestWeixinStoreTokenCache:
     async def test_token_is_cached_and_reused(self, wx_env):
         """WeixinStoreMCP caches the access_token and reuses it."""
         import importlib
-        import mcp_weixin_store.server as wx_mod
-        importlib.reload(wx_mod)
-        WeixinStoreMCP = wx_mod.WeixinStoreMCP
 
-        client = WeixinStoreMCP(app_key="wx_id", app_secret="wx_secret")
+        import mcp_weixin_store.server as wx_mod
+
+        importlib.reload(wx_mod)
+        weixin_store_cls = wx_mod.WeixinStoreMCP
+
+        client = weixin_store_cls(app_key="wx_id", app_secret="wx_secret")
 
         # Simulate a successful token fetch
         # _ensure_token creates its own httpx.AsyncClient inline, so we
@@ -1219,11 +1231,13 @@ class TestWeixinStoreTokenCache:
     async def test_static_token_bypasses_fetch(self, wx_env):
         """When WX_ACCESS_TOKEN is set directly, no token fetch occurs."""
         import importlib
-        import mcp_weixin_store.server as wx_mod
-        importlib.reload(wx_mod)
-        WeixinStoreMCP = wx_mod.WeixinStoreMCP
 
-        client = WeixinStoreMCP(access_token="static_token_xyz")
+        import mcp_weixin_store.server as wx_mod
+
+        importlib.reload(wx_mod)
+        weixin_store_cls = wx_mod.WeixinStoreMCP
+
+        client = weixin_store_cls(access_token="static_token_xyz")
         token = await client._ensure_token()
         assert token == "static_token_xyz"
 
@@ -1292,6 +1306,7 @@ class TestDoudianFullRequestFlow:
                 mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_http)
                 mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
                 from mcp_doudian.server import get_order_list
+
                 result = await get_order_list(start_time="2024-01-01", end_time="2024-01-31")
 
         assert "orders" in result
@@ -1317,14 +1332,15 @@ class TestPinduoduoFullRequestFlow:
         }
         with patch.dict(os.environ, env, clear=False):
             import importlib
+
             if "mcp_pinduoduo.server" in sys.modules:
                 importlib.reload(sys.modules["mcp_pinduoduo.server"])
             else:
                 import mcp_pinduoduo.server  # noqa: F401
             pdd_mod = sys.modules["mcp_pinduoduo.server"]
-            PinduoduoMCP = pdd_mod.PinduoduoMCP
+            pinduoduo_cls = pdd_mod.PinduoduoMCP
 
-        client = PinduoduoMCP(app_key="pdd_key", app_secret="pdd_secret", access_token="pdd_tok")
+        client = pinduoduo_cls(app_key="pdd_key", app_secret="pdd_secret", access_token="pdd_tok")
 
         mock_response = MagicMock()
         mock_response.json.return_value = {

@@ -22,22 +22,21 @@ if str(_shared_dir) not in sys.path:
     sys.path.insert(0, str(_shared_dir))
 
 from cn_commerce_base import (
+    DEFAULT_RETRY,
+    RATE_LIMIT_RETRY,
     BatchRequestItem,
     BatchResultItem,
     BatchSummary,
     CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,
-    DEFAULT_RETRY,
     EndpointMetrics,
     MetricsCollector,
-    RATE_LIMIT_RETRY,
     RateLimiter,
-    RetryConfig,
     RetryableError,
+    RetryConfig,
     SensitiveDataFilter,
     SignMethod,
-    _SENSITIVE_FIELD_PATTERNS,
     format_error_response,
     format_response,
     handle_tool_errors,
@@ -917,8 +916,13 @@ class TestSensitiveDataFilter:
     def test_filter_masks_string_message(self):
         f = SensitiveDataFilter()
         record = logging.LogRecord(
-            name="test", level=logging.INFO, pathname="", lineno=0,
-            msg="Using Bearer abcdefghijklmnop", args=None, exc_info=None,
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="Using Bearer abcdefghijklmnop",
+            args=None,
+            exc_info=None,
         )
         result = f.filter(record)
         assert result is True
@@ -927,8 +931,13 @@ class TestSensitiveDataFilter:
     def test_filter_masks_dict_args(self):
         f = SensitiveDataFilter()
         record = logging.LogRecord(
-            name="test", level=logging.INFO, pathname="", lineno=0,
-            msg="test %s", args=({"app_key": "secretkey12345"},), exc_info=None,
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="test %s",
+            args=({"app_key": "secretkey12345"},),
+            exc_info=None,
         )
         result = f.filter(record)
         assert result is True
@@ -936,7 +945,10 @@ class TestSensitiveDataFilter:
     def test_filter_masks_tuple_args_with_strings(self):
         f = SensitiveDataFilter()
         record = logging.LogRecord(
-            name="test", level=logging.INFO, pathname="", lineno=0,
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
             msg="test %s %s",
             args=("normal", "Bearer abcdefghijklmnop"),
             exc_info=None,
@@ -947,8 +959,13 @@ class TestSensitiveDataFilter:
     def test_filter_non_string_msg_passthrough(self):
         f = SensitiveDataFilter()
         record = logging.LogRecord(
-            name="test", level=logging.INFO, pathname="", lineno=0,
-            msg=42, args=None, exc_info=None,
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg=42,
+            args=None,
+            exc_info=None,
         )
         result = f.filter(record)
         assert result is True

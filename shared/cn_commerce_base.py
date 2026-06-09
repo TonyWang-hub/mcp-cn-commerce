@@ -1644,7 +1644,7 @@ class ExportConfig:
         encoding: Character encoding for CSV output.
     """
 
-    format: ExportFormat = ExportFormat.CSV
+    format: ExportFormat = field(default_factory=lambda: ExportFormat.CSV)
     fields: list[str] | None = None
     filename: str = "export"
     output_dir: str = "."

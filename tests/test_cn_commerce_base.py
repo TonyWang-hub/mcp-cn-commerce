@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -21,27 +22,32 @@ if str(_shared_dir) not in sys.path:
     sys.path.insert(0, str(_shared_dir))
 
 from cn_commerce_base import (
+    DEFAULT_RETRY,
+    RATE_LIMIT_RETRY,
     BatchRequestItem,
     BatchResultItem,
     BatchSummary,
     CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,
-    DataExporter,
     EndpointMetrics,
-    ExportConfig,
-    ExportFormat,
     MetricsCollector,
     RateLimiter,
+    RetryableError,
+    RetryConfig,
+    SensitiveDataFilter,
     SignMethod,
-    WebhookDeliveryError,
-    WebhookDeliveryResult,
-    WebhookEvent,
-    WebhookEventType,
-    WebhookManager,
-    WebhookSignatureVerifier,
-    WebhookSubscription,
     format_error_response,
+    format_response,
+    handle_tool_errors,
+    mask_dict_sensitive_keys,
+    mask_log_message,
+    mask_sensitive_value,
+    sanitize_log_context,
+    validate_api_param,
+    validate_env_var_name,
+    validate_platform_name,
+    with_retry,
 )
 
 # ── SignMethod Tests ──────────────────────────────────────
@@ -770,303 +776,1083 @@ class TestBatchRequest:
         assert summary.error_summary["ConnectError"] == 1
 
 
-# ── ExportFormat Tests ─────────────────────────────────────
+# ── mask_sensitive_value Tests ─────────────────────────────
 
 
-class TestExportFormat:
-    """Tests for ExportFormat enum."""
+class TestMaskSensitiveValue:
+    """Tests for mask_sensitive_value function."""
 
-    def test_csv_value(self):
-        assert ExportFormat.CSV == "csv"
+    def test_normal_value(self):
+        assert mask_sensitive_value("abcdefghijklmnop") == "abcd****mnop"
 
-    def test_json_value(self):
-        assert ExportFormat.JSON == "json"
+    def test_short_value(self):
+        result = mask_sensitive_value("short")
+        assert "****" in result
+        assert result.startswith("s")
+        assert result.endswith("t")
 
-    def test_excel_value(self):
-        assert ExportFormat.EXCEL == "excel"
+    def test_empty_value(self):
+        assert mask_sensitive_value("") == "****"
 
-    def test_is_string_enum(self):
-        assert isinstance(ExportFormat.CSV, str)
+    def test_single_char(self):
+        assert mask_sensitive_value("x") == "****"
+
+    def test_two_chars(self):
+        result = mask_sensitive_value("ab")
+        assert "****" in result
+        assert result == "a****b"
+
+    def test_exact_boundary_length(self):
+        """Value length equals prefix + suffix: should mask."""
+        result = mask_sensitive_value("abcdefgh", visible_prefix=4, visible_suffix=4)
+        # len == 8 == prefix + suffix, so it goes to the short path
+        assert "****" in result
+
+    def test_just_above_boundary(self):
+        result = mask_sensitive_value("abcdefghi", visible_prefix=4, visible_suffix=4)
+        assert result == "abcd****fghi"
+
+    def test_custom_visible_lengths(self):
+        result = mask_sensitive_value("abcdefghij", visible_prefix=2, visible_suffix=2)
+        assert result == "ab****ij"
+
+    def test_none_like_falsy(self):
+        # mask_sensitive_value expects str, but let's check empty string edge
+        assert mask_sensitive_value("") == "****"
 
 
-# ── ExportConfig Tests ────────────────────────────────────
+# ── mask_dict_sensitive_keys Tests ─────────────────────────
 
 
-class TestExportConfig:
-    """Tests for ExportConfig dataclass."""
+class TestMaskDictSensitiveKeys:
+    """Tests for mask_dict_sensitive_keys function."""
 
-    def test_default_values(self):
-        config = ExportConfig()
-        assert config.format == ExportFormat.CSV
-        assert config.fields is None
-        assert config.filename == "export"
-        assert config.output_dir == "."
-        assert config.page == 0
-        assert config.page_size == 1000
-        assert config.flatten_nested is True
-        assert config.encoding == "utf-8"
+    def test_no_sensitive_keys(self):
+        data = {"name": "test", "count": 42}
+        result = mask_dict_sensitive_keys(data)
+        assert result == {"name": "test", "count": 42}
 
-    def test_custom_values(self):
-        config = ExportConfig(
-            format=ExportFormat.JSON,
-            fields=["id", "name"],
-            filename="orders",
-            output_dir="/tmp",
-            page=2,
-            page_size=50,
-            flatten_nested=False,
-            encoding="gbk",
+    def test_sensitive_string_key(self):
+        data = {"app_key": "abcdefghijklmnop", "name": "test"}
+        result = mask_dict_sensitive_keys(data)
+        assert result["name"] == "test"
+        assert "****" in result["app_key"]
+
+    def test_sensitive_non_string_key(self):
+        data = {"access_token": 12345}
+        result = mask_dict_sensitive_keys(data)
+        assert result["access_token"] == "***MASKED***"
+
+    def test_nested_dict(self):
+        data = {"outer": {"app_secret": "verysecretvalue", "safe": "ok"}}
+        result = mask_dict_sensitive_keys(data)
+        assert result["outer"]["safe"] == "ok"
+        assert "****" in result["outer"]["app_secret"]
+
+    def test_list_of_dicts(self):
+        data = {"items": [{"app_key": "key1"}, {"app_key": "key2"}]}
+        result = mask_dict_sensitive_keys(data)
+        assert "****" in result["items"][0]["app_key"]
+
+    def test_list_of_non_dicts_unchanged(self):
+        data = {"items": [1, 2, "three"]}
+        result = mask_dict_sensitive_keys(data)
+        assert result["items"] == [1, 2, "three"]
+
+    def test_sign_key_masked(self):
+        data = {"sign": "abcdef123456"}
+        result = mask_dict_sensitive_keys(data)
+        assert "****" in result["sign"]
+
+    def test_password_key_masked(self):
+        data = {"password": "mysecretpw"}
+        result = mask_dict_sensitive_keys(data)
+        assert "****" in result["password"]
+
+    def test_refresh_token_key_masked(self):
+        data = {"refresh_token": "tok_1234567890abcdef"}
+        result = mask_dict_sensitive_keys(data)
+        assert "****" in result["refresh_token"]
+
+
+# ── mask_log_message Tests ────────────────────────────────
+
+
+class TestMaskLogMessage:
+    """Tests for mask_log_message function."""
+
+    def test_no_sensitive_data(self):
+        msg = "Normal log message"
+        assert mask_log_message(msg) == msg
+
+    def test_jwt_masked(self):
+        jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        result = mask_log_message(jwt)
+        assert "eyJ" in result  # first few chars visible
+        assert "****" in result
+
+    def test_bearer_token_masked(self):
+        msg = "Using Bearer abcdefghijklmnop1234"
+        result = mask_log_message(msg)
+        assert "Bearer" in result
+        assert "****" in result
+
+    def test_mixed_text(self):
+        msg = "Request failed with Bearer abcdefghijklmnop, retrying"
+        result = mask_log_message(msg)
+        assert "Request failed" in result
+        assert "Bearer" in result
+
+    def test_empty_string(self):
+        assert mask_log_message("") == ""
+
+
+# ── SensitiveDataFilter Tests ─────────────────────────────
+
+
+class TestSensitiveDataFilter:
+    """Tests for SensitiveDataFilter logging filter."""
+
+    def test_filter_masks_string_message(self):
+        f = SensitiveDataFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="Using Bearer abcdefghijklmnop",
+            args=None,
+            exc_info=None,
         )
-        assert config.format == ExportFormat.JSON
-        assert config.fields == ["id", "name"]
-        assert config.filename == "orders"
-        assert config.output_dir == "/tmp"
-        assert config.page == 2
-        assert config.page_size == 50
-        assert config.flatten_nested is False
-        assert config.encoding == "gbk"
+        result = f.filter(record)
+        assert result is True
+        assert "****" in record.msg
+
+    def test_filter_masks_dict_args(self):
+        f = SensitiveDataFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="test %s",
+            args=({"app_key": "secretkey12345"},),
+            exc_info=None,
+        )
+        result = f.filter(record)
+        assert result is True
+
+    def test_filter_masks_tuple_args_with_strings(self):
+        f = SensitiveDataFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="test %s %s",
+            args=("normal", "Bearer abcdefghijklmnop"),
+            exc_info=None,
+        )
+        result = f.filter(record)
+        assert result is True
+
+    def test_filter_non_string_msg_passthrough(self):
+        f = SensitiveDataFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg=42,
+            args=None,
+            exc_info=None,
+        )
+        result = f.filter(record)
+        assert result is True
+        assert record.msg == 42
 
 
-# ── DataExporter._flatten_dict Tests ─────────────────────
+# ── validate_platform_name Tests ───────────────────────────
 
 
-class TestDataExporterFlattenDict:
-    """Tests for DataExporter._flatten_dict."""
+class TestValidatePlatformName:
+    """Tests for validate_platform_name function."""
 
-    def test_flat_dict_unchanged(self):
-        d = {"id": 1, "name": "test"}
-        result = DataExporter._flatten_dict(d)
-        assert result == {"id": 1, "name": "test"}
+    def test_valid_name(self):
+        assert validate_platform_name("OCEANENGINE") == "OCEANENGINE"
 
-    def test_nested_dict_flattened(self):
-        d = {"id": 1, "address": {"city": "Beijing", "zip": "100000"}}
-        result = DataExporter._flatten_dict(d)
-        assert result == {"id": 1, "address.city": "Beijing", "address.zip": "100000"}
+    def test_valid_with_underscores(self):
+        assert validate_platform_name("WEIXIN_STORE") == "WEIXIN_STORE"
 
-    def test_deeply_nested(self):
-        d = {"a": {"b": {"c": "deep"}}}
-        result = DataExporter._flatten_dict(d)
-        assert result == {"a.b.c": "deep"}
+    def test_valid_with_numbers(self):
+        assert validate_platform_name("API2") == "API2"
 
-    def test_list_values_json_stringified(self):
-        d = {"id": 1, "tags": ["a", "b"]}
-        result = DataExporter._flatten_dict(d)
-        assert result["id"] == 1
-        assert result["tags"] == '["a", "b"]'
+    def test_empty_raises(self):
+        with pytest.raises(ValueError, match="cannot be empty"):
+            validate_platform_name("")
 
-    def test_empty_dict(self):
-        result = DataExporter._flatten_dict({})
+    def test_lowercase_raises(self):
+        with pytest.raises(ValueError, match="uppercase"):
+            validate_platform_name("oceanengine")
+
+    def test_special_chars_raises(self):
+        with pytest.raises(ValueError, match="uppercase"):
+            validate_platform_name("OCEAN-ENGINE")
+
+    def test_starts_with_number_raises(self):
+        with pytest.raises(ValueError, match="uppercase"):
+            validate_platform_name("1PLATFORM")
+
+    def test_too_long_raises(self):
+        with pytest.raises(ValueError, match="too long"):
+            validate_platform_name("A" * 65)
+
+    def test_exactly_64_chars(self):
+        name = "A" * 64
+        assert validate_platform_name(name) == name
+
+
+# ── validate_api_param Tests ───────────────────────────────
+
+
+class TestValidateApiParam:
+    """Tests for validate_api_param function."""
+
+    def test_valid_param(self):
+        assert validate_api_param("page", "1") == "1"
+
+    def test_normal_string(self):
+        assert validate_api_param("name", "hello world") == "hello world"
+
+    def test_non_string_passthrough(self):
+        assert validate_api_param("count", 42) == 42
+
+    def test_too_long_raises(self):
+        with pytest.raises(ValueError, match="maximum length"):
+            validate_api_param("data", "x" * 4097)
+
+    def test_custom_max_length(self):
+        with pytest.raises(ValueError, match="maximum length"):
+            validate_api_param("data", "x" * 100, max_length=50)
+
+    def test_sql_injection_union(self):
+        with pytest.raises(ValueError, match="SQL"):
+            validate_api_param("q", "1 UNION SELECT * FROM users")
+
+    def test_sql_injection_comment(self):
+        with pytest.raises(ValueError, match="SQL"):
+            validate_api_param("q", "test' OR '1'='1")
+
+    def test_sql_injection_drop(self):
+        with pytest.raises(ValueError, match="SQL"):
+            validate_api_param("q", "test; DROP TABLE users")
+
+    def test_path_traversal(self):
+        with pytest.raises(ValueError, match="path traversal"):
+            validate_api_param("file", "../../etc/passwd")
+
+    def test_path_traversal_encoded(self):
+        with pytest.raises(ValueError, match="path traversal"):
+            validate_api_param("file", "%2e%2e/etc/passwd")
+
+    def test_xss_script_tag(self):
+        with pytest.raises(ValueError, match="script"):
+            validate_api_param("html", "<script>alert(1)</script>")
+
+    def test_xss_javascript_uri(self):
+        with pytest.raises(ValueError, match="script"):
+            validate_api_param("url", "javascript:alert(1)")
+
+    def test_xss_event_handler(self):
+        with pytest.raises(ValueError, match="script"):
+            validate_api_param("html", '<img onerror="alert(1)">')
+
+    def test_xss_iframe(self):
+        with pytest.raises(ValueError, match="script"):
+            validate_api_param("html", "<iframe src='evil'>")
+
+    def test_at_boundary_length(self):
+        value = "a" * 4096
+        assert validate_api_param("data", value) == value
+
+
+# ── validate_env_var_name Tests ────────────────────────────
+
+
+class TestValidateEnvVarName:
+    """Tests for validate_env_var_name function."""
+
+    def test_valid_name(self):
+        assert validate_env_var_name("APP_KEY") == "APP_KEY"
+
+    def test_simple_name(self):
+        assert validate_env_var_name("HOME") == "HOME"
+
+    def test_empty_raises(self):
+        with pytest.raises(ValueError, match="cannot be empty"):
+            validate_env_var_name("")
+
+    def test_lowercase_raises(self):
+        with pytest.raises(ValueError, match="uppercase"):
+            validate_env_var_name("app_key")
+
+    def test_starts_with_number_raises(self):
+        with pytest.raises(ValueError, match="uppercase"):
+            validate_env_var_name("1VAR")
+
+    def test_hyphen_raises(self):
+        with pytest.raises(ValueError, match="uppercase"):
+            validate_env_var_name("APP-KEY")
+
+
+# ── sanitize_log_context Tests ────────────────────────────
+
+
+class TestSanitizeLogContext:
+    """Tests for sanitize_log_context function."""
+
+    def test_basic_context(self):
+        result = sanitize_log_context(action="test", page=1)
+        assert result["action"] == "test"
+        assert result["page"] == 1
+
+    def test_masks_sensitive_keys(self):
+        result = sanitize_log_context(app_key="secretkey12345", name="test")
+        assert result["name"] == "test"
+        assert "****" in result["app_key"]
+
+    def test_empty_context(self):
+        result = sanitize_log_context()
         assert result == {}
 
-    def test_custom_separator(self):
-        d = {"a": {"b": 1}}
-        result = DataExporter._flatten_dict(d, sep="__")
-        assert result == {"a__b": 1}
+
+# ── RetryableError Tests ──────────────────────────────────
 
 
-# ── DataExporter._select_fields Tests ─────────────────────
+class TestRetryableError:
+    """Tests for RetryableError exception."""
+
+    def test_attributes(self):
+        original = ValueError("original error")
+        err = RetryableError(original, attempt=2)
+        assert err.original is original
+        assert err.attempt == 2
+
+    def test_message_format(self):
+        original = ValueError("bad")
+        err = RetryableError(original, attempt=1)
+        assert "attempt 1" in str(err)
+        assert "bad" in str(err)
+
+    def test_is_exception(self):
+        err = RetryableError(ValueError("x"), attempt=0)
+        assert isinstance(err, Exception)
 
 
-class TestDataExporterSelectFields:
-    """Tests for DataExporter._select_fields."""
-
-    def test_select_specific_fields(self):
-        data = [{"id": 1, "name": "a", "extra": "x"}, {"id": 2, "name": "b", "extra": "y"}]
-        result = DataExporter._select_fields(data, ["id", "name"])
-        assert result == [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]
-
-    def test_none_fields_returns_all(self):
-        data = [{"id": 1, "name": "a"}]
-        result = DataExporter._select_fields(data, None)
-        assert result == [{"id": 1, "name": "a"}]
-
-    def test_missing_field_returns_none(self):
-        data = [{"id": 1}]
-        result = DataExporter._select_fields(data, ["id", "name"])
-        assert result == [{"id": 1, "name": None}]
-
-    def test_empty_data(self):
-        result = DataExporter._select_fields([], ["id"])
-        assert result == []
+# ── RetryConfig Tests ─────────────────────────────────────
 
 
-# ── DataExporter._paginate_data Tests ─────────────────────
+class TestRetryConfig:
+    """Tests for RetryConfig dataclass."""
+
+    def test_default_values(self):
+        cfg = RetryConfig()
+        assert cfg.max_retries == 3
+        assert cfg.base_delay == 1.0
+        assert cfg.max_delay == 60.0
+        assert cfg.jitter is True
+
+    def test_compute_delay_exponential(self):
+        cfg = RetryConfig(base_delay=1.0, jitter=False)
+        assert cfg.compute_delay(0) == 1.0
+        assert cfg.compute_delay(1) == 2.0
+        assert cfg.compute_delay(2) == 4.0
+
+    def test_compute_delay_capped(self):
+        cfg = RetryConfig(base_delay=1.0, max_delay=5.0, jitter=False)
+        assert cfg.compute_delay(10) == 5.0
+
+    def test_compute_delay_with_jitter(self):
+        cfg = RetryConfig(base_delay=1.0, jitter=True)
+        delays = [cfg.compute_delay(0) for _ in range(100)]
+        # With jitter, delays should vary (not all be 1.0)
+        assert len(set(delays)) > 1
+        # But all should be between 0.5 and 1.5 (base_delay * (0.5 + random))
+        for d in delays:
+            assert 0.5 <= d <= 1.5
+
+    def test_should_retry_http_status(self):
+        cfg = RetryConfig()
+        assert cfg.should_retry_http_status(429) is True
+        assert cfg.should_retry_http_status(500) is True
+        assert cfg.should_retry_http_status(502) is True
+        assert cfg.should_retry_http_status(503) is True
+        assert cfg.should_retry_http_status(504) is True
+        assert cfg.should_retry_http_status(200) is False
+        assert cfg.should_retry_http_status(400) is False
+        assert cfg.should_retry_http_status(404) is False
+
+    def test_should_retry_api_code(self):
+        cfg = RetryConfig(retryable_api_codes={10001, 10002})
+        assert cfg.should_retry_api_code(10001) is True
+        assert cfg.should_retry_api_code(10002) is True
+        assert cfg.should_retry_api_code(99999) is False
+
+    def test_should_retry_exception_connect_error(self):
+        cfg = RetryConfig()
+        assert cfg.should_retry_exception(httpx.ConnectError("fail")) is True
+
+    def test_should_retry_exception_read_timeout(self):
+        cfg = RetryConfig()
+        assert cfg.should_retry_exception(httpx.ReadTimeout("timeout")) is True
+
+    def test_should_retry_exception_write_timeout(self):
+        cfg = RetryConfig()
+        assert cfg.should_retry_exception(httpx.WriteTimeout("timeout")) is True
+
+    def test_should_retry_exception_pool_timeout(self):
+        cfg = RetryConfig()
+        assert cfg.should_retry_exception(httpx.PoolTimeout("timeout")) is True
+
+    def test_should_not_retry_generic_exception(self):
+        cfg = RetryConfig()
+        assert cfg.should_retry_exception(ValueError("bad")) is False
+
+    def test_should_retry_commerce_api_error_by_code(self):
+        cfg = RetryConfig(retryable_api_codes={40001})
+        err = CommerceAPIError(40001, "rate limited")
+        assert cfg.should_retry_exception(err) is True
+
+    def test_should_not_retry_commerce_api_error_unknown_code(self):
+        cfg = RetryConfig(retryable_api_codes={40001})
+        err = CommerceAPIError(99999, "unknown")
+        assert cfg.should_retry_exception(err) is False
+
+    def test_default_retry_config(self):
+        assert DEFAULT_RETRY.max_retries == 3
+        assert DEFAULT_RETRY.jitter is True
+
+    def test_rate_limit_retry_config(self):
+        assert RATE_LIMIT_RETRY.max_retries == 5
+        assert RATE_LIMIT_RETRY.base_delay == 2.0
+        assert RATE_LIMIT_RETRY.max_delay == 120.0
+
+    def test_custom_retryable_exceptions(self):
+        cfg = RetryConfig(retryable_exceptions=(ValueError,))
+        assert cfg.should_retry_exception(ValueError("bad")) is True
+        assert cfg.should_retry_exception(TypeError("bad")) is False
 
 
-class TestDataExporterPaginateData:
-    """Tests for DataExporter._paginate_data."""
-
-    def test_page_zero_returns_all(self):
-        data = [{"id": i} for i in range(10)]
-        page_data, info = DataExporter._paginate_data(data, page=0, page_size=3)
-        assert len(page_data) == 10
-        assert info["total"] == 10
-        assert info["page"] == 0
-
-    def test_first_page(self):
-        data = [{"id": i} for i in range(10)]
-        page_data, info = DataExporter._paginate_data(data, page=1, page_size=3)
-        assert len(page_data) == 3
-        assert page_data[0]["id"] == 0
-        assert info["page"] == 1
-        assert info["total_pages"] == 4
-        assert info["has_next"] is True
-        assert info["has_prev"] is False
-
-    def test_last_page(self):
-        data = [{"id": i} for i in range(10)]
-        page_data, info = DataExporter._paginate_data(data, page=4, page_size=3)
-        assert len(page_data) == 1
-        assert page_data[0]["id"] == 9
-        assert info["has_next"] is False
-        assert info["has_prev"] is True
-
-    def test_empty_data(self):
-        page_data, info = DataExporter._paginate_data([], page=1, page_size=10)
-        assert page_data == []
-        assert info["total"] == 0
+# ── with_retry Decorator Tests ────────────────────────────
 
 
-# ── DataExporter.export Tests ─────────────────────────────
+class TestWithRetry:
+    """Tests for with_retry decorator."""
+
+    @pytest.mark.asyncio
+    async def test_success_on_first_try(self):
+        call_count = 0
+
+        @with_retry(RetryConfig(max_retries=3, jitter=False))
+        async def succeed():
+            nonlocal call_count
+            call_count += 1
+            return "ok"
+
+        result = await succeed()
+        assert result == "ok"
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_retries_on_retryable_error(self):
+        call_count = 0
+
+        @with_retry(RetryConfig(max_retries=3, base_delay=0.01, jitter=False))
+        async def fail_then_succeed():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise httpx.ConnectError("fail")
+            return "ok"
+
+        result = await fail_then_succeed()
+        assert result == "ok"
+        assert call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_raises_on_non_retryable_error(self):
+        @with_retry(RetryConfig(max_retries=3, jitter=False))
+        async def always_fail():
+            raise ValueError("not retryable")
+
+        with pytest.raises(ValueError, match="not retryable"):
+            await always_fail()
+
+    @pytest.mark.asyncio
+    async def test_raises_after_max_retries(self):
+        @with_retry(RetryConfig(max_retries=2, base_delay=0.01, jitter=False))
+        async def always_connect_error():
+            raise httpx.ConnectError("always fail")
+
+        with pytest.raises(httpx.ConnectError):
+            await always_connect_error()
+
+    @pytest.mark.asyncio
+    async def test_uses_default_config_when_none(self):
+        call_count = 0
+
+        @with_retry()
+        async def succeed():
+            nonlocal call_count
+            call_count += 1
+            return "ok"
+
+        result = await succeed()
+        assert result == "ok"
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_preserves_function_name(self):
+        @with_retry(RetryConfig(max_retries=0))
+        async def my_function():
+            return "ok"
+
+        assert my_function.__name__ == "my_function"
 
 
-class TestDataExporterExport:
-    """Tests for DataExporter.export (file-based export)."""
+# ── CommerceMCPBase._get_client Tests ─────────────────────
 
-    def test_export_csv(self, tmp_path):
-        data = [{"id": 1, "name": "Item A"}, {"id": 2, "name": "Item B"}]
-        config = ExportConfig(format=ExportFormat.CSV, output_dir=str(tmp_path), filename="test")
-        result = DataExporter.export(data, config)
-        assert result["format"] == "csv"
-        assert result["record_count"] == 2
-        assert "id" in result["fields"]
-        assert "name" in result["fields"]
-        content = (tmp_path / "test.csv").read_text(encoding="utf-8")
-        assert "id,name" in content
-        assert "Item A" in content
 
-    def test_export_json(self, tmp_path):
-        data = [{"id": 1, "name": "Item A"}]
-        config = ExportConfig(format=ExportFormat.JSON, output_dir=str(tmp_path), filename="test")
-        result = DataExporter.export(data, config)
-        assert result["format"] == "json"
-        assert result["record_count"] == 1
-        content = json.loads((tmp_path / "test.json").read_text(encoding="utf-8"))
-        assert content[0]["id"] == 1
+class TestGetClient:
+    """Tests for CommerceMCPBase._get_client."""
 
-    def test_export_excel(self, tmp_path):
-        data = [{"id": 1, "name": "Item A"}, {"id": 2, "name": "Item B"}]
-        config = ExportConfig(format=ExportFormat.EXCEL, output_dir=str(tmp_path), filename="test")
-        result = DataExporter.export(data, config)
-        assert result["format"] == "excel"
-        assert result["record_count"] == 2
-        assert (tmp_path / "test.excel").exists()
+    def test_creates_client(self):
+        client = CommerceMCPBase()
+        http_client = client._get_client()
+        assert isinstance(http_client, httpx.AsyncClient)
+        assert not http_client.is_closed
 
-    def test_export_with_custom_fields(self, tmp_path):
-        data = [{"id": 1, "name": "A", "secret": "hidden"}]
-        config = ExportConfig(
-            format=ExportFormat.JSON,
-            fields=["id", "name"],
-            output_dir=str(tmp_path),
-            filename="filtered",
+    def test_reuses_existing_client(self):
+        client = CommerceMCPBase()
+        c1 = client._get_client()
+        c2 = client._get_client()
+        assert c1 is c2
+
+    def test_recreates_closed_client(self):
+        client = CommerceMCPBase()
+        # Pre-set a mock closed client
+        closed_client = MagicMock()
+        closed_client.is_closed = True
+        client._client = closed_client
+        c2 = client._get_client()
+        assert c2 is not closed_client
+        assert isinstance(c2, httpx.AsyncClient)
+
+
+# ── CommerceMCPBase.close Tests ────────────────────────────
+
+
+class TestClose:
+    """Tests for CommerceMCPBase.close."""
+
+    @pytest.mark.asyncio
+    async def test_close_with_active_client(self):
+        client = CommerceMCPBase()
+        _ = client._get_client()
+        assert client._client is not None
+        await client.close()
+        assert client._client is None
+
+    @pytest.mark.asyncio
+    async def test_close_without_client(self):
+        client = CommerceMCPBase()
+        # Should not raise
+        await client.close()
+        assert client._client is None
+
+    @pytest.mark.asyncio
+    async def test_close_idempotent(self):
+        client = CommerceMCPBase()
+        _ = client._get_client()
+        await client.close()
+        # Second close should be safe
+        await client.close()
+
+
+# ── CommerceMCPBase._request Tests ────────────────────────
+
+
+class TestRequest:
+    """Tests for CommerceMCPBase._request."""
+
+    @pytest.mark.asyncio
+    async def test_successful_get_request(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": {"id": 1}}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_get_client", return_value=mock_client):
+            result = await client._request("GET", "/api/test")
+
+        assert result == {"result": {"id": 1}}
+        mock_client.get.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_successful_post_request(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": {"ok": True}}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_get_client", return_value=mock_client):
+            result = await client._request("POST", "/api/test", data={"key": "val"})
+
+        assert result == {"result": {"ok": True}}
+        mock_client.post.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_api_error_response(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"error_response": {"code": 40001, "msg": "bad params"}}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_get_client", return_value=mock_client):
+            with pytest.raises(CommerceAPIError) as exc_info:
+                await client._request("GET", "/api/test")
+            assert exc_info.value.code == 40001
+            assert exc_info.value.msg == "bad params"
+
+    @pytest.mark.asyncio
+    async def test_request_includes_auth_params(self):
+        client = CommerceMCPBase(app_key="mykey", app_secret="mysecret", access_token="mytoken")
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": "ok"}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_get_client", return_value=mock_client):
+            await client._request("GET", "/api/test", params={"extra": "value"})
+
+        # Check that auth params were included
+        call_kwargs = mock_client.get.call_args
+        passed_params = call_kwargs.kwargs.get("params", call_kwargs.args[1] if len(call_kwargs.args) > 1 else {})
+        assert passed_params.get("app_key") == "mykey"
+        assert passed_params.get("access_token") == "mytoken"
+        assert passed_params.get("sign") is not None
+        assert passed_params.get("timestamp") is not None
+
+    @pytest.mark.asyncio
+    async def test_request_without_access_token(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": "ok"}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_get_client", return_value=mock_client):
+            await client._request("GET", "/api/test")
+
+        call_kwargs = mock_client.get.call_args
+        passed_params = call_kwargs.kwargs.get("params", {})
+        assert "access_token" not in passed_params
+
+    @pytest.mark.asyncio
+    async def test_request_with_retry_on_connect_error(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": "ok"}
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        call_count = 0
+
+        async def get_side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise httpx.ConnectError("connection refused")
+            return mock_response
+
+        mock_client.get.side_effect = get_side_effect
+        mock_client.is_closed = False
+
+        retry_config = RetryConfig(max_retries=2, base_delay=0.01, jitter=False)
+        with patch.object(client, "_get_client", return_value=mock_client):
+            result = await client._request("GET", "/api/test", retry_config=retry_config)
+
+        assert result == {"result": "ok"}
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_request_no_retry_on_non_retryable_error(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = ValueError("not retryable")
+        mock_client.is_closed = False
+
+        retry_config = RetryConfig(max_retries=3, base_delay=0.01, jitter=False)
+        with patch.object(client, "_get_client", return_value=mock_client):
+            with pytest.raises(ValueError, match="not retryable"):
+                await client._request("GET", "/api/test", retry_config=retry_config)
+
+    @pytest.mark.asyncio
+    async def test_request_retry_exhausted(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = httpx.ConnectError("always fail")
+        mock_client.is_closed = False
+
+        retry_config = RetryConfig(max_retries=2, base_delay=0.01, jitter=False)
+        with patch.object(client, "_get_client", return_value=mock_client):
+            with pytest.raises(httpx.ConnectError):
+                await client._request("GET", "/api/test", retry_config=retry_config)
+
+    @pytest.mark.asyncio
+    async def test_request_retry_on_api_error_with_retryable_code(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        call_count = 0
+
+        def make_response(data):
+            resp = MagicMock()
+            resp.json.return_value = data
+            resp.status_code = 200
+            return resp
+
+        async def mock_get(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return make_response({"error_response": {"code": 40001, "msg": "retryable"}})
+            return make_response({"result": "ok"})
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = mock_get
+        mock_client.is_closed = False
+
+        retry_config = RetryConfig(
+            max_retries=2,
+            base_delay=0.01,
+            jitter=False,
+            retryable_api_codes={40001},
         )
-        result = DataExporter.export(data, config)
-        content = json.loads((tmp_path / "filtered.json").read_text(encoding="utf-8"))
-        assert "secret" not in content[0]
-        assert content[0]["id"] == 1
+        with patch.object(client, "_get_client", return_value=mock_client):
+            result = await client._request("GET", "/api/test", retry_config=retry_config)
 
-    def test_export_with_pagination(self, tmp_path):
-        data = [{"id": i} for i in range(10)]
-        config = ExportConfig(
-            format=ExportFormat.JSON,
-            output_dir=str(tmp_path),
-            filename="paged",
-            page=2,
-            page_size=3,
-        )
-        result = DataExporter.export(data, config)
-        assert result["record_count"] == 3
-        assert result["pagination"]["page"] == 2
-        assert result["pagination"]["total"] == 10
-
-    def test_export_with_nested_flattening(self, tmp_path):
-        data = [{"id": 1, "address": {"city": "Beijing"}}]
-        config = ExportConfig(
-            format=ExportFormat.JSON,
-            output_dir=str(tmp_path),
-            filename="flat",
-            flatten_nested=True,
-        )
-        result = DataExporter.export(data, config)
-        content = json.loads((tmp_path / "flat.json").read_text(encoding="utf-8"))
-        assert "address.city" in content[0]
-
-    def test_export_creates_output_dir(self, tmp_path):
-        nested_dir = tmp_path / "subdir" / "exports"
-        config = ExportConfig(
-            format=ExportFormat.JSON,
-            output_dir=str(nested_dir),
-            filename="test",
-        )
-        DataExporter.export([{"id": 1}], config)
-        assert (nested_dir / "test.json").exists()
-
-    def test_export_empty_data(self, tmp_path):
-        config = ExportConfig(
-            format=ExportFormat.JSON,
-            output_dir=str(tmp_path),
-            filename="empty",
-        )
-        result = DataExporter.export([], config)
-        assert result["record_count"] == 0
-
-    def test_export_default_config(self, tmp_path):
-        config = ExportConfig(output_dir=str(tmp_path))
-        result = DataExporter.export([{"id": 1}], config)
-        assert result["format"] == "csv"
-        assert (tmp_path / "export.csv").exists()
+        assert result == {"result": "ok"}
+        assert call_count == 2
 
 
-# ── DataExporter.export_to_string Tests ───────────────────
+# ── CommerceMCPBase._sign Unknown Method Test ─────────────
 
 
-class TestDataExporterExportToString:
-    """Tests for DataExporter.export_to_string."""
+class TestSignUnknownMethod:
+    """Tests for _sign with unknown sign method."""
 
-    def test_json_string(self):
-        data = [{"id": 1, "name": "test"}]
-        result = DataExporter.export_to_string(data, format=ExportFormat.JSON)
+    def test_sign_unknown_method_raises(self):
+        client = CommerceMCPBase(app_secret="s")
+        client.sign_method = "unknown_method"
+        with pytest.raises(ValueError, match="Unknown sign method"):
+            client._sign({"app_key": "k"})
+
+
+# ── format_response Tests ─────────────────────────────────
+
+
+class TestFormatResponse:
+    """Tests for format_response function."""
+
+    def test_dict_response(self):
+        result = format_response({"key": "value"})
         parsed = json.loads(result)
-        assert parsed[0]["id"] == 1
+        assert parsed["key"] == "value"
 
-    def test_csv_string(self):
-        data = [{"id": 1, "name": "test"}]
-        result = DataExporter.export_to_string(data, format=ExportFormat.CSV)
-        assert "id,name" in result
-        assert "1,test" in result
-
-    def test_with_fields(self):
-        data = [{"id": 1, "name": "test", "secret": "hidden"}]
-        result = DataExporter.export_to_string(
-            data, format=ExportFormat.JSON, fields=["id", "name"]
-        )
+    def test_list_response(self):
+        result = format_response([1, 2, 3])
         parsed = json.loads(result)
-        assert "secret" not in parsed[0]
+        assert parsed == [1, 2, 3]
 
-    def test_excel_raises(self):
-        with pytest.raises(ValueError, match="does not support Excel"):
-            DataExporter.export_to_string([{"id": 1}], format=ExportFormat.EXCEL)
+    def test_string_passthrough(self):
+        result = format_response("already a string")
+        assert result == "already a string"
 
-    def test_empty_data_json(self):
-        result = DataExporter.export_to_string([], format=ExportFormat.JSON)
-        assert json.loads(result) == []
+    def test_pretty_printed(self):
+        result = format_response({"key": "value"})
+        assert "\n" in result
+        assert "  " in result
 
-    def test_empty_data_csv(self):
-        result = DataExporter.export_to_string([], format=ExportFormat.CSV)
-        assert result == ""
+    def test_none_value(self):
+        result = format_response(None)
+        assert result == "null"
 
-    def test_flatten_nested(self):
-        data = [{"id": 1, "meta": {"key": "val"}}]
-        result = DataExporter.export_to_string(data, format=ExportFormat.JSON, flatten_nested=True)
+    def test_nested_structure(self):
+        data = {"a": {"b": [1, 2, {"c": 3}]}}
+        result = format_response(data)
         parsed = json.loads(result)
-        assert "meta.key" in parsed[0]
+        assert parsed == data
+
+
+# ── handle_tool_errors Tests ──────────────────────────────
+
+
+class TestHandleToolErrors:
+    """Tests for handle_tool_errors decorator."""
+
+    @pytest.mark.asyncio
+    async def test_success_dict(self):
+        @handle_tool_errors
+        async def my_tool():
+            return {"key": "value"}
+
+        result = await my_tool()
+        parsed = json.loads(result)
+        assert parsed["key"] == "value"
+
+    @pytest.mark.asyncio
+    async def test_success_string(self):
+        @handle_tool_errors
+        async def my_tool():
+            return "raw string"
+
+        result = await my_tool()
+        assert result == "raw string"
+
+    @pytest.mark.asyncio
+    async def test_commerce_api_error(self):
+        @handle_tool_errors
+        async def my_tool():
+            raise CommerceAPIError(40001, "Invalid params")
+
+        result = await my_tool()
+        parsed = json.loads(result)
+        assert parsed["error"]["code"] == 40001
+        assert parsed["error"]["message"] == "Invalid params"
+
+    @pytest.mark.asyncio
+    async def test_json_decode_error(self):
+        @handle_tool_errors
+        async def my_tool():
+            raise json.JSONDecodeError("bad json", "", 0)
+
+        result = await my_tool()
+        parsed = json.loads(result)
+        assert "Invalid JSON" in parsed["error"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_generic_exception(self):
+        @handle_tool_errors
+        async def my_tool():
+            raise RuntimeError("something broke")
+
+        result = await my_tool()
+        parsed = json.loads(result)
+        assert parsed["error"]["message"] == "something broke"
+
+    @pytest.mark.asyncio
+    async def test_preserves_function_name(self):
+        @handle_tool_errors
+        async def my_named_tool():
+            return "ok"
+
+        assert my_named_tool.__name__ == "my_named_tool"
+
+    @pytest.mark.asyncio
+    async def test_preserves_function_doc(self):
+        """Docstring should be preserved by functools.wraps."""
+
+        @handle_tool_errors
+        async def my_documented_tool():
+            """This is my doc."""
+            return "ok"
+
+        assert my_documented_tool.__doc__ == "This is my doc."
+
+
+# ── Concurrency Tests ─────────────────────────────────────
+
+
+class TestMetricsCollectorConcurrency:
+    """Thread-safety tests for MetricsCollector."""
+
+    def test_concurrent_record_requests(self):
+        """Multiple threads recording requests should not lose data."""
+        import threading
+
+        collector = MetricsCollector()
+        num_threads = 10
+        requests_per_thread = 100
+
+        def record_batch():
+            for _ in range(requests_per_thread):
+                collector.record_request("/api/test", latency_ms=10.0, success=True)
+
+        threads = [threading.Thread(target=record_batch) for _ in range(num_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        g = collector.get_global_metrics()
+        assert g.request_count == num_threads * requests_per_thread
+
+    def test_concurrent_record_with_errors(self):
+        """Mixing successes and failures across threads."""
+        import threading
+
+        collector = MetricsCollector()
+
+        def record_success():
+            for _ in range(50):
+                collector.record_request("/api/test", latency_ms=10.0, success=True)
+
+        def record_failure():
+            for _ in range(50):
+                collector.record_request("/api/test", latency_ms=10.0, success=False, error_code=500, error_msg="err")
+
+        threads = [
+            threading.Thread(target=record_success),
+            threading.Thread(target=record_failure),
+            threading.Thread(target=record_success),
+            threading.Thread(target=record_failure),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        g = collector.get_global_metrics()
+        assert g.request_count == 200
+        assert g.error_count == 100
+
+    def test_concurrent_get_summary(self):
+        """get_summary while recording should not raise."""
+        import threading
+
+        collector = MetricsCollector()
+        errors = []
+
+        def record():
+            for _ in range(100):
+                collector.record_request("/api", latency_ms=5.0, success=True)
+
+        def summarize():
+            for _ in range(100):
+                try:
+                    collector.get_summary()
+                except Exception as e:
+                    errors.append(e)
+
+        threads = [threading.Thread(target=record), threading.Thread(target=summarize)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == []
+
+
+# ── Health Check Success Path ──────────────────────────────
+
+
+class TestHealthCheckSuccess:
+    """Tests for health_check when API is reachable."""
+
+    @pytest.mark.asyncio
+    async def test_health_check_api_reachable(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s", access_token="t")
+        client.BASE_URL = "http://api.example.com"
+
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.head.return_value = mock_response
+
+        with patch.object(client, "_get_client", return_value=mock_client):
+            result = await client.health_check()
+
+        assert result["configured"] is True
+        assert result["has_token"] is True
+        assert result["api_reachable"] is True
+        assert "metrics" in result
+
+    @pytest.mark.asyncio
+    async def test_health_check_server_error(self):
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        client.BASE_URL = "http://api.example.com"
+
+        mock_response = AsyncMock()
+        mock_response.status_code = 500
+        mock_client = AsyncMock()
+        mock_client.head.return_value = mock_response
+
+        with patch.object(client, "_get_client", return_value=mock_client):
+            result = await client.health_check()
+
+        assert result["api_reachable"] is False
+
+
+# ── _sign Deterministic Tests ─────────────────────────────
+
+
+class TestSignDeterministic:
+    """Verify that signing is deterministic for the same input."""
+
+    def test_md5_deterministic(self):
+        client = CommerceMCPBase(app_secret="secret")
+        client.sign_method = SignMethod.MD5
+        params = {"app_key": "k", "timestamp": "123"}
+        sig1 = client._sign(params)
+        sig2 = client._sign(params)
+        assert sig1 == sig2
+
+    def test_hmac_sha256_deterministic(self):
+        client = CommerceMCPBase(app_secret="secret")
+        client.sign_method = SignMethod.HMAC_SHA256
+        params = {"app_key": "k", "timestamp": "123"}
+        sig1 = client._sign(params)
+        sig2 = client._sign(params)
+        assert sig1 == sig2
+
+    def test_different_secrets_produce_different_sigs(self):
+        c1 = CommerceMCPBase(app_secret="secret1")
+        c1.sign_method = SignMethod.MD5
+        c2 = CommerceMCPBase(app_secret="secret2")
+        c2.sign_method = SignMethod.MD5
+        params = {"app_key": "k", "timestamp": "123"}
+        assert c1._sign(params) != c2._sign(params)
+
+    def test_sign_uppercase_hex(self):
+        client = CommerceMCPBase(app_secret="s")
+        client.sign_method = SignMethod.MD5
+        sig = client._sign({"app_key": "k"})
+        assert sig == sig.upper()
+        assert all(c in "0123456789ABCDEF" for c in sig)
+
+    def test_sign_sorts_keys(self):
+        """Params with different key orders should produce the same signature."""
+        client = CommerceMCPBase(app_secret="s")
+        client.sign_method = SignMethod.MD5
+        sig1 = client._sign({"b": "2", "a": "1"})
+        sig2 = client._sign({"a": "1", "b": "2"})
+        assert sig1 == sig2
+
+    def test_sign_excludes_empty_values(self):
+        """Empty string values should be excluded from signing."""
+        client = CommerceMCPBase(app_secret="s")
+        client.sign_method = SignMethod.MD5
+        sig1 = client._sign({"a": "1", "b": ""})
+        sig2 = client._sign({"a": "1"})
+        assert sig1 == sig2

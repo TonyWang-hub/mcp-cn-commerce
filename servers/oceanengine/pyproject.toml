@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-cn-oceanengine"
@@ -15,5 +15,5 @@ dependencies = [
 [project.scripts]
 mcp-cn-oceanengine = "mcp_oceanengine.server:main"
 
-[tool.hatch.build.targets.wheels]
-packages = ["src/mcp_oceanengine"]
+[tool.setuptools.packages.find]
+where = ["src"]

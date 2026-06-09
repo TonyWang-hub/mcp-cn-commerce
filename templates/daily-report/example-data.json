@@ -1,0 +1,78 @@
+{
+  "date": "2026-06-09",
+  "shops": [
+    {
+      "shop_name": "XX品牌旗舰店",
+      "platform": "doudian",
+      "summary": {
+        "order_count": 156,
+        "gmv": 2895000,
+        "avg_order_value": 18558,
+        "refund_count": 8,
+        "refund_rate": 0.051,
+        "new_customer_count": 42,
+        "repeat_customer_count": 114
+      },
+      "top_products": [
+        {"name": "夏季新款男士短袖T恤", "sales": 38, "gmv": 756200},
+        {"name": "女士碎花连衣裙", "sales": 25, "gmv": 622500},
+        {"name": "运动休闲鞋", "sales": 18, "gmv": 538200}
+      ],
+      "yesterday": {
+        "order_count": 142,
+        "gmv": 2650000,
+        "refund_rate": 0.045
+      }
+    },
+    {
+      "shop_name": "XX数码专营店",
+      "platform": "jd",
+      "summary": {
+        "order_count": 89,
+        "gmv": 4567000,
+        "avg_order_value": 51315,
+        "refund_count": 3,
+        "refund_rate": 0.034,
+        "new_customer_count": 15,
+        "repeat_customer_count": 74
+      },
+      "top_products": [
+        {"name": "无线蓝牙耳机 Pro", "sales": 32, "gmv": 2556800},
+        {"name": "手机壳 透明防摔款", "sales": 28, "gmv": 557200},
+        {"name": "充电宝 20000mAh", "sales": 15, "gmv": 1198500}
+      ],
+      "yesterday": {
+        "order_count": 95,
+        "gmv": 4890000,
+        "refund_rate": 0.032
+      }
+    },
+    {
+      "shop_name": "XX女装小红书店",
+      "platform": "xiaohongshu",
+      "summary": {
+        "order_count": 67,
+        "gmv": 1234500,
+        "avg_order_value": 18425,
+        "refund_count": 5,
+        "refund_rate": 0.075,
+        "new_customer_count": 28,
+        "repeat_customer_count": 39
+      },
+      "top_products": [
+        {"name": "法式复古碎花茶歇裙", "sales": 22, "gmv": 525800},
+        {"name": "冰丝防晒衣 女薄款", "sales": 18, "gmv": 268200},
+        {"name": "大码阔腿裤 高腰显瘦", "sales": 12, "gmv": 142800}
+      ],
+      "yesterday": {
+        "order_count": 72,
+        "gmv": 1350000,
+        "refund_rate": 0.065
+      }
+    }
+  ],
+  "low_stock_alerts": [
+    {"product": "夏季新款男士短袖T恤", "platform": "doudian", "stock": 32, "sku": "白色 XL"},
+    {"product": "无线蓝牙耳机 Pro", "platform": "jd", "stock": 15, "sku": "黑色"}
+  ]
+}

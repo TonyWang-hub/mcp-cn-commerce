@@ -3816,6 +3816,7 @@ class TestRequestResultCache:
         key = RequestResultCache.make_key("GET", "/api/test")
         cache.set(key, {"result": "ok"})
         import time as _time
+
         _time.sleep(0.01)
         assert cache.get(key) is None
 
@@ -3887,6 +3888,7 @@ class TestRequestResultCache:
         cache.set("k1", {"a": 1})
         cache.set("k2", {"b": 2})
         import time as _time
+
         _time.sleep(0.01)
         removed = cache.cleanup_expired()
         assert removed == 2
@@ -4326,9 +4328,7 @@ class TestCommerceMCPBaseResultCache:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                mock_response.json.return_value = {
-                    "error_response": {"code": 40001, "msg": "bad"}
-                }
+                mock_response.json.return_value = {"error_response": {"code": 40001, "msg": "bad"}}
             else:
                 mock_response.json.return_value = {"result": "ok"}
             mock_response.status_code = 200
@@ -4373,9 +4373,7 @@ class TestCommerceMCPBaseDecompression:
 
         client = CommerceMCPBase(app_key="k", app_secret="s")
         original_data = {"result": {"products": list(range(100))}}
-        compressed_body = gzip_mod.compress(
-            json.dumps(original_data, ensure_ascii=False).encode()
-        )
+        compressed_body = gzip_mod.compress(json.dumps(original_data, ensure_ascii=False).encode())
 
         mock_response = MagicMock()
         mock_response.content = compressed_body

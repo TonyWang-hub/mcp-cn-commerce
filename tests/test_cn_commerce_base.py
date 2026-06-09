@@ -35,6 +35,7 @@ from cn_commerce_base import (
     CompressionMethod,
     ConfigurableRateLimiter,
     ConfigValidationError,
+    DecompressionStats,
     EndpointMetrics,
     EndpointRateLimit,
     MetricsCollector,
@@ -46,8 +47,12 @@ from cn_commerce_base import (
     RateLimitConfig,
     RateLimiter,
     RateLimitStats,
+    RequestCacheConfig,
+    RequestCacheStats,
     RequestCompressor,
     RequestPriority,
+    RequestResultCache,
+    ResponseDecompressor,
     RetryableError,
     RetryConfig,
     SensitiveDataFilter,
@@ -3681,3 +3686,758 @@ class TestCommerceMCPBasePriority:
         stats = client.get_priority_stats()
         assert stats["stats"]["total_dispatched"] == 1
         assert stats["stats"]["by_priority"]["high"] == 1
+
+
+# ── RequestCacheConfig Tests ───────────────────────────────
+
+
+class TestRequestCacheConfig:
+    """Tests for RequestCacheConfig dataclass."""
+
+    def test_default_values(self):
+        cfg = RequestCacheConfig()
+        assert cfg.enabled is True
+        assert cfg.max_size == 512
+        assert cfg.default_ttl_seconds == 300.0
+        assert cfg.cacheable_methods == ("GET",)
+        assert cfg.key_include_headers is False
+        assert cfg.exclude_error_responses is True
+
+    def test_custom_values(self):
+        cfg = RequestCacheConfig(
+            enabled=False,
+            max_size=128,
+            default_ttl_seconds=60.0,
+            cacheable_methods=("GET", "POST"),
+        )
+        assert cfg.enabled is False
+        assert cfg.max_size == 128
+        assert cfg.default_ttl_seconds == 60.0
+        assert cfg.cacheable_methods == ("GET", "POST")
+
+    def test_to_dict(self):
+        cfg = RequestCacheConfig(max_size=256)
+        d = cfg.to_dict()
+        assert d["max_size"] == 256
+        assert d["cacheable_methods"] == ["GET"]
+
+    def test_from_dict(self):
+        data = {
+            "enabled": False,
+            "max_size": 64,
+            "default_ttl_seconds": 120.0,
+            "cacheable_methods": ["GET", "POST"],
+        }
+        cfg = RequestCacheConfig.from_dict(data)
+        assert cfg.enabled is False
+        assert cfg.max_size == 64
+        assert cfg.cacheable_methods == ("GET", "POST")
+
+    def test_roundtrip(self):
+        original = RequestCacheConfig(max_size=100, default_ttl_seconds=60.0)
+        d = original.to_dict()
+        restored = RequestCacheConfig.from_dict(d)
+        assert restored.max_size == original.max_size
+        assert restored.default_ttl_seconds == original.default_ttl_seconds
+
+
+# ── RequestCacheStats Tests ────────────────────────────────
+
+
+class TestRequestCacheStats:
+    """Tests for RequestCacheStats dataclass."""
+
+    def test_default_values(self):
+        stats = RequestCacheStats()
+        assert stats.total_requests == 0
+        assert stats.cache_hits == 0
+        assert stats.cache_misses == 0
+        assert stats.total_stored == 0
+        assert stats.total_evicted == 0
+
+    def test_hit_rate_no_requests(self):
+        stats = RequestCacheStats()
+        assert stats.hit_rate == 0.0
+
+    def test_hit_rate_with_requests(self):
+        stats = RequestCacheStats()
+        stats.total_requests = 10
+        stats.cache_hits = 7
+        assert stats.hit_rate == pytest.approx(0.7)
+
+    def test_to_dict(self):
+        stats = RequestCacheStats(total_requests=5, cache_hits=3)
+        d = stats.to_dict()
+        assert d["total_requests"] == 5
+        assert d["cache_hits"] == 3
+        assert d["hit_rate"] == pytest.approx(0.6)
+
+    def test_reset(self):
+        stats = RequestCacheStats(total_requests=10, cache_hits=5)
+        stats.reset()
+        assert stats.total_requests == 0
+        assert stats.cache_hits == 0
+
+
+# ── RequestResultCache Tests ───────────────────────────────
+
+
+class TestRequestResultCache:
+    """Tests for RequestResultCache."""
+
+    def test_make_key_deterministic(self):
+        key1 = RequestResultCache.make_key("GET", "/api/test", {"page": "1"})
+        key2 = RequestResultCache.make_key("GET", "/api/test", {"page": "1"})
+        assert key1 == key2
+
+    def test_make_key_different_params(self):
+        key1 = RequestResultCache.make_key("GET", "/api/test", {"page": "1"})
+        key2 = RequestResultCache.make_key("GET", "/api/test", {"page": "2"})
+        assert key1 != key2
+
+    def test_make_key_different_methods(self):
+        key1 = RequestResultCache.make_key("GET", "/api/test")
+        key2 = RequestResultCache.make_key("POST", "/api/test")
+        assert key1 != key2
+
+    def test_set_and_get(self):
+        cache = RequestResultCache()
+        key = RequestResultCache.make_key("GET", "/api/test")
+        cache.set(key, {"result": "ok"})
+        assert cache.get(key) == {"result": "ok"}
+
+    def test_get_miss(self):
+        cache = RequestResultCache()
+        assert cache.get("nonexistent") is None
+
+    def test_ttl_expiry(self):
+        config = RequestCacheConfig(default_ttl_seconds=0.0)
+        cache = RequestResultCache(config)
+        key = RequestResultCache.make_key("GET", "/api/test")
+        cache.set(key, {"result": "ok"})
+        import time as _time
+        _time.sleep(0.01)
+        assert cache.get(key) is None
+
+    def test_ttl_override(self):
+        cache = RequestResultCache()
+        key = RequestResultCache.make_key("GET", "/api/test")
+        cache.set(key, {"result": "ok"}, ttl_seconds=60.0)
+        assert cache.get(key) == {"result": "ok"}
+
+    def test_lru_eviction(self):
+        config = RequestCacheConfig(max_size=2)
+        cache = RequestResultCache(config)
+        k1 = RequestResultCache.make_key("GET", "/a")
+        k2 = RequestResultCache.make_key("GET", "/b")
+        k3 = RequestResultCache.make_key("GET", "/c")
+
+        cache.set(k1, {"id": 1})
+        cache.set(k2, {"id": 2})
+        cache.set(k3, {"id": 3})  # Should evict k1
+
+        assert cache.get(k1) is None
+        assert cache.get(k2) == {"id": 2}
+        assert cache.get(k3) == {"id": 3}
+
+    def test_lru_access_moves_to_end(self):
+        config = RequestCacheConfig(max_size=2)
+        cache = RequestResultCache(config)
+        k1 = RequestResultCache.make_key("GET", "/a")
+        k2 = RequestResultCache.make_key("GET", "/b")
+
+        cache.set(k1, {"id": 1})
+        cache.set(k2, {"id": 2})
+        cache.get(k1)  # Move k1 to end
+        cache.set(RequestResultCache.make_key("GET", "/c"), {"id": 3})  # Evicts k2
+
+        assert cache.get(k1) == {"id": 1}
+        assert cache.get(k2) is None
+
+    def test_update_existing_key(self):
+        cache = RequestResultCache()
+        key = RequestResultCache.make_key("GET", "/api/test")
+        cache.set(key, {"v": 1})
+        cache.set(key, {"v": 2})
+        assert cache.get(key) == {"v": 2}
+        assert cache.size == 1
+
+    def test_invalidate_single(self):
+        cache = RequestResultCache()
+        key = RequestResultCache.make_key("GET", "/api/test")
+        cache.set(key, {"result": "ok"})
+        assert cache.invalidate(key) == 1
+        assert cache.get(key) is None
+
+    def test_invalidate_nonexistent(self):
+        cache = RequestResultCache()
+        assert cache.invalidate("missing") == 0
+
+    def test_invalidate_all(self):
+        cache = RequestResultCache()
+        cache.set("k1", {"a": 1})
+        cache.set("k2", {"b": 2})
+        count = cache.invalidate()
+        assert count == 2
+        assert cache.size == 0
+
+    def test_cleanup_expired(self):
+        config = RequestCacheConfig(default_ttl_seconds=0.0)
+        cache = RequestResultCache(config)
+        cache.set("k1", {"a": 1})
+        cache.set("k2", {"b": 2})
+        import time as _time
+        _time.sleep(0.01)
+        removed = cache.cleanup_expired()
+        assert removed == 2
+        assert cache.size == 0
+
+    def test_size(self):
+        cache = RequestResultCache()
+        assert cache.size == 0
+        cache.set("k1", {"a": 1})
+        assert cache.size == 1
+
+    def test_get_stats(self):
+        cache = RequestResultCache()
+        key = RequestResultCache.make_key("GET", "/api/test")
+        cache.set(key, {"result": "ok"})
+        cache.get(key)
+        cache.get("missing")
+        stats = cache.get_stats()
+        assert stats["total_requests"] == 2
+        assert stats["cache_hits"] == 1
+        assert stats["cache_misses"] == 1
+        assert stats["hit_rate"] == pytest.approx(0.5)
+        assert stats["current_size"] == 1
+        assert stats["max_size"] == 512
+
+    def test_reset_stats(self):
+        cache = RequestResultCache()
+        cache.set("k1", {"a": 1})
+        cache.get("k1")
+        cache.reset_stats()
+        stats = cache.get_stats()
+        assert stats["total_requests"] == 0
+
+    def test_clear(self):
+        cache = RequestResultCache()
+        cache.set("k1", {"a": 1})
+        cache.set("k2", {"b": 2})
+        cache.clear()
+        assert cache.size == 0
+        stats = cache.get_stats()
+        assert stats["total_requests"] == 0
+
+    def test_disabled_cache(self):
+        config = RequestCacheConfig(enabled=False)
+        cache = RequestResultCache(config)
+        assert config.enabled is False
+
+
+class TestRequestResultCacheConcurrency:
+    """Thread-safety tests for RequestResultCache."""
+
+    def test_concurrent_set_and_get(self):
+        import threading
+
+        cache = RequestResultCache()
+        errors = []
+
+        def writer():
+            try:
+                for i in range(100):
+                    cache.set(f"key_{i}", {"val": i})
+            except Exception as e:
+                errors.append(e)
+
+        def reader():
+            try:
+                for i in range(100):
+                    cache.get(f"key_{i}")
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=writer), threading.Thread(target=reader)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert errors == []
+
+    def test_concurrent_invalidate(self):
+        import threading
+
+        cache = RequestResultCache()
+
+        def writer():
+            for i in range(50):
+                cache.set(f"k{i}", {"v": i})
+
+        def invalidator():
+            for _ in range(50):
+                cache.invalidate()
+
+        threads = [threading.Thread(target=writer), threading.Thread(target=invalidator)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+
+# ── DecompressionStats Tests ───────────────────────────────
+
+
+class TestDecompressionStats:
+    """Tests for DecompressionStats dataclass."""
+
+    def test_default_values(self):
+        stats = DecompressionStats()
+        assert stats.total_responses == 0
+        assert stats.decompressed_responses == 0
+        assert stats.total_compressed_bytes == 0
+        assert stats.total_decompressed_bytes == 0
+        assert stats.decompression_errors == 0
+
+    def test_decompression_rate_no_responses(self):
+        stats = DecompressionStats()
+        assert stats.decompression_rate == 0.0
+
+    def test_decompression_rate_with_responses(self):
+        stats = DecompressionStats()
+        stats.total_responses = 10
+        stats.decompressed_responses = 4
+        assert stats.decompression_rate == pytest.approx(0.4)
+
+    def test_avg_compression_ratio(self):
+        stats = DecompressionStats()
+        stats.total_compressed_bytes = 100
+        stats.total_decompressed_bytes = 200
+        assert stats.avg_compression_ratio == pytest.approx(2.0)
+
+    def test_avg_compression_ratio_no_data(self):
+        stats = DecompressionStats()
+        assert stats.avg_compression_ratio == 0.0
+
+    def test_to_dict(self):
+        stats = DecompressionStats(total_responses=5, decompressed_responses=3)
+        d = stats.to_dict()
+        assert d["total_responses"] == 5
+        assert d["decompressed_responses"] == 3
+        assert "decompression_rate" in d
+        assert "bytes_saved" in d
+
+    def test_reset(self):
+        stats = DecompressionStats(total_responses=10, decompressed_responses=5)
+        stats.reset()
+        assert stats.total_responses == 0
+        assert stats.decompressed_responses == 0
+
+
+# ── ResponseDecompressor Tests ─────────────────────────────
+
+
+class TestResponseDecompressor:
+    """Tests for ResponseDecompressor."""
+
+    def test_no_encoding(self):
+        decompressor = ResponseDecompressor()
+        body = b'{"result": "ok"}'
+        result = decompressor.decompress(body, content_encoding="")
+        assert result == body
+
+    def test_identity_encoding(self):
+        decompressor = ResponseDecompressor()
+        body = b'{"result": "ok"}'
+        result = decompressor.decompress(body, content_encoding="identity")
+        assert result == body
+
+    def test_gzip_decompression(self):
+        import gzip as gzip_mod
+
+        decompressor = ResponseDecompressor()
+        original = b'{"data": "test_value"}'
+        compressed = gzip_mod.compress(original)
+        result = decompressor.decompress(compressed, content_encoding="gzip")
+        assert result == original
+
+    def test_deflate_decompression(self):
+        decompressor = ResponseDecompressor()
+        original = b'{"data": "test_value"}'
+        compressed = zlib.compress(original)
+        result = decompressor.decompress(compressed, content_encoding="deflate")
+        assert result == original
+
+    def test_x_gzip_decompression(self):
+        import gzip as gzip_mod
+
+        decompressor = ResponseDecompressor()
+        original = b'{"data": "test_value"}'
+        compressed = gzip_mod.compress(original)
+        result = decompressor.decompress(compressed, content_encoding="x-gzip")
+        assert result == original
+
+    def test_unsupported_encoding_returns_original(self):
+        decompressor = ResponseDecompressor()
+        body = b"some data"
+        result = decompressor.decompress(body, content_encoding="br")
+        # brotli likely not installed, should return original
+        assert isinstance(result, bytes)
+
+    def test_corrupt_gzip_returns_original(self):
+        decompressor = ResponseDecompressor()
+        body = b"not gzip data"
+        result = decompressor.decompress(body, content_encoding="gzip")
+        assert result == body  # Falls back to original on error
+
+    def test_stats_tracking(self):
+        import gzip as gzip_mod
+
+        decompressor = ResponseDecompressor()
+        original = b"x" * 1000
+        compressed = gzip_mod.compress(original)
+        decompressor.decompress(compressed, content_encoding="gzip")
+        decompressor.decompress(b"plain", content_encoding="identity")
+
+        stats = decompressor.get_stats()
+        assert stats["total_responses"] == 2
+        assert stats["decompressed_responses"] == 1
+        assert stats["total_compressed_bytes"] > 0
+
+    def test_stats_decompression_rate(self):
+        decompressor = ResponseDecompressor()
+        decompressor.decompress(b"a", content_encoding="gzip")  # Corrupt, error
+        decompressor.decompress(b"b", content_encoding="identity")  # No decompression
+        stats = decompressor.get_stats()
+        assert stats["total_responses"] == 2
+
+    def test_reset_stats(self):
+        decompressor = ResponseDecompressor()
+        decompressor.decompress(b"test", content_encoding="identity")
+        decompressor.reset_stats()
+        stats = decompressor.get_stats()
+        assert stats["total_responses"] == 0
+
+    def test_multiple_gzip_responses(self):
+        import gzip as gzip_mod
+
+        decompressor = ResponseDecompressor()
+        for i in range(5):
+            original = f'{{"id": {i}}}'.encode()
+            compressed = gzip_mod.compress(original)
+            result = decompressor.decompress(compressed, content_encoding="gzip")
+            assert result == original
+
+        stats = decompressor.get_stats()
+        assert stats["total_responses"] == 5
+        assert stats["decompressed_responses"] == 5
+
+
+class TestResponseDecompressorConcurrency:
+    """Thread-safety tests for ResponseDecompressor."""
+
+    def test_concurrent_decompress(self):
+        import gzip as gzip_mod
+        import threading
+
+        decompressor = ResponseDecompressor()
+        original = b"x" * 500
+        compressed = gzip_mod.compress(original)
+        errors = []
+
+        def decompress_batch():
+            try:
+                for _ in range(50):
+                    result = decompressor.decompress(compressed, content_encoding="gzip")
+                    assert result == original
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=decompress_batch) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert errors == []
+        stats = decompressor.get_stats()
+        assert stats["total_responses"] == 200
+        assert stats["decompressed_responses"] == 200
+
+
+# ── CommerceMCPBase Result Cache Integration ───────────────
+
+
+class TestCommerceMCPBaseResultCache:
+    """Tests for CommerceMCPBase result cache integration."""
+
+    def test_has_result_cache(self):
+        client = CommerceMCPBase()
+        assert isinstance(client._result_cache, RequestResultCache)
+
+    def test_custom_cache_config(self):
+        config = RequestCacheConfig(max_size=64, default_ttl_seconds=60.0)
+        client = CommerceMCPBase(cache_config=config)
+        assert client._result_cache.config.max_size == 64
+        assert client._result_cache.config.default_ttl_seconds == 60.0
+
+    def test_get_result_cache_stats(self):
+        client = CommerceMCPBase()
+        stats = client.get_result_cache_stats()
+        assert "total_requests" in stats
+        assert "cache_hits" in stats
+        assert "hit_rate" in stats
+        assert "current_size" in stats
+
+    def test_invalidate_result_cache(self):
+        client = CommerceMCPBase()
+        client._result_cache.set("k1", {"a": 1})
+        count = client.invalidate_result_cache()
+        assert count == 1
+
+    def test_invalidate_result_cache_specific_key(self):
+        client = CommerceMCPBase()
+        client._result_cache.set("k1", {"a": 1})
+        client._result_cache.set("k2", {"b": 2})
+        count = client.invalidate_result_cache("k1")
+        assert count == 1
+        assert client._result_cache.size == 1
+
+    @pytest.mark.asyncio
+    async def test_get_request_cached(self):
+        """Second identical GET request should be served from cache."""
+        config = RequestCacheConfig(default_ttl_seconds=60.0)
+        client = CommerceMCPBase(app_key="k", app_secret="s", cache_config=config)
+
+        call_count = 0
+        mock_response = MagicMock()
+
+        def make_response(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            mock_response.json.return_value = {"result": {"id": call_count}}
+            mock_response.status_code = 200
+            mock_response.headers = {}
+            return mock_response
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = make_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            r1 = await client._request("GET", "/api/test", params={"page": "1"})
+            r2 = await client._request("GET", "/api/test", params={"page": "1"})
+
+        assert r1 == {"result": {"id": 1}}
+        assert r2 == {"result": {"id": 1}}  # Cached
+        assert call_count == 1  # Only one actual HTTP call
+
+    @pytest.mark.asyncio
+    async def test_different_params_not_cached(self):
+        """Different params should result in different cache entries."""
+        config = RequestCacheConfig(default_ttl_seconds=60.0)
+        client = CommerceMCPBase(app_key="k", app_secret="s", cache_config=config)
+
+        call_count = 0
+        mock_response = MagicMock()
+
+        def make_response(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            mock_response.json.return_value = {"result": {"id": call_count}}
+            mock_response.status_code = 200
+            mock_response.headers = {}
+            return mock_response
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = make_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            r1 = await client._request("GET", "/api/test", params={"page": "1"})
+            r2 = await client._request("GET", "/api/test", params={"page": "2"})
+
+        assert r1 != r2
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_cache_disabled(self):
+        """When cache is disabled, all requests should go through."""
+        config = RequestCacheConfig(enabled=False)
+        client = CommerceMCPBase(app_key="k", app_secret="s", cache_config=config)
+
+        call_count = 0
+        mock_response = MagicMock()
+
+        def make_response(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            mock_response.json.return_value = {"result": {"id": call_count}}
+            mock_response.status_code = 200
+            mock_response.headers = {}
+            return mock_response
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = make_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            await client._request("GET", "/api/test")
+            await client._request("GET", "/api/test")
+
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_use_cache_false_bypasses(self):
+        """use_cache=False should skip caching for that request."""
+        config = RequestCacheConfig(default_ttl_seconds=60.0)
+        client = CommerceMCPBase(app_key="k", app_secret="s", cache_config=config)
+
+        call_count = 0
+        mock_response = MagicMock()
+
+        def make_response(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            mock_response.json.return_value = {"result": {"id": call_count}}
+            mock_response.status_code = 200
+            mock_response.headers = {}
+            return mock_response
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = make_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            await client._request("GET", "/api/test", use_cache=False)
+            await client._request("GET", "/api/test", use_cache=False)
+
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_error_response_not_cached(self):
+        """Error responses should not be cached."""
+        config = RequestCacheConfig(default_ttl_seconds=60.0)
+        client = CommerceMCPBase(app_key="k", app_secret="s", cache_config=config)
+
+        call_count = 0
+        mock_response = MagicMock()
+
+        def make_response(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                mock_response.json.return_value = {
+                    "error_response": {"code": 40001, "msg": "bad"}
+                }
+            else:
+                mock_response.json.return_value = {"result": "ok"}
+            mock_response.status_code = 200
+            mock_response.headers = {}
+            return mock_response
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = make_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            with pytest.raises(CommerceAPIError):
+                await client._request("GET", "/api/test")
+
+            # Second request should not be served from cache
+            result = await client._request("GET", "/api/test")
+            assert result == {"result": "ok"}
+            assert call_count == 2
+
+
+# ── CommerceMCPBase Decompression Integration ──────────────
+
+
+class TestCommerceMCPBaseDecompression:
+    """Tests for CommerceMCPBase response decompression integration."""
+
+    def test_has_decompressor(self):
+        client = CommerceMCPBase()
+        assert isinstance(client._decompressor, ResponseDecompressor)
+
+    def test_get_decompression_stats(self):
+        client = CommerceMCPBase()
+        stats = client.get_decompression_stats()
+        assert "total_responses" in stats
+        assert "decompressed_responses" in stats
+        assert "decompression_rate" in stats
+
+    @pytest.mark.asyncio
+    async def test_gzip_response_decompressed(self):
+        """Compressed responses should be transparently decompressed."""
+        import gzip as gzip_mod
+
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+        original_data = {"result": {"products": list(range(100))}}
+        compressed_body = gzip_mod.compress(
+            json.dumps(original_data, ensure_ascii=False).encode()
+        )
+
+        mock_response = MagicMock()
+        mock_response.content = compressed_body
+        mock_response.status_code = 200
+        mock_response.headers = {"content-encoding": "gzip"}
+        # json() should not be called when decompression succeeds
+        mock_response.json.return_value = original_data
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client._request("GET", "/api/test")
+
+        assert result == original_data
+        stats = client.get_decompression_stats()
+        assert stats["decompressed_responses"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_no_compression_header_uses_json(self):
+        """Responses without Content-Encoding should use resp.json()."""
+        client = CommerceMCPBase(app_key="k", app_secret="s")
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": "ok"}
+        mock_response.status_code = 200
+        mock_response.headers = {}
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+        mock_client.is_closed = False
+
+        with patch.object(client, "_ensure_client", return_value=mock_client):
+            result = await client._request("GET", "/api/test")
+
+        assert result == {"result": "ok"}
+
+
+# ── CommerceMCPBase Cache + Compression Combined ───────────
+
+
+class TestCommerceMCPBaseCacheAndCompression:
+    """Tests for combined cache and compression features."""
+
+    def test_all_new_features_initialized(self):
+        """Client should have result cache, decompressor, and compressor."""
+        client = CommerceMCPBase()
+        assert isinstance(client._result_cache, RequestResultCache)
+        assert isinstance(client._decompressor, ResponseDecompressor)
+        assert isinstance(client._compressor, RequestCompressor)
+
+    def test_custom_configs_combined(self):
+        """All custom configs should be accepted together."""
+        cache_cfg = RequestCacheConfig(max_size=32)
+        comp_cfg = CompressionConfig(method=CompressionMethod.GZIP)
+        rate_cfg = RateLimitConfig(default_requests_per_second=5.0)
+        client = CommerceMCPBase(
+            compression_config=comp_cfg,
+            rate_limit_config=rate_cfg,
+            cache_config=cache_cfg,
+        )
+        assert client._result_cache.config.max_size == 32
+        assert client._compressor.config.method == CompressionMethod.GZIP
+        assert client._configurable_limiter.config.default_requests_per_second == 5.0

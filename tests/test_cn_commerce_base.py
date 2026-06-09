@@ -27,10 +27,20 @@ from cn_commerce_base import (
     CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,
+    DataExporter,
     EndpointMetrics,
+    ExportConfig,
+    ExportFormat,
     MetricsCollector,
     RateLimiter,
     SignMethod,
+    WebhookDeliveryError,
+    WebhookDeliveryResult,
+    WebhookEvent,
+    WebhookEventType,
+    WebhookManager,
+    WebhookSignatureVerifier,
+    WebhookSubscription,
     format_error_response,
 )
 
@@ -758,3 +768,305 @@ class TestBatchRequest:
         assert summary.failed == 2
         assert summary.error_summary["CommerceAPIError"] == 1
         assert summary.error_summary["ConnectError"] == 1
+
+
+# ── ExportFormat Tests ─────────────────────────────────────
+
+
+class TestExportFormat:
+    """Tests for ExportFormat enum."""
+
+    def test_csv_value(self):
+        assert ExportFormat.CSV == "csv"
+
+    def test_json_value(self):
+        assert ExportFormat.JSON == "json"
+
+    def test_excel_value(self):
+        assert ExportFormat.EXCEL == "excel"
+
+    def test_is_string_enum(self):
+        assert isinstance(ExportFormat.CSV, str)
+
+
+# ── ExportConfig Tests ────────────────────────────────────
+
+
+class TestExportConfig:
+    """Tests for ExportConfig dataclass."""
+
+    def test_default_values(self):
+        config = ExportConfig()
+        assert config.format == ExportFormat.CSV
+        assert config.fields is None
+        assert config.filename == "export"
+        assert config.output_dir == "."
+        assert config.page == 0
+        assert config.page_size == 1000
+        assert config.flatten_nested is True
+        assert config.encoding == "utf-8"
+
+    def test_custom_values(self):
+        config = ExportConfig(
+            format=ExportFormat.JSON,
+            fields=["id", "name"],
+            filename="orders",
+            output_dir="/tmp",
+            page=2,
+            page_size=50,
+            flatten_nested=False,
+            encoding="gbk",
+        )
+        assert config.format == ExportFormat.JSON
+        assert config.fields == ["id", "name"]
+        assert config.filename == "orders"
+        assert config.output_dir == "/tmp"
+        assert config.page == 2
+        assert config.page_size == 50
+        assert config.flatten_nested is False
+        assert config.encoding == "gbk"
+
+
+# ── DataExporter._flatten_dict Tests ─────────────────────
+
+
+class TestDataExporterFlattenDict:
+    """Tests for DataExporter._flatten_dict."""
+
+    def test_flat_dict_unchanged(self):
+        d = {"id": 1, "name": "test"}
+        result = DataExporter._flatten_dict(d)
+        assert result == {"id": 1, "name": "test"}
+
+    def test_nested_dict_flattened(self):
+        d = {"id": 1, "address": {"city": "Beijing", "zip": "100000"}}
+        result = DataExporter._flatten_dict(d)
+        assert result == {"id": 1, "address.city": "Beijing", "address.zip": "100000"}
+
+    def test_deeply_nested(self):
+        d = {"a": {"b": {"c": "deep"}}}
+        result = DataExporter._flatten_dict(d)
+        assert result == {"a.b.c": "deep"}
+
+    def test_list_values_json_stringified(self):
+        d = {"id": 1, "tags": ["a", "b"]}
+        result = DataExporter._flatten_dict(d)
+        assert result["id"] == 1
+        assert result["tags"] == '["a", "b"]'
+
+    def test_empty_dict(self):
+        result = DataExporter._flatten_dict({})
+        assert result == {}
+
+    def test_custom_separator(self):
+        d = {"a": {"b": 1}}
+        result = DataExporter._flatten_dict(d, sep="__")
+        assert result == {"a__b": 1}
+
+
+# ── DataExporter._select_fields Tests ─────────────────────
+
+
+class TestDataExporterSelectFields:
+    """Tests for DataExporter._select_fields."""
+
+    def test_select_specific_fields(self):
+        data = [{"id": 1, "name": "a", "extra": "x"}, {"id": 2, "name": "b", "extra": "y"}]
+        result = DataExporter._select_fields(data, ["id", "name"])
+        assert result == [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]
+
+    def test_none_fields_returns_all(self):
+        data = [{"id": 1, "name": "a"}]
+        result = DataExporter._select_fields(data, None)
+        assert result == [{"id": 1, "name": "a"}]
+
+    def test_missing_field_returns_none(self):
+        data = [{"id": 1}]
+        result = DataExporter._select_fields(data, ["id", "name"])
+        assert result == [{"id": 1, "name": None}]
+
+    def test_empty_data(self):
+        result = DataExporter._select_fields([], ["id"])
+        assert result == []
+
+
+# ── DataExporter._paginate_data Tests ─────────────────────
+
+
+class TestDataExporterPaginateData:
+    """Tests for DataExporter._paginate_data."""
+
+    def test_page_zero_returns_all(self):
+        data = [{"id": i} for i in range(10)]
+        page_data, info = DataExporter._paginate_data(data, page=0, page_size=3)
+        assert len(page_data) == 10
+        assert info["total"] == 10
+        assert info["page"] == 0
+
+    def test_first_page(self):
+        data = [{"id": i} for i in range(10)]
+        page_data, info = DataExporter._paginate_data(data, page=1, page_size=3)
+        assert len(page_data) == 3
+        assert page_data[0]["id"] == 0
+        assert info["page"] == 1
+        assert info["total_pages"] == 4
+        assert info["has_next"] is True
+        assert info["has_prev"] is False
+
+    def test_last_page(self):
+        data = [{"id": i} for i in range(10)]
+        page_data, info = DataExporter._paginate_data(data, page=4, page_size=3)
+        assert len(page_data) == 1
+        assert page_data[0]["id"] == 9
+        assert info["has_next"] is False
+        assert info["has_prev"] is True
+
+    def test_empty_data(self):
+        page_data, info = DataExporter._paginate_data([], page=1, page_size=10)
+        assert page_data == []
+        assert info["total"] == 0
+
+
+# ── DataExporter.export Tests ─────────────────────────────
+
+
+class TestDataExporterExport:
+    """Tests for DataExporter.export (file-based export)."""
+
+    def test_export_csv(self, tmp_path):
+        data = [{"id": 1, "name": "Item A"}, {"id": 2, "name": "Item B"}]
+        config = ExportConfig(format=ExportFormat.CSV, output_dir=str(tmp_path), filename="test")
+        result = DataExporter.export(data, config)
+        assert result["format"] == "csv"
+        assert result["record_count"] == 2
+        assert "id" in result["fields"]
+        assert "name" in result["fields"]
+        content = (tmp_path / "test.csv").read_text(encoding="utf-8")
+        assert "id,name" in content
+        assert "Item A" in content
+
+    def test_export_json(self, tmp_path):
+        data = [{"id": 1, "name": "Item A"}]
+        config = ExportConfig(format=ExportFormat.JSON, output_dir=str(tmp_path), filename="test")
+        result = DataExporter.export(data, config)
+        assert result["format"] == "json"
+        assert result["record_count"] == 1
+        content = json.loads((tmp_path / "test.json").read_text(encoding="utf-8"))
+        assert content[0]["id"] == 1
+
+    def test_export_excel(self, tmp_path):
+        data = [{"id": 1, "name": "Item A"}, {"id": 2, "name": "Item B"}]
+        config = ExportConfig(format=ExportFormat.EXCEL, output_dir=str(tmp_path), filename="test")
+        result = DataExporter.export(data, config)
+        assert result["format"] == "excel"
+        assert result["record_count"] == 2
+        assert (tmp_path / "test.excel").exists()
+
+    def test_export_with_custom_fields(self, tmp_path):
+        data = [{"id": 1, "name": "A", "secret": "hidden"}]
+        config = ExportConfig(
+            format=ExportFormat.JSON,
+            fields=["id", "name"],
+            output_dir=str(tmp_path),
+            filename="filtered",
+        )
+        result = DataExporter.export(data, config)
+        content = json.loads((tmp_path / "filtered.json").read_text(encoding="utf-8"))
+        assert "secret" not in content[0]
+        assert content[0]["id"] == 1
+
+    def test_export_with_pagination(self, tmp_path):
+        data = [{"id": i} for i in range(10)]
+        config = ExportConfig(
+            format=ExportFormat.JSON,
+            output_dir=str(tmp_path),
+            filename="paged",
+            page=2,
+            page_size=3,
+        )
+        result = DataExporter.export(data, config)
+        assert result["record_count"] == 3
+        assert result["pagination"]["page"] == 2
+        assert result["pagination"]["total"] == 10
+
+    def test_export_with_nested_flattening(self, tmp_path):
+        data = [{"id": 1, "address": {"city": "Beijing"}}]
+        config = ExportConfig(
+            format=ExportFormat.JSON,
+            output_dir=str(tmp_path),
+            filename="flat",
+            flatten_nested=True,
+        )
+        result = DataExporter.export(data, config)
+        content = json.loads((tmp_path / "flat.json").read_text(encoding="utf-8"))
+        assert "address.city" in content[0]
+
+    def test_export_creates_output_dir(self, tmp_path):
+        nested_dir = tmp_path / "subdir" / "exports"
+        config = ExportConfig(
+            format=ExportFormat.JSON,
+            output_dir=str(nested_dir),
+            filename="test",
+        )
+        DataExporter.export([{"id": 1}], config)
+        assert (nested_dir / "test.json").exists()
+
+    def test_export_empty_data(self, tmp_path):
+        config = ExportConfig(
+            format=ExportFormat.JSON,
+            output_dir=str(tmp_path),
+            filename="empty",
+        )
+        result = DataExporter.export([], config)
+        assert result["record_count"] == 0
+
+    def test_export_default_config(self, tmp_path):
+        config = ExportConfig(output_dir=str(tmp_path))
+        result = DataExporter.export([{"id": 1}], config)
+        assert result["format"] == "csv"
+        assert (tmp_path / "export.csv").exists()
+
+
+# ── DataExporter.export_to_string Tests ───────────────────
+
+
+class TestDataExporterExportToString:
+    """Tests for DataExporter.export_to_string."""
+
+    def test_json_string(self):
+        data = [{"id": 1, "name": "test"}]
+        result = DataExporter.export_to_string(data, format=ExportFormat.JSON)
+        parsed = json.loads(result)
+        assert parsed[0]["id"] == 1
+
+    def test_csv_string(self):
+        data = [{"id": 1, "name": "test"}]
+        result = DataExporter.export_to_string(data, format=ExportFormat.CSV)
+        assert "id,name" in result
+        assert "1,test" in result
+
+    def test_with_fields(self):
+        data = [{"id": 1, "name": "test", "secret": "hidden"}]
+        result = DataExporter.export_to_string(
+            data, format=ExportFormat.JSON, fields=["id", "name"]
+        )
+        parsed = json.loads(result)
+        assert "secret" not in parsed[0]
+
+    def test_excel_raises(self):
+        with pytest.raises(ValueError, match="does not support Excel"):
+            DataExporter.export_to_string([{"id": 1}], format=ExportFormat.EXCEL)
+
+    def test_empty_data_json(self):
+        result = DataExporter.export_to_string([], format=ExportFormat.JSON)
+        assert json.loads(result) == []
+
+    def test_empty_data_csv(self):
+        result = DataExporter.export_to_string([], format=ExportFormat.CSV)
+        assert result == ""
+
+    def test_flatten_nested(self):
+        data = [{"id": 1, "meta": {"key": "val"}}]
+        result = DataExporter.export_to_string(data, format=ExportFormat.JSON, flatten_nested=True)
+        parsed = json.loads(result)
+        assert "meta.key" in parsed[0]

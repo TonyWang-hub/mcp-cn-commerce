@@ -2730,6 +2730,658 @@ class ConfigValidator:
         return self.validate(config, prefix=f"{env_prefix}_")
 
 
+# ── Load Balancing ─────────────────────────────────────────
+
+
+class LoadBalancingStrategy(StrEnum):
+    """Supported load balancing strategies.
+
+    Attributes:
+        ROUND_ROBIN: Distributes requests sequentially across endpoints.
+        WEIGHTED: Distributes requests based on endpoint weights.
+        LEAST_CONNECTIONS: Routes to the endpoint with fewest active connections.
+    """
+
+    ROUND_ROBIN = "round_robin"
+    WEIGHTED = "weighted"
+    LEAST_CONNECTIONS = "least_connections"
+
+
+@dataclass
+class EndpointNode:
+    """Represents a single endpoint in a load balancing pool.
+
+    Attributes:
+        url: The endpoint URL.
+        weight: Relative weight for weighted load balancing (higher = more traffic).
+        active_connections: Current number of active connections.
+        is_healthy: Whether the endpoint is currently considered healthy.
+        failure_count: Number of consecutive failures.
+        last_failure_time: Timestamp of the last failure (0.0 if never failed).
+        total_requests: Total requests routed to this endpoint.
+        total_failures: Total failures for this endpoint.
+        avg_latency_ms: Rolling average latency in milliseconds.
+    """
+
+    url: str = ""
+    weight: int = 1
+    active_connections: int = 0
+    is_healthy: bool = True
+    failure_count: int = 0
+    last_failure_time: float = 0.0
+    total_requests: int = 0
+    total_failures: int = 0
+    avg_latency_ms: float = 0.0
+
+
+class LoadBalancer:
+    """Distributes requests across multiple endpoints using configurable strategies.
+
+    Supports round-robin, weighted, and least-connections load balancing.
+    Integrates with failover to automatically skip unhealthy endpoints.
+
+    Usage::
+
+        lb = LoadBalancer(LoadBalancingStrategy.WEIGHTED)
+        lb.add_endpoint("https://api1.example.com", weight=3)
+        lb.add_endpoint("https://api2.example.com", weight=1)
+        endpoint = lb.get_endpoint()
+    """
+
+    def __init__(self, strategy: LoadBalancingStrategy = LoadBalancingStrategy.ROUND_ROBIN) -> None:
+        """Initialize the load balancer.
+
+        Args:
+            strategy: The load balancing strategy to use.
+        """
+        self.strategy = strategy
+        self._endpoints: dict[str, EndpointNode] = {}
+        self._round_robin_index: int = 0
+        self._lock = threading.Lock()
+
+    def add_endpoint(self, url: str, weight: int = 1) -> EndpointNode:
+        """Add an endpoint to the pool.
+
+        Args:
+            url: The endpoint URL.
+            weight: Relative weight for weighted load balancing.
+
+        Returns:
+            The created EndpointNode.
+        """
+        with self._lock:
+            if url in self._endpoints:
+                existing = self._endpoints[url]
+                existing.weight = weight
+                return existing
+            node = EndpointNode(url=url, weight=max(1, weight))
+            self._endpoints[url] = node
+            logger.info(f"Load balancer: added endpoint {url} (weight={weight})")
+            return node
+
+    def remove_endpoint(self, url: str) -> bool:
+        """Remove an endpoint from the pool.
+
+        Args:
+            url: The endpoint URL to remove.
+
+        Returns:
+            True if the endpoint was found and removed.
+        """
+        with self._lock:
+            if url in self._endpoints:
+                del self._endpoints[url]
+                logger.info(f"Load balancer: removed endpoint {url}")
+                return True
+            return False
+
+    def mark_healthy(self, url: str) -> None:
+        """Mark an endpoint as healthy.
+
+        Args:
+            url: The endpoint URL.
+        """
+        with self._lock:
+            node = self._endpoints.get(url)
+            if node:
+                was_unhealthy = not node.is_healthy
+                node.is_healthy = True
+                node.failure_count = 0
+                if was_unhealthy:
+                    logger.info(f"Load balancer: endpoint {url} recovered")
+
+    def mark_unhealthy(self, url: str) -> None:
+        """Mark an endpoint as unhealthy.
+
+        Args:
+            url: The endpoint URL.
+        """
+        with self._lock:
+            node = self._endpoints.get(url)
+            if node:
+                node.is_healthy = False
+                node.failure_count += 1
+                node.total_failures += 1
+                node.last_failure_time = time.time()
+                logger.warning(
+                    f"Load balancer: endpoint {url} marked unhealthy "
+                    f"(failures={node.failure_count})"
+                )
+
+    def record_success(self, url: str, latency_ms: float = 0.0) -> None:
+        """Record a successful request to an endpoint.
+
+        Args:
+            url: The endpoint URL.
+            latency_ms: Request latency in milliseconds.
+        """
+        with self._lock:
+            node = self._endpoints.get(url)
+            if node:
+                node.total_requests += 1
+                # Exponential moving average for latency
+                if node.avg_latency_ms == 0.0:
+                    node.avg_latency_ms = latency_ms
+                else:
+                    node.avg_latency_ms = 0.8 * node.avg_latency_ms + 0.2 * latency_ms
+
+    def record_failure(self, url: str) -> None:
+        """Record a failed request to an endpoint.
+
+        Args:
+            url: The endpoint URL.
+        """
+        self.mark_unhealthy(url)
+
+    def _get_healthy_endpoints(self) -> list[EndpointNode]:
+        """Get all healthy endpoints."""
+        return [n for n in self._endpoints.values() if n.is_healthy]
+
+    def get_endpoint(self) -> EndpointNode | None:
+        """Select the next endpoint based on the load balancing strategy.
+
+        Returns:
+            The selected EndpointNode, or None if no healthy endpoints are available.
+        """
+        with self._lock:
+            healthy = self._get_healthy_endpoints()
+            if not healthy:
+                logger.warning("Load balancer: no healthy endpoints available")
+                return None
+
+            if self.strategy == LoadBalancingStrategy.ROUND_ROBIN:
+                return self._round_robin(healthy)
+            elif self.strategy == LoadBalancingStrategy.WEIGHTED:
+                return self._weighted(healthy)
+            elif self.strategy == LoadBalancingStrategy.LEAST_CONNECTIONS:
+                return self._least_connections(healthy)
+            else:
+                return self._round_robin(healthy)
+
+    def _round_robin(self, endpoints: list[EndpointNode]) -> EndpointNode:
+        """Select endpoint using round-robin.
+
+        Args:
+            endpoints: List of healthy endpoints.
+
+        Returns:
+            Selected endpoint.
+        """
+        idx = self._round_robin_index % len(endpoints)
+        self._round_robin_index += 1
+        return endpoints[idx]
+
+    def _weighted(self, endpoints: list[EndpointNode]) -> EndpointNode:
+        """Select endpoint using weighted random selection.
+
+        Args:
+            endpoints: List of healthy endpoints.
+
+        Returns:
+            Selected endpoint.
+        """
+        total_weight = sum(e.weight for e in endpoints)
+        if total_weight <= 0:
+            return endpoints[0]
+
+        r = random.random() * total_weight
+        cumulative = 0.0
+        for endpoint in endpoints:
+            cumulative += endpoint.weight
+            if r <= cumulative:
+                return endpoint
+        return endpoints[-1]
+
+    def _least_connections(self, endpoints: list[EndpointNode]) -> EndpointNode:
+        """Select the endpoint with the fewest active connections.
+
+        Args:
+            endpoints: List of healthy endpoints.
+
+        Returns:
+            Selected endpoint.
+        """
+        return min(endpoints, key=lambda e: e.active_connections)
+
+    def increment_connections(self, url: str) -> None:
+        """Increment active connection count for an endpoint.
+
+        Args:
+            url: The endpoint URL.
+        """
+        with self._lock:
+            node = self._endpoints.get(url)
+            if node:
+                node.active_connections += 1
+
+    def decrement_connections(self, url: str) -> None:
+        """Decrement active connection count for an endpoint.
+
+        Args:
+            url: The endpoint URL.
+        """
+        with self._lock:
+            node = self._endpoints.get(url)
+            if node:
+                node.active_connections = max(0, node.active_connections - 1)
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get load balancer statistics.
+
+        Returns:
+            Dict with strategy, endpoint count, healthy count, and per-endpoint stats.
+        """
+        with self._lock:
+            total = len(self._endpoints)
+            healthy = sum(1 for n in self._endpoints.values() if n.is_healthy)
+            return {
+                "strategy": self.strategy.value,
+                "total_endpoints": total,
+                "healthy_endpoints": healthy,
+                "unhealthy_endpoints": total - healthy,
+                "endpoints": {
+                    url: {
+                        "url": n.url,
+                        "weight": n.weight,
+                        "active_connections": n.active_connections,
+                        "is_healthy": n.is_healthy,
+                        "failure_count": n.failure_count,
+                        "total_requests": n.total_requests,
+                        "total_failures": n.total_failures,
+                        "avg_latency_ms": round(n.avg_latency_ms, 2),
+                    }
+                    for url, n in self._endpoints.items()
+                },
+            }
+
+    @property
+    def endpoint_count(self) -> int:
+        """Number of endpoints in the pool."""
+        return len(self._endpoints)
+
+    @property
+    def healthy_count(self) -> int:
+        """Number of healthy endpoints."""
+        return sum(1 for n in self._endpoints.values() if n.is_healthy)
+
+
+# ── Failover ──────────────────────────────────────────────
+
+
+@dataclass
+class FailoverConfig:
+    """Configuration for the failover mechanism.
+
+    Attributes:
+        max_failures: Number of consecutive failures before marking endpoint unhealthy.
+        recovery_check_interval: Seconds between recovery probe attempts.
+        recovery_timeout: Timeout for recovery probes in seconds.
+        enable_auto_recovery: Whether to automatically attempt recovery of failed endpoints.
+        circuit_breaker_threshold: Failure rate (0.0-1.0) to trip circuit breaker.
+        circuit_breaker_reset_seconds: Seconds before resetting a tripped circuit breaker.
+    """
+
+    max_failures: int = 3
+    recovery_check_interval: float = 30.0
+    recovery_timeout: float = 5.0
+    enable_auto_recovery: bool = True
+    circuit_breaker_threshold: float = 0.5
+    circuit_breaker_reset_seconds: float = 60.0
+
+
+@dataclass
+class CircuitBreakerState:
+    """State of a circuit breaker for an endpoint.
+
+    Attributes:
+        url: The endpoint URL.
+        is_open: Whether the circuit is open (requests blocked).
+        failure_count: Number of failures since last reset.
+        success_count: Number of successes since last reset.
+        last_failure_time: Timestamp of last failure.
+        opened_at: Timestamp when the circuit was opened.
+    """
+
+    url: str = ""
+    is_open: bool = False
+    failure_count: int = 0
+    success_count: int = 0
+    last_failure_time: float = 0.0
+    opened_at: float = 0.0
+
+
+class FailoverManager:
+    """Manages automatic failover and recovery for API endpoints.
+
+    Works with ``LoadBalancer`` to detect failures, mark endpoints unhealthy,
+    and periodically probe them for recovery.
+
+    Features:
+    - Automatic failure detection and endpoint marking
+    - Circuit breaker pattern to prevent cascading failures
+    - Background recovery probing
+    - Configurable thresholds and timeouts
+
+    Usage::
+
+        lb = LoadBalancer()
+        lb.add_endpoint("https://api1.example.com")
+        lb.add_endpoint("https://api2.example.com")
+
+        fm = FailoverManager(load_balancer=lb, config=FailoverConfig(max_failures=3))
+        endpoint = fm.get_healthy_endpoint()
+        fm.report_success("https://api1.example.com")
+        fm.report_failure("https://api1.example.com")
+    """
+
+    def __init__(
+        self,
+        load_balancer: LoadBalancer,
+        config: FailoverConfig | None = None,
+    ) -> None:
+        """Initialize the failover manager.
+
+        Args:
+            load_balancer: The load balancer to manage.
+            config: Failover configuration. Uses defaults if not provided.
+        """
+        self._lb = load_balancer
+        self.config = config or FailoverConfig()
+        self._circuit_breakers: dict[str, CircuitBreakerState] = {}
+        self._lock = threading.RLock()  # Reentrant for nested calls
+        self._recovery_task: asyncio.Task | None = None
+        self._failure_history: list[dict[str, Any]] = []
+
+    def report_success(self, url: str, latency_ms: float = 0.0) -> None:
+        """Report a successful request to an endpoint.
+
+        Resets the failure count and closes the circuit breaker if applicable.
+
+        Args:
+            url: The endpoint URL.
+            latency_ms: Request latency in milliseconds.
+        """
+        with self._lock:
+            self._lb.record_success(url, latency_ms)
+            self._lb.mark_healthy(url)
+
+            # Update circuit breaker
+            cb = self._circuit_breakers.get(url)
+            if cb:
+                cb.success_count += 1
+                if cb.is_open:
+                    cb.is_open = False
+                    cb.failure_count = 0
+                    logger.info(f"Failover: circuit breaker closed for {url}")
+
+            # Check if circuit breaker should open (even on success, to evaluate rate)
+            self._check_circuit_breaker_on_success(url)
+
+    def report_failure(self, url: str, error: str = "") -> None:
+        """Report a failed request to an endpoint.
+
+        Increments the failure count and may mark the endpoint unhealthy
+        or open the circuit breaker.
+
+        Args:
+            url: The endpoint URL.
+            error: Error message for logging.
+        """
+        with self._lock:
+            node = self._lb._endpoints.get(url)
+            if not node:
+                return
+
+            node.failure_count += 1
+            node.total_failures += 1
+            node.last_failure_time = time.time()
+            node.total_requests += 1
+
+            # Record in history
+            self._failure_history.append({
+                "url": url,
+                "error": error,
+                "timestamp": time.time(),
+                "failure_count": node.failure_count,
+            })
+            # Keep history bounded (trim to last 500 when exceeding 500)
+            if len(self._failure_history) > 500:
+                self._failure_history = self._failure_history[-500:]
+
+            # Mark unhealthy if max failures exceeded (directly, avoid double-count)
+            if node.failure_count >= self.config.max_failures and node.is_healthy:
+                node.is_healthy = False
+                logger.warning(
+                    f"Load balancer: endpoint {url} marked unhealthy "
+                    f"(failures={node.failure_count})"
+                )
+
+            # Check circuit breaker
+            self._check_circuit_breaker(url)
+
+            logger.warning(
+                f"Failover: failure reported for {url} "
+                f"(count={node.failure_count}, error={error})"
+            )
+
+    def _check_circuit_breaker(self, url: str) -> None:
+        """Check and update circuit breaker state.
+
+        Args:
+            url: The endpoint URL.
+        """
+        node = self._lb._endpoints.get(url)
+        if not node:
+            return
+
+        cb = self._circuit_breakers.get(url)
+        if cb is None:
+            cb = CircuitBreakerState(url=url)
+            self._circuit_breakers[url] = cb
+
+        cb.failure_count += 1
+        cb.last_failure_time = time.time()
+
+        total = cb.failure_count + cb.success_count
+        if total >= 5:  # Need at least 5 requests to evaluate
+            failure_rate = cb.failure_count / total
+            if failure_rate >= self.config.circuit_breaker_threshold and not cb.is_open:
+                cb.is_open = True
+                cb.opened_at = time.time()
+                # Mark unhealthy directly to avoid double-counting
+                if node.is_healthy:
+                    node.is_healthy = False
+                logger.warning(
+                    f"Failover: circuit breaker OPENED for {url} "
+                    f"(failure_rate={failure_rate:.2f})"
+                )
+
+    def _check_circuit_breaker_on_success(self, url: str) -> None:
+        """Check circuit breaker state after a success.
+
+        Evaluates if the circuit should open based on accumulated failure rate.
+
+        Args:
+            url: The endpoint URL.
+        """
+        cb = self._circuit_breakers.get(url)
+        if cb is None or cb.is_open:
+            return
+
+        total = cb.failure_count + cb.success_count
+        if total >= 5:  # Need at least 5 requests to evaluate
+            failure_rate = cb.failure_count / total
+            if failure_rate >= self.config.circuit_breaker_threshold:
+                cb.is_open = True
+                cb.opened_at = time.time()
+                node = self._lb._endpoints.get(url)
+                if node and node.is_healthy:
+                    node.is_healthy = False
+                logger.warning(
+                    f"Failover: circuit breaker OPENED for {url} "
+                    f"(failure_rate={failure_rate:.2f})"
+                )
+
+    def is_circuit_open(self, url: str) -> bool:
+        """Check if the circuit breaker is open for an endpoint.
+
+        Args:
+            url: The endpoint URL.
+
+        Returns:
+            True if the circuit is open (endpoint should not receive traffic).
+        """
+        with self._lock:
+            cb = self._circuit_breakers.get(url)
+            if cb is None or not cb.is_open:
+                return False
+
+            # Check if circuit breaker should be reset
+            elapsed = time.time() - cb.opened_at
+            if elapsed >= self.config.circuit_breaker_reset_seconds:
+                cb.is_open = False
+                cb.failure_count = 0
+                cb.success_count = 0
+                logger.info(f"Failover: circuit breaker reset for {url}")
+                return False
+
+            return True
+
+    def get_healthy_endpoint(self) -> EndpointNode | None:
+        """Get a healthy endpoint from the load balancer, respecting circuit breakers.
+
+        Returns:
+            A healthy EndpointNode, or None if none available.
+        """
+        with self._lock:
+            # Try up to the number of endpoints to find one without an open circuit
+            for _ in range(self._lb.endpoint_count):
+                endpoint = self._lb.get_endpoint()
+                if endpoint is None:
+                    return None
+                if not self.is_circuit_open(endpoint.url):
+                    return endpoint
+            return None
+
+    async def check_recovery(self, url: str) -> bool:
+        """Probe a failed endpoint to check if it has recovered.
+
+        Args:
+            url: The endpoint URL to probe.
+
+        Returns:
+            True if the endpoint responded successfully.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=self.config.recovery_timeout) as client:
+                resp = await client.head(url)
+                if resp.status_code < 500:
+                    self._lb.mark_healthy(url)
+                    # Reset circuit breaker
+                    with self._lock:
+                        cb = self._circuit_breakers.get(url)
+                        if cb:
+                            cb.is_open = False
+                            cb.failure_count = 0
+                    logger.info(f"Failover: endpoint {url} recovered via probe")
+                    return True
+        except Exception as exc:
+            logger.debug(f"Failover: recovery probe failed for {url}: {exc}")
+        return False
+
+    async def start_recovery_monitor(self) -> None:
+        """Start background task to periodically probe failed endpoints.
+
+        Probes unhealthy endpoints at the configured interval.
+        """
+        if not self.config.enable_auto_recovery:
+            return
+
+        async def _recovery_loop() -> None:
+            while True:
+                try:
+                    await asyncio.sleep(self.config.recovery_check_interval)
+                    unhealthy = [
+                        url for url, node in self._lb._endpoints.items()
+                        if not node.is_healthy
+                    ]
+                    for url in unhealthy:
+                        await self.check_recovery(url)
+                except asyncio.CancelledError:
+                    break
+                except Exception as exc:
+                    logger.error(f"Failover: recovery loop error: {exc}")
+
+        self._recovery_task = asyncio.create_task(_recovery_loop())
+        logger.info("Failover: recovery monitor started")
+
+    def stop_recovery_monitor(self) -> None:
+        """Stop the background recovery monitor."""
+        if self._recovery_task and not self._recovery_task.done():
+            self._recovery_task.cancel()
+            self._recovery_task = None
+            logger.info("Failover: recovery monitor stopped")
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get failover manager statistics.
+
+        Returns:
+            Dict with circuit breaker states, failure history, and config.
+        """
+        with self._lock:
+            return {
+                "config": {
+                    "max_failures": self.config.max_failures,
+                    "recovery_check_interval": self.config.recovery_check_interval,
+                    "enable_auto_recovery": self.config.enable_auto_recovery,
+                    "circuit_breaker_threshold": self.config.circuit_breaker_threshold,
+                    "circuit_breaker_reset_seconds": self.config.circuit_breaker_reset_seconds,
+                },
+                "circuit_breakers": {
+                    url: {
+                        "is_open": cb.is_open,
+                        "failure_count": cb.failure_count,
+                        "success_count": cb.success_count,
+                        "opened_at": cb.opened_at,
+                    }
+                    for url, cb in self._circuit_breakers.items()
+                },
+                "recent_failures": self._failure_history[-20:],
+                "total_failure_events": len(self._failure_history),
+                "load_balancer": self._lb.get_stats(),
+            }
+
+    def reset(self) -> None:
+        """Reset all failover state."""
+        with self._lock:
+            self._circuit_breakers.clear()
+            self._failure_history.clear()
+            for node in self._lb._endpoints.values():
+                node.is_healthy = True
+                node.failure_count = 0
+            logger.info("Failover: all state reset")
+
+
 # ── Batch Operations ──────────────────────────────────────
 
 

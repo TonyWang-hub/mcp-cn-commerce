@@ -7,18 +7,11 @@ from __future__ import annotations
 
 import json
 import os
-import sys
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-# Add shared directory to path
-_shared_dir = Path(__file__).resolve().parents[1] / "shared"
-if str(_shared_dir) not in sys.path:
-    sys.path.insert(0, str(_shared_dir))
-
-from cli import (
+from shared.cli import (
     SERVER_REGISTRY,
     __version__,
     build_parser,

@@ -2,6 +2,43 @@
 
 Export e-commerce data to CSV, JSON, or Excel formats with custom field selection, pagination, and nested dict flattening.
 
+## What's wired in: the `export_data` tool
+
+Every platform server exposes an `export_data` MCP tool (registered via
+`shared.cn_commerce_base.register_common_tools`). It is backed by the
+`CommerceMCPBase.export_data()` convenience method, which is a thin wrapper over
+`DataExporter.export_to_string()`:
+
+```python
+from shared.cn_commerce_base import CommerceMCPBase
+
+client = CommerceMCPBase(app_key="...", app_secret="...")
+
+records = [
+    {"id": 1, "name": "Widget", "price": 9.9},
+    {"id": 2, "name": "Gadget", "price": 19.9},
+]
+
+# Returns the records serialised to a CSV string (header + rows).
+csv_text = client.export_data(records, fmt="csv")
+```
+
+The MCP tool signature is `export_data(records_json: str, fmt: str = "json")`,
+where `records_json` is a JSON array of objects; it returns the exported string.
+
+> **Known limitation:** the `ExportFormat` enum members currently compare equal
+> to one another, so format dispatch resolves to **CSV for every format**
+> (`export_data(..., fmt="json")`, `DataExporter.export(format=ExportFormat.JSON)`,
+> and Excel all emit CSV content). Treat the export output as CSV until this is
+> fixed in the shared base. The examples below describe the intended behaviour of
+> each format.
+
+A runnable demo is in
+[`examples/best-practices/observability_demo.py`](../examples/best-practices/observability_demo.py).
+
+The rest of this document covers the lower-level `DataExporter` API for
+file-based exports and explicit format control.
+
 ## Overview
 
 The `DataExporter` class provides a unified way to export API response data to files or strings. It supports:

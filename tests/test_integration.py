@@ -17,32 +17,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-# ── Path setup ───────────────────────────────────────────────────
-
+# Repo root, used by tests that assert on the on-disk project layout.
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_SHARED_DIR = _REPO_ROOT / "shared"
-
-# Add all server src dirs to sys.path so every platform module is importable.
-_ALL_PLATFORMS = [
-    "oceanengine",
-    "doudian",
-    "jd",
-    "taobao",
-    "pinduoduo",
-    "kuaishou",
-    "xiaohongshu",
-    "weixin-store",
-]
-for _p in _ALL_PLATFORMS:
-    _src = _REPO_ROOT / "servers" / _p / "src"
-    if _src.is_dir() and str(_src) not in sys.path:
-        sys.path.insert(0, str(_src))
-if str(_SHARED_DIR) not in sys.path:
-    sys.path.insert(0, str(_SHARED_DIR))
 
 # ── MCP compat shim (same as per-server tests) ──────────────────
 
-import mcp.server  # noqa: E402
+import mcp.server
 
 _orig_server_cls = mcp.server.Server
 if not hasattr(_orig_server_cls, "tool"):
@@ -55,14 +35,14 @@ if not hasattr(_orig_server_cls, "tool"):
 
     _orig_server_cls.tool = _mock_tool  # type: ignore[attr-defined]
 
-from cli import (  # noqa: E402
+from shared.cli import (  # noqa: E402
     SERVER_REGISTRY,
     build_pythonpath,
     check_all_health,
     check_server_health,
     load_config,
 )
-from cn_commerce_base import (  # noqa: E402
+from shared.cn_commerce_base import (  # noqa: E402
     CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,
@@ -1111,7 +1091,7 @@ class TestEndToEndScenarios:
     @pytest.mark.asyncio
     async def test_batch_operations_with_mixed_results(self):
         """Simulate batch operations where some succeed and some fail."""
-        from cn_commerce_base import BatchRequestItem
+        from shared.cn_commerce_base import BatchRequestItem
 
         client = CommerceMCPBase(app_key="k", app_secret="s")
         call_count = 0
@@ -1167,11 +1147,11 @@ class TestEndToEndScenarios:
         assert result["data"] == "recovered"
         assert call_count == 2
 
-        # Record success in metrics
-        client.metrics.record_request("/api/data", latency_ms=50.0, success=True)
+        # _request now records metrics live: the failed first attempt plus the
+        # successful retry => 2 requests, 1 of them an error.
         summary = client.metrics.get_summary()
-        assert summary["global"]["total_requests"] == 1
-        assert summary["global"]["total_errors"] == 0
+        assert summary["global"]["total_requests"] == 2
+        assert summary["global"]["total_errors"] == 1
 
 
 # ====================================================================
@@ -1300,11 +1280,10 @@ class TestDoudianFullRequestFlow:
 
         mock_http = AsyncMock()
         mock_http.post.return_value = mock_response
+        mock_http.is_closed = False
 
         with patch("mcp_doudian.server._get_client", return_value=client):
-            with patch("httpx.AsyncClient") as mock_ctx:
-                mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_http)
-                mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
+            with patch.object(client, "_ensure_client", return_value=mock_http):
                 from mcp_doudian.server import get_order_list
 
                 result = await get_order_list(start_time="2024-01-01", end_time="2024-01-31")

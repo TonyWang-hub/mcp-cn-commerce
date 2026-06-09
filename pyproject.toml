@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-cn-commerce"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Chinese e-commerce platform MCP servers — let AI agents read merchant business data (Ocean Engine, Douyin Shop, JD.com, Taobao, Pinduoduo)"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -70,13 +70,19 @@ all = [
     "mcp-cn-weixin-store",
 ]
 dev = ["pytest>=7.0", "pytest-asyncio", "pytest-cov", "black", "ruff"]
-crypto = ["pyaes>=1.6"]
 
 [project.scripts]
-mcp-cn-commerce = "cli:main"
+mcp-cn-commerce = "shared.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["shared*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "shared.__version__"}
+
+[tool.pytest.ini_options]
+pythonpath = [".", "servers/oceanengine/src", "servers/doudian/src", "servers/jd/src", "servers/taobao/src", "servers/pinduoduo/src", "servers/kuaishou/src", "servers/xiaohongshu/src", "servers/weixin-store/src"]
+testpaths = ["tests", "servers"]
 
 [tool.black]
 line-length = 120
@@ -188,7 +194,8 @@ disable = [
     "R0912",  # too-many-branches
     "R0915",  # too-many-statements
     "R1705",  # no-else-return
-    "W0237",  # arguments-differ
+    "W0221",  # arguments-differ (platform _request/_sign overrides differ by design)
+    "W0237",  # arguments-renamed
 ]
 
 [tool.pylint.format]

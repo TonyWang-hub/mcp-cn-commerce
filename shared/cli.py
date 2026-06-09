@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-__version__ = "0.1.0"
+from shared import __version__
 
 # ── Server Registry ────────────────────────────────────────
 

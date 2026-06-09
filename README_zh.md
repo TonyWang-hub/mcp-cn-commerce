@@ -87,7 +87,22 @@
 
 ### 安装
 
-#### 从 GitHub Releases 下载（推荐 — 无需注册）
+#### 从 PyPI 安装（推荐）
+
+```bash
+# 安装基础包
+pip install mcp-cn-commerce
+
+# 安装单个平台
+pip install mcp-cn-commerce[doudian]      # 抖店
+pip install mcp-cn-commerce[jd]           # 京东
+pip install mcp-cn-commerce[oceanengine]  # 巨量引擎
+
+# 安装所有平台
+pip install mcp-cn-commerce[all]
+```
+
+#### 从 GitHub Releases 下载
 
 ```bash
 # 下载最新 Release 的 .whl 文件安装
@@ -265,7 +280,6 @@ Monorepo 架构：每个平台是一个独立的 MCP Server，用户按需安装
 
 ```bibtex
 @software{mcp-cn-commerce,
-  author = {Wang, Zhuo},
   title = {mcp-cn-commerce: MCP Servers for Chinese E-Commerce Platforms},
   year = {2026},
   url = {https://github.com/TonyWang-hub/mcp-cn-commerce}

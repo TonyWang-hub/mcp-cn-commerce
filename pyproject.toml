@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Chinese e-commerce platform MCP servers — let AI agents read merchant business data (Ocean Engine, Douyin Shop, JD.com, Taobao, Pinduoduo)"
 requires-python = ">=3.11"
 license = {text = "MIT"}
-authors = [{name = "Wang Zhuo", email = "tonywang@example.com"}]
+authors = [{name = "mcp-cn-commerce contributors"}]
 readme = "README.md"
 keywords = [
     "mcp",
@@ -36,7 +36,6 @@ keywords = [
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",

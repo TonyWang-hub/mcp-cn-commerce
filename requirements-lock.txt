@@ -1,0 +1,19 @@
+# Runtime dependency lock for mcp-cn-commerce.
+#
+# This is a RUNTIME lock (not dev/test/build tooling). It pins the core
+# runtime dependencies (mcp, httpx) and their direct transitive dependencies
+# to the exact versions verified in the reference environment.
+#
+# Generated as the core subset of `pip freeze` covering the runtime closure
+# of mcp + httpx. Regenerate by installing mcp/httpx into a clean venv and
+# copying the versions of the packages below from `pip freeze`.
+#
+# Use:  pip install -r requirements-lock.txt
+mcp==1.27.2
+httpx==0.28.1
+anyio==4.13.0
+httpcore==1.0.9
+h11==0.16.0
+certifi==2026.5.20
+idna==3.18
+sniffio==1.3.1

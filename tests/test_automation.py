@@ -15,7 +15,6 @@ All network calls are mocked.
 
 from __future__ import annotations
 
-import asyncio
 import importlib
 import inspect
 import json
@@ -68,6 +67,7 @@ if not hasattr(_orig_server_cls, "tool"):
 
     _orig_server_cls.tool = _mock_tool  # type: ignore[attr-defined]
 
+from cli import SERVER_REGISTRY, check_all_health, check_server_health  # noqa: E402
 from cn_commerce_base import (  # noqa: E402
     CommerceAPIError,
     CommerceMCPBase,
@@ -76,12 +76,9 @@ from cn_commerce_base import (  # noqa: E402
     RateLimiter,
     RetryConfig,
     SignMethod,
-    format_error_response,
-    format_response,
     handle_tool_errors,
     with_retry,
 )
-from cli import SERVER_REGISTRY, check_all_health, check_server_health  # noqa: E402
 
 # ── Platform metadata for automation ────────────────────────────
 
@@ -418,7 +415,7 @@ class TestFullRequestFlowAutomation:
     @pytest.mark.asyncio
     async def test_kuaishou_full_flow(self, mock_http_response):
         """Kuaishou: tool -> _call -> mock HTTP -> JSON response."""
-        from mcp_kuaishou.server import KuaishouMCP, get_order_list, ks
+        from mcp_kuaishou.server import get_order_list, ks
 
         mock_http_response.json.return_value = {
             "result": 1,
@@ -528,9 +525,9 @@ class TestErrorPropagationAutomation:
                 is_wrapped = hasattr(func, "__wrapped__")
                 # Also check if it's a decorated function (not the raw function)
                 # We consider it safe if it's been decorated at all
-                assert is_wrapped or not inspect.isfunction(func) or True, (
-                    f"{module_name}.{name} may not have error handling decorator"
-                )
+                assert (
+                    is_wrapped or not inspect.isfunction(func) or True
+                ), f"{module_name}.{name} may not have error handling decorator"
 
 
 # ====================================================================

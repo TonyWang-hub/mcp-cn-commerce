@@ -10,19 +10,18 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import time
-from pathlib import Path
 
 import httpx
 from mcp.server.fastmcp import FastMCP
 
-# Let the server find the shared base class at <repo-root>/shared/
-_project_root = Path(__file__).resolve().parents[4]
-if str(_project_root) not in sys.path:
-    sys.path.insert(0, str(_project_root))
-
-from shared.cn_commerce_base import CommerceAPIError, CommerceMCPBase, ConfigValidationError, SignMethod
+from shared.cn_commerce_base import (
+    CommerceAPIError,
+    CommerceMCPBase,
+    ConfigValidationError,
+    SignMethod,
+    register_common_tools,
+)
 
 # ── Xiaohongshu client ────────────────────────────────────────────────────────
 
@@ -86,8 +85,8 @@ def _create_xiaohongshu_client() -> XiaohongshuMCP:
     except ConfigValidationError:
         # Fallback to direct instantiation for backward compatibility
         return XiaohongshuMCP(
-            client_id=os.environ.get("XHS_CLIENT_ID", ""),
-            client_secret=os.environ.get("XHS_CLIENT_SECRET", ""),
+            app_key=os.environ.get("XHS_CLIENT_ID", ""),
+            app_secret=os.environ.get("XHS_CLIENT_SECRET", ""),
             access_token=os.environ.get("XHS_ACCESS_TOKEN", ""),
         )
 
@@ -408,6 +407,10 @@ async def get_bill_list(
 
     result = await xhs._call("GET", "/api/bill/list", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+# ── Cross-platform operational tools (get_metrics/get_traces/get_alerts/export_data) ──
+register_common_tools(mcp, xhs)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

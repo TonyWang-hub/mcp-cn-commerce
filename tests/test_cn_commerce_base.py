@@ -9,20 +9,13 @@ import asyncio
 import json
 import logging
 import os
-import sys
 import zlib
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
-# Add the shared directory to the path
-_shared_dir = Path(__file__).resolve().parents[1] / "shared"
-if str(_shared_dir) not in sys.path:
-    sys.path.insert(0, str(_shared_dir))
-
-from cn_commerce_base import (
+from shared.cn_commerce_base import (
     DEFAULT_RETRY,
     RATE_LIMIT_RETRY,
     Alert,
@@ -4237,8 +4230,10 @@ class TestAlertNotifier:
 
     def test_remove_callback(self):
         notifier = AlertNotifier()
+
         def cb(alert):
             return None
+
         notifier.add_callback(cb)
         assert notifier.remove_callback(cb) is True
         assert len(notifier._callbacks) == 0
@@ -4593,12 +4588,12 @@ class TestDefaultAlertRules:
     """Tests for default alert rules."""
 
     def test_default_rules_count(self):
-        from cn_commerce_base import DEFAULT_ALERT_RULES
+        from shared.cn_commerce_base import DEFAULT_ALERT_RULES
 
         assert len(DEFAULT_ALERT_RULES) == 4
 
     def test_default_high_error_rate(self):
-        from cn_commerce_base import DEFAULT_ALERT_RULES
+        from shared.cn_commerce_base import DEFAULT_ALERT_RULES
 
         rule = next(r for r in DEFAULT_ALERT_RULES if r.name == "high_error_rate")
         assert rule.threshold == 0.1
@@ -4606,21 +4601,21 @@ class TestDefaultAlertRules:
         assert rule.comparison == "gt"
 
     def test_default_critical_error_rate(self):
-        from cn_commerce_base import DEFAULT_ALERT_RULES
+        from shared.cn_commerce_base import DEFAULT_ALERT_RULES
 
         rule = next(r for r in DEFAULT_ALERT_RULES if r.name == "critical_error_rate")
         assert rule.threshold == 0.5
         assert rule.severity == AlertSeverity.CRITICAL
 
     def test_default_high_latency(self):
-        from cn_commerce_base import DEFAULT_ALERT_RULES
+        from shared.cn_commerce_base import DEFAULT_ALERT_RULES
 
         rule = next(r for r in DEFAULT_ALERT_RULES if r.name == "high_latency")
         assert rule.threshold == 5000.0
         assert rule.severity == AlertSeverity.MEDIUM
 
     def test_default_critical_latency(self):
-        from cn_commerce_base import DEFAULT_ALERT_RULES
+        from shared.cn_commerce_base import DEFAULT_ALERT_RULES
 
         rule = next(r for r in DEFAULT_ALERT_RULES if r.name == "critical_latency")
         assert rule.threshold == 30000.0

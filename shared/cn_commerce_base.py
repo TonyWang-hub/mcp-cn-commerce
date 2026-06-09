@@ -220,6 +220,30 @@ def validate_api_param(name: str, value: str, max_length: int = 4096) -> str:
     return value
 
 
+def canonicalize_sign_value(value: Any) -> str:
+    """Canonicalize a parameter value for stable signing.
+
+    Signatures must be reproducible: the same logical value must always
+    serialize to the same string, regardless of Python object identity or
+    dict ordering. Naively interpolating arbitrary values (``f"{v}"``) makes
+    ``dict``/``list`` values stringify non-deterministically, producing
+    signatures that intermittently fail server-side verification.
+
+    Args:
+        value: Any parameter value.
+
+    Returns:
+        A deterministic string representation.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return str(value)
+
+
 def validate_env_var_name(name: str) -> str:
     """Validate an environment variable name.
 
@@ -2678,10 +2702,12 @@ class CommerceMCPBase:
         reconnect_config: ReconnectConfig | None = None,
         compression_config: CompressionConfig | None = None,
         rate_limit_config: RateLimitConfig | None = None,
+        validate_input: bool = True,
     ) -> None:
         self.app_key = app_key
         self.app_secret = app_secret
         self.access_token = access_token
+        self.validate_input = validate_input
         self.rate_limiter = RateLimiter()
         self.metrics = MetricsCollector()
         self._reconnect_config = reconnect_config or ReconnectConfig()
@@ -2691,6 +2717,13 @@ class CommerceMCPBase:
         self._configurable_limiter = ConfigurableRateLimiter(rate_limit_config)
         self._priority_scheduler = PriorityScheduler(rate_limiter=self._configurable_limiter)
         self._alert_manager = AlertManager()
+        # Live request observability: every _request is traced and metered.
+        self._tracer = RequestTracer(self.__class__.__name__)
+        # Opt-in capabilities, lazily constructed on first access (see properties).
+        self._webhook_manager: WebhookManager | None = None
+        self._load_balancer: LoadBalancer | None = None
+        self._request_recorder: RequestRecorder | None = None
+        self._deduplicator: RequestDeduplicator | None = None
 
     def _get_client(self) -> httpx.AsyncClient:
         """Get or create an HTTP client with connection pooling.
@@ -2837,6 +2870,11 @@ class CommerceMCPBase:
         params = params or {}
         data = data or {}
 
+        # Reject injection-style payloads before they reach the upstream API.
+        if self.validate_input:
+            self._validate_params(params)
+            self._validate_params(data)
+
         # Snapshot auth params for retry (timestamp must be regenerated each attempt)
         auth_params: dict[str, str] = {}
         auth_params["app_key"] = self.app_key
@@ -2846,7 +2884,11 @@ class CommerceMCPBase:
         last_exc: Exception | None = None
         max_attempts = (retry_config.max_retries + 1) if retry_config else 1
 
+        # One trace span per logical request (covers all retry attempts).
+        span = self._tracer.start_span(f"{method} {path}", attributes={"method": method, "path": path})
+
         for attempt in range(max_attempts):
+            attempt_start = time.time()
             try:
                 # Rate limiting
                 if self.rate_limiter:
@@ -2890,17 +2932,25 @@ class CommerceMCPBase:
                     raise CommerceAPIError(code=error_code, msg=error_msg)
 
                 logger.debug(f"Response: {resp.status_code}")
+                self.metrics.record_request(path, (time.time() - attempt_start) * 1000, success=True)
+                self._tracer.finish_span(span, status="ok")
                 return result
 
             except Exception as exc:
                 last_exc = exc
+                err_code = exc.code if isinstance(exc, CommerceAPIError) else 0
+                self.metrics.record_request(
+                    path, (time.time() - attempt_start) * 1000, success=False, error_code=err_code, error_msg=str(exc)
+                )
                 # If no retry config or not retryable, re-raise immediately
                 if not retry_config or not retry_config.should_retry_exception(exc):
+                    self._tracer.finish_span(span, status="error")
                     raise
 
                 # If this was the last attempt, re-raise
                 if attempt == max_attempts - 1:
                     logger.error(f"Max retries ({retry_config.max_retries}) exhausted for {path}")
+                    self._tracer.finish_span(span, status="error")
                     raise
 
                 delay = retry_config.compute_delay(attempt)
@@ -2914,6 +2964,44 @@ class CommerceMCPBase:
             raise last_exc  # type: ignore[misc]
         return {}  # type: ignore[return-value]
 
+    # ── Input validation ──────────────────────────────────
+
+    def _validate_params(self, params: dict[str, Any]) -> None:
+        """Validate string parameter values for injection patterns.
+
+        Only string values are checked; numeric/bool values are inherently
+        safe. Raises ``ValueError`` on the first suspicious value.
+        """
+        for name, value in params.items():
+            if isinstance(value, str):
+                validate_api_param(name, value)
+
+    # ── Common observability / data accessors ─────────────
+    # These surface the always-on middleware to callers; register_common_tools()
+    # exposes them as MCP tools shared by every platform server.
+
+    def get_metrics_summary(self) -> dict[str, Any]:
+        """Return a snapshot of per-endpoint request metrics (latency, errors)."""
+        return self.metrics.get_summary()
+
+    def get_trace_summary(self) -> dict[str, Any]:
+        """Return a summary of recent request traces (spans, durations, status)."""
+        return self._tracer.get_trace_summary()
+
+    def get_alerts(self) -> dict[str, Any]:
+        """Evaluate alert rules against current metrics and report firing alerts."""
+        summary = self.metrics.get_summary()
+        fired = self._alert_manager.evaluate_metrics(summary, platform=self.__class__.__name__)
+        return {
+            "firing": [a.to_dict() for a in fired],
+            "stats": self._alert_manager.get_stats(),
+        }
+
+    def export_data(self, records: list[dict[str, Any]], fmt: str = "json") -> str:
+        """Export a list of records to a CSV or JSON string."""
+        export_format = ExportFormat.CSV if str(fmt).lower() == "csv" else ExportFormat.JSON
+        return DataExporter.export_to_string(records, format=export_format)
+
     # ── Signing ───────────────────────────────────────────
 
     def _sign(self, params: dict[str, Any]) -> str:
@@ -2921,7 +3009,11 @@ class CommerceMCPBase:
         # Remove sign and sign_method, sort by key
         to_sign = {k: v for k, v in params.items() if k not in ("sign", "sign_method") and v != ""}
         sorted_keys = sorted(to_sign.keys())
-        raw = self.app_secret + "".join(f"{k}{to_sign[k]}" for k in sorted_keys) + self.app_secret
+        raw = (
+            self.app_secret
+            + "".join(f"{k}{canonicalize_sign_value(to_sign[k])}" for k in sorted_keys)
+            + self.app_secret
+        )
 
         if self.sign_method == SignMethod.MD5:
             return hashlib.md5(raw.encode()).hexdigest().upper()
@@ -3226,6 +3318,56 @@ class CommerceMCPBase:
     def get_alert_stats(self) -> dict[str, Any]:
         """Get alert manager statistics."""
         return self._alert_manager.get_stats()
+
+    # ── Opt-in Advanced Capabilities (lazy accessors) ──────
+    #
+    # These wrappers make standalone opt-in helpers reachable from a base
+    # instance without changing any request behaviour. Each is lazily
+    # constructed on first access so the common path stays lightweight.
+
+    @property
+    def webhook_manager(self) -> WebhookManager:
+        """Access a lazily-created webhook manager for this instance."""
+        existing = getattr(self, "_webhook_manager", None)
+        if existing is None:
+            existing = WebhookManager()
+            self._webhook_manager = existing
+        return existing
+
+    @property
+    def load_balancer(self) -> LoadBalancer:
+        """Access a lazily-created load balancer for this instance."""
+        existing = getattr(self, "_load_balancer", None)
+        if existing is None:
+            existing = LoadBalancer()
+            self._load_balancer = existing
+        return existing
+
+    def create_failover_manager(self, config: FailoverConfig | None = None) -> FailoverManager:
+        """Create a failover manager bound to this instance's load balancer."""
+        return FailoverManager(self.load_balancer, config=config)
+
+    @property
+    def request_recorder(self) -> RequestRecorder:
+        """Access a lazily-created request recorder for this instance."""
+        existing = getattr(self, "_request_recorder", None)
+        if existing is None:
+            existing = RequestRecorder()
+            self._request_recorder = existing
+        return existing
+
+    def create_replayer(self, config: ReplayConfig | None = None) -> RequestReplayer:
+        """Create a replayer bound to this instance's request recorder."""
+        return RequestReplayer(self.request_recorder, config=config)
+
+    @property
+    def deduplicator(self) -> RequestDeduplicator:
+        """Access a lazily-created request deduplicator for this instance."""
+        existing = getattr(self, "_deduplicator", None)
+        if existing is None:
+            existing = RequestDeduplicator()
+            self._deduplicator = existing
+        return existing
 
     # ── Batch Operations ──────────────────────────────────
 
@@ -4738,7 +4880,9 @@ class FailoverManager:
         self._lb = load_balancer
         self.config = config or FailoverConfig()
         self._circuit_breakers: dict[str, CircuitBreakerState] = {}
-        self._lock = threading.Lock()
+        # Reentrant: get_healthy_endpoint() holds the lock and calls
+        # is_circuit_open(), which re-acquires it.
+        self._lock = threading.RLock()
         self._recovery_task: asyncio.Task | None = None
         self._failure_history: list[dict[str, Any]] = []
 
@@ -4973,7 +5117,6 @@ class FailoverManager:
 # ── Batch Operations ──────────────────────────────────────
 
 
-@dataclass
 class ExportFormat(StrEnum):
     """Supported export formats."""
 
@@ -6837,3 +6980,47 @@ class AlertManager:
             }
             self._notifier.reset_stats()
         logger.info("Alert manager reset")
+
+
+# ── Cross-platform MCP tool registration ──────────────────────
+
+
+def register_common_tools(mcp: Any, client: Any) -> None:
+    """Register cross-platform observability/data tools on a FastMCP server.
+
+    Every platform server gets the same operational tools without duplicating
+    them. ``client`` may be a :class:`CommerceMCPBase` instance or a zero-arg
+    callable returning one (for servers that build their client lazily).
+
+    Registered tools: ``get_metrics``, ``get_traces``, ``get_alerts``,
+    ``export_data``. Uses duck-typed ``mcp.tool()`` so this module stays free
+    of any MCP framework import.
+
+    Args:
+        mcp: A FastMCP instance exposing a ``tool()`` decorator.
+        client: A ``CommerceMCPBase`` instance or a callable returning one.
+    """
+
+    def _resolve() -> Any:
+        return client() if callable(client) else client
+
+    @mcp.tool()
+    async def get_metrics() -> str:
+        """Return request metrics (per-endpoint latency, success/error counts)."""
+        return json.dumps(_resolve().get_metrics_summary(), ensure_ascii=False)
+
+    @mcp.tool()
+    async def get_traces() -> str:
+        """Return a summary of recent request traces (spans, durations, status)."""
+        return json.dumps(_resolve().get_trace_summary(), ensure_ascii=False)
+
+    @mcp.tool()
+    async def get_alerts() -> str:
+        """Evaluate alert rules against current metrics; return firing alerts."""
+        return json.dumps(_resolve().get_alerts(), ensure_ascii=False)
+
+    @mcp.tool()
+    async def export_data(records_json: str, fmt: str = "json") -> str:
+        """Export a JSON array of records to a CSV or JSON string."""
+        records = json.loads(records_json)
+        return _resolve().export_data(records, fmt=fmt)

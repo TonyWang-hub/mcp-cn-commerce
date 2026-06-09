@@ -7,19 +7,12 @@ environment variable support, and thread safety.
 from __future__ import annotations
 
 import os
-import sys
 import threading
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-# Add shared directory to path
-_shared_dir = Path(__file__).resolve().parents[1] / "shared"
-if str(_shared_dir) not in sys.path:
-    sys.path.insert(0, str(_shared_dir))
-
-from i18n import (
+from shared.i18n import (
     DEFAULT_LANGUAGE,
     SUPPORTED_LANGUAGES,
     get_all_keys,

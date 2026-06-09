@@ -11,22 +11,15 @@ Tests cover:
 from __future__ import annotations
 
 import json
-import sys
 import time
-from pathlib import Path
 
 import pytest
 
-# Add the shared directory to the path
-_shared_dir = Path(__file__).resolve().parents[1] / "shared"
-if str(_shared_dir) not in sys.path:
-    sys.path.insert(0, str(_shared_dir))
-
-from cn_commerce_base import (
+from shared.cn_commerce_base import (
     MetricsCollector,
     WebhookManager,
 )
-from dashboard import (
+from shared.dashboard import (
     AlertRule,
     AlertSeverity,
     CacheStats,

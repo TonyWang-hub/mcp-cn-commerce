@@ -28,9 +28,8 @@ RUN apt-get update && \
 COPY pyproject.toml Makefile ./
 COPY shared/ shared/
 
-# Install base package + dev tools
-RUN pip install --no-cache-dir -e ".[dev]" 2>/dev/null || \
-    pip install --no-cache-dir pytest pytest-asyncio httpx mcp
+# Install base package (provides the `shared` library) + dev tools
+RUN pip install --no-cache-dir -e ".[dev]"
 
 # Install each platform server
 COPY servers/oceanengine/   servers/oceanengine/
@@ -42,15 +41,14 @@ COPY servers/kuaishou/      servers/kuaishou/
 COPY servers/xiaohongshu/   servers/xiaohongshu/
 COPY servers/weixin-store/  servers/weixin-store/
 
-RUN pip install --no-cache-dir \
-    -e servers/oceanengine/ \
-    -e servers/doudian/ \
-    -e servers/jd/ \
-    -e servers/taobao/ \
-    -e servers/pinduoduo/ \
-    -e servers/kuaishou/ \
-    -e servers/xiaohongshu/ \
-    -e servers/weixin-store/
+RUN pip install --no-cache-dir -e servers/oceanengine/ && \
+    pip install --no-cache-dir -e servers/doudian/ && \
+    pip install --no-cache-dir -e servers/jd/ && \
+    pip install --no-cache-dir -e servers/taobao/ && \
+    pip install --no-cache-dir -e servers/pinduoduo/ && \
+    pip install --no-cache-dir -e servers/kuaishou/ && \
+    pip install --no-cache-dir -e servers/xiaohongshu/ && \
+    pip install --no-cache-dir -e servers/weixin-store/
 
 # ── PYTHONPATH for all platform source directories ──────────
 ENV PYTHONPATH=servers/oceanengine/src:servers/doudian/src:servers/jd/src:servers/taobao/src:servers/pinduoduo/src:servers/kuaishou/src:servers/xiaohongshu/src:servers/weixin-store/src

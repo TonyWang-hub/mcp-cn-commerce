@@ -9,17 +9,16 @@ from __future__ import annotations
 
 import json
 import os
-import sys
-from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-# Let the server find the shared base class at <repo-root>/shared/
-_project_root = Path(__file__).resolve().parents[4]
-if str(_project_root) not in sys.path:
-    sys.path.insert(0, str(_project_root))
-
-from shared.cn_commerce_base import CommerceAPIError, CommerceMCPBase, ConfigValidationError, SignMethod
+from shared.cn_commerce_base import (
+    CommerceAPIError,
+    CommerceMCPBase,
+    ConfigValidationError,
+    SignMethod,
+    register_common_tools,
+)
 
 # ── Taobao client ───────────────────────────────────────────────────────────────
 
@@ -376,6 +375,10 @@ async def list_categories(parent_cid: str = "0") -> str:
 
     result = await taobao._call("taobao.itemcats.get", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+# ── Cross-platform operational tools (get_metrics/get_traces/get_alerts/export_data) ──
+register_common_tools(mcp, taobao)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════

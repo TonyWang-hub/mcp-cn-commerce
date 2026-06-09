@@ -5184,3 +5184,925 @@ class DataExporter:
             return json.dumps(data, ensure_ascii=False, indent=2, default=str)
         else:
             raise ValueError("export_to_string does not support Excel format")
+
+
+# ── Request Replay & Debug ──────────────────────────────────
+
+
+@dataclass
+class RequestRecord:
+    """A single recorded request for replay.
+
+    Attributes:
+        record_id: Unique identifier for this record.
+        method: HTTP method ("GET" or "POST").
+        path: API endpoint path.
+        params: Query parameters.
+        data: Request body data.
+        response: Captured response data.
+        status_code: HTTP status code of the response.
+        latency_ms: Request duration in milliseconds.
+        timestamp: Unix timestamp when the request was made.
+        platform: Platform identifier.
+        tags: User-defined tags for filtering.
+    """
+
+    record_id: str = ""
+    method: str = ""
+    path: str = ""
+    params: dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
+    response: dict[str, Any] | None = None
+    status_code: int = 0
+    latency_ms: float = 0.0
+    timestamp: float = 0.0
+    platform: str = ""
+    tags: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.record_id:
+            self.record_id = str(uuid.uuid4())
+        if self.timestamp == 0.0:
+            self.timestamp = time.time()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to a JSON-serializable dictionary."""
+        return {
+            "record_id": self.record_id,
+            "method": self.method,
+            "path": self.path,
+            "params": self.params,
+            "data": self.data,
+            "response": self.response,
+            "status_code": self.status_code,
+            "latency_ms": round(self.latency_ms, 2),
+            "timestamp": self.timestamp,
+            "platform": self.platform,
+            "tags": self.tags,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RequestRecord:
+        """Reconstruct a RequestRecord from a dictionary."""
+        return cls(
+            record_id=data.get("record_id", ""),
+            method=data.get("method", ""),
+            path=data.get("path", ""),
+            params=data.get("params", {}),
+            data=data.get("data", {}),
+            response=data.get("response"),
+            status_code=data.get("status_code", 0),
+            latency_ms=data.get("latency_ms", 0.0),
+            timestamp=data.get("timestamp", 0.0),
+            platform=data.get("platform", ""),
+            tags=data.get("tags", []),
+        )
+
+
+@dataclass
+class ReplayConfig:
+    """Configuration for request replay behaviour.
+
+    Attributes:
+        max_records: Maximum number of records to keep in memory.
+        record_responses: Whether to store response data in records.
+        auto_record: Whether to automatically record all _request() calls.
+        replay_delay_ms: Artificial delay between replayed requests (0 = none).
+        match_strategy: How to match replay requests ("exact" or "fuzzy").
+    """
+
+    max_records: int = 1000
+    record_responses: bool = True
+    auto_record: bool = False
+    replay_delay_ms: float = 0.0
+    match_strategy: str = "exact"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dictionary."""
+        return {
+            "max_records": self.max_records,
+            "record_responses": self.record_responses,
+            "auto_record": self.auto_record,
+            "replay_delay_ms": self.replay_delay_ms,
+            "match_strategy": self.match_strategy,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ReplayConfig:
+        """Deserialize from a dictionary."""
+        return cls(
+            max_records=data.get("max_records", 1000),
+            record_responses=data.get("record_responses", True),
+            auto_record=data.get("auto_record", False),
+            replay_delay_ms=data.get("replay_delay_ms", 0.0),
+            match_strategy=data.get("match_strategy", "exact"),
+        )
+
+
+class RequestRecorder:
+    """Records API requests for later replay and debugging.
+
+    Supports recording, filtering, exporting, and importing request records.
+    Thread-safe for concurrent access.
+    """
+
+    def __init__(self, config: ReplayConfig | None = None) -> None:
+        self.config = config or ReplayConfig()
+        self._records: list[RequestRecord] = []
+        self._lock = threading.Lock()
+        self._stats = {
+            "total_recorded": 0,
+            "total_exported": 0,
+            "total_imported": 0,
+        }
+
+    def record(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+        response: dict[str, Any] | None = None,
+        status_code: int = 0,
+        latency_ms: float = 0.0,
+        platform: str = "",
+        tags: list[str] | None = None,
+    ) -> RequestRecord:
+        """Record a request."""
+        rec = RequestRecord(
+            method=method.upper(),
+            path=path,
+            params=params or {},
+            data=data or {},
+            response=response if self.config.record_responses else None,
+            status_code=status_code,
+            latency_ms=latency_ms,
+            platform=platform,
+            tags=tags or [],
+        )
+
+        with self._lock:
+            self._records.append(rec)
+            if len(self._records) > self.config.max_records:
+                self._records = self._records[-self.config.max_records:]
+            self._stats["total_recorded"] += 1
+
+        logger.debug(f"Recorded request: {rec.method} {rec.path} [{rec.record_id[:8]}]")
+        return rec
+
+    def get_records(self) -> list[RequestRecord]:
+        """Get all recorded records (copy)."""
+        with self._lock:
+            return list(self._records)
+
+    def get_record(self, record_id: str) -> RequestRecord | None:
+        """Get a specific record by ID."""
+        with self._lock:
+            for rec in self._records:
+                if rec.record_id == record_id:
+                    return rec
+        return None
+
+    def filter(
+        self,
+        method: str | None = None,
+        path: str | None = None,
+        platform: str | None = None,
+        tags: list[str] | None = None,
+        since: float | None = None,
+    ) -> list[RequestRecord]:
+        """Filter records by criteria."""
+        with self._lock:
+            results = list(self._records)
+
+        if method:
+            method_upper = method.upper()
+            results = [r for r in results if r.method == method_upper]
+        if path:
+            results = [r for r in results if path in r.path]
+        if platform:
+            results = [r for r in results if r.platform == platform]
+        if tags:
+            tag_set = set(tags)
+            results = [r for r in results if tag_set & set(r.tags)]
+        if since is not None:
+            results = [r for r in results if r.timestamp >= since]
+
+        return results
+
+    def clear(self) -> int:
+        """Remove all records. Returns count."""
+        with self._lock:
+            count = len(self._records)
+            self._records.clear()
+            return count
+
+    def export_json(self) -> str:
+        """Export all records as a JSON string."""
+        with self._lock:
+            data = [r.to_dict() for r in self._records]
+            self._stats["total_exported"] += 1
+        return json.dumps(data, ensure_ascii=False, indent=2)
+
+    def import_json(self, json_str: str) -> int:
+        """Import records from a JSON string."""
+        data = json.loads(json_str)
+        records = [RequestRecord.from_dict(d) for d in data]
+        with self._lock:
+            self._records.extend(records)
+            if len(self._records) > self.config.max_records:
+                self._records = self._records[-self.config.max_records:]
+            self._stats["total_imported"] += len(records)
+        logger.debug(f"Imported {len(records)} request records")
+        return len(records)
+
+    def export_to_file(self, file_path: str) -> int:
+        """Export records to a JSON file."""
+        json_str = self.export_json()
+        Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(json_str)
+        with self._lock:
+            count = len(self._records)
+        logger.info(f"Exported {count} records to {file_path}")
+        return count
+
+    def import_from_file(self, file_path: str) -> int:
+        """Import records from a JSON file."""
+        with open(file_path, encoding="utf-8") as f:
+            json_str = f.read()
+        return self.import_json(json_str)
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get recorder statistics."""
+        with self._lock:
+            return {
+                "record_count": len(self._records),
+                "max_records": self.config.max_records,
+                "config": self.config.to_dict(),
+                **self._stats,
+            }
+
+    def reset_stats(self) -> None:
+        """Reset collected statistics (not records)."""
+        self._stats = {
+            "total_recorded": 0,
+            "total_exported": 0,
+            "total_imported": 0,
+        }
+
+
+class RequestReplayer:
+    """Replays previously recorded requests."""
+
+    def __init__(
+        self,
+        recorder: RequestRecorder,
+        config: ReplayConfig | None = None,
+    ) -> None:
+        self._recorder = recorder
+        self.config = config or recorder.config
+        self._stats = {
+            "total_replayed": 0,
+            "total_matched": 0,
+            "total_mismatched": 0,
+            "total_errors": 0,
+        }
+
+    async def replay(
+        self,
+        record: RequestRecord,
+        execute_fn: Callable[..., Awaitable[dict[str, Any]]],
+    ) -> dict[str, Any]:
+        """Replay a single recorded request."""
+        if self.config.replay_delay_ms > 0:
+            await asyncio.sleep(self.config.replay_delay_ms / 1000.0)
+
+        start = time.time()
+        try:
+            new_response = await execute_fn(
+                method=record.method,
+                path=record.path,
+                params=dict(record.params),
+                data=dict(record.data),
+            )
+            latency_ms = (time.time() - start) * 1000
+            self._stats["total_replayed"] += 1
+
+            return {
+                "record_id": record.record_id,
+                "success": True,
+                "original_response": record.response,
+                "new_response": new_response,
+                "latency_ms": round(latency_ms, 2),
+                "original_latency_ms": round(record.latency_ms, 2),
+            }
+        except Exception as exc:
+            latency_ms = (time.time() - start) * 1000
+            self._stats["total_replayed"] += 1
+            self._stats["total_errors"] += 1
+            return {
+                "record_id": record.record_id,
+                "success": False,
+                "error": str(exc),
+                "latency_ms": round(latency_ms, 2),
+                "original_latency_ms": round(record.latency_ms, 2),
+            }
+
+    async def replay_all(
+        self,
+        execute_fn: Callable[..., Awaitable[dict[str, Any]]],
+    ) -> list[dict[str, Any]]:
+        """Replay all recorded requests sequentially."""
+        records = self._recorder.get_records()
+        results: list[dict[str, Any]] = []
+        for record in records:
+            result = await self.replay(record, execute_fn)
+            results.append(result)
+        return results
+
+    async def replay_filtered(
+        self,
+        execute_fn: Callable[..., Awaitable[dict[str, Any]]],
+        method: str | None = None,
+        path: str | None = None,
+        platform: str | None = None,
+        tags: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Replay filtered recorded requests."""
+        records = self._recorder.filter(
+            method=method, path=path, platform=platform, tags=tags,
+        )
+        results: list[dict[str, Any]] = []
+        for record in records:
+            result = await self.replay(record, execute_fn)
+            results.append(result)
+        return results
+
+    async def validate_replay(
+        self,
+        execute_fn: Callable[..., Awaitable[dict[str, Any]]],
+        records: list[RequestRecord] | None = None,
+    ) -> dict[str, Any]:
+        """Replay requests and validate responses against recordings."""
+        if records is None:
+            records = self._recorder.get_records()
+
+        matched = 0
+        mismatched = 0
+        details: list[dict[str, Any]] = []
+
+        for record in records:
+            result = await self.replay(record, execute_fn)
+            if not result["success"]:
+                mismatched += 1
+                details.append({
+                    "record_id": record.record_id,
+                    "status": "error",
+                    "error": result.get("error", ""),
+                })
+                continue
+
+            original = record.response or {}
+            new = result.get("new_response", {})
+
+            if self._responses_match(original, new):
+                matched += 1
+                details.append({
+                    "record_id": record.record_id,
+                    "status": "matched",
+                })
+            else:
+                mismatched += 1
+                details.append({
+                    "record_id": record.record_id,
+                    "status": "mismatched",
+                    "original_keys": sorted(original.keys()) if isinstance(original, dict) else [],
+                    "new_keys": sorted(new.keys()) if isinstance(new, dict) else [],
+                })
+
+        self._stats["total_matched"] += matched
+        self._stats["total_mismatched"] += mismatched
+
+        return {
+            "total": len(records),
+            "matched": matched,
+            "mismatched": mismatched,
+            "match_rate": round(matched / len(records), 4) if records else 0.0,
+            "details": details,
+        }
+
+    @staticmethod
+    def _responses_match(original: Any, new: Any) -> bool:
+        """Check if two responses have matching structure."""
+        if isinstance(original, dict) and isinstance(new, dict):
+            return set(original.keys()) == set(new.keys())
+        return original == new
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get replayer statistics."""
+        return dict(self._stats)
+
+    def reset_stats(self) -> None:
+        """Reset collected statistics."""
+        self._stats = {
+            "total_replayed": 0,
+            "total_matched": 0,
+            "total_mismatched": 0,
+            "total_errors": 0,
+        }
+
+
+# ── Request Tracing (Debug) ─────────────────────────────────
+
+
+@dataclass
+class TraceSpan:
+    """A single span within a request trace."""
+
+    span_id: str = ""
+    trace_id: str = ""
+    parent_id: str | None = None
+    name: str = ""
+    start_time: float = 0.0
+    end_time: float = 0.0
+    duration_ms: float = 0.0
+    status: str = "unset"
+    attributes: dict[str, Any] = field(default_factory=dict)
+    events: list[dict[str, Any]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.span_id:
+            self.span_id = uuid.uuid4().hex[:16]
+        if not self.trace_id:
+            self.trace_id = uuid.uuid4().hex[:32]
+        if self.start_time == 0.0:
+            self.start_time = time.time()
+
+    def set_attribute(self, key: str, value: Any) -> None:
+        """Add or update a span attribute."""
+        self.attributes[key] = value
+
+    def add_event(self, name: str, attributes: dict[str, Any] | None = None) -> None:
+        """Add a timestamped event to the span."""
+        self.events.append({
+            "name": name,
+            "timestamp": time.time(),
+            "attributes": attributes or {},
+        })
+
+    def finish(self, status: str = "ok") -> None:
+        """Mark the span as finished."""
+        self.end_time = time.time()
+        self.duration_ms = (self.end_time - self.start_time) * 1000
+        self.status = status
+
+    @property
+    def is_active(self) -> bool:
+        """Whether the span is still active (not finished)."""
+        return self.end_time == 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to a JSON-serializable dictionary."""
+        return {
+            "span_id": self.span_id,
+            "trace_id": self.trace_id,
+            "parent_id": self.parent_id,
+            "name": self.name,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "duration_ms": round(self.duration_ms, 2),
+            "status": self.status,
+            "attributes": self.attributes,
+            "events": self.events,
+        }
+
+
+class RequestTracer:
+    """Traces requests through the system with parent-child span support."""
+
+    def __init__(self, service_name: str = "") -> None:
+        self.service_name = service_name
+        self._spans: list[TraceSpan] = []
+        self._active_spans: dict[str, TraceSpan] = {}
+        self._current_trace_id: str = ""
+        self._lock = threading.Lock()
+
+    def start_span(
+        self,
+        name: str,
+        parent: TraceSpan | None = None,
+        attributes: dict[str, Any] | None = None,
+    ) -> TraceSpan:
+        """Start a new span."""
+        span = TraceSpan(
+            name=name,
+            parent_id=parent.span_id if parent else None,
+            trace_id=parent.trace_id if parent else "",
+            attributes=attributes or {},
+        )
+
+        with self._lock:
+            self._spans.append(span)
+            self._active_spans[span.span_id] = span
+            if parent is None:
+                self._current_trace_id = span.trace_id
+
+        return span
+
+    def finish_span(self, span: TraceSpan, status: str = "ok") -> None:
+        """Finish an active span."""
+        span.finish(status)
+        with self._lock:
+            self._active_spans.pop(span.span_id, None)
+
+    def get_spans(self) -> list[TraceSpan]:
+        """Get all spans (copy)."""
+        with self._lock:
+            return list(self._spans)
+
+    def get_active_spans(self) -> list[TraceSpan]:
+        """Get currently active (unfinished) spans."""
+        with self._lock:
+            return list(self._active_spans.values())
+
+    def get_trace_summary(self) -> dict[str, Any]:
+        """Get a summary of the current trace."""
+        with self._lock:
+            spans = list(self._spans)
+            active = list(self._active_spans.values())
+
+        if not spans:
+            return {
+                "trace_id": "",
+                "span_count": 0,
+                "active_span_count": 0,
+                "total_duration_ms": 0.0,
+                "root_span": "",
+                "status": "unset",
+                "service_name": self.service_name,
+            }
+
+        trace_id = spans[0].trace_id
+        root_spans = [s for s in spans if s.parent_id is None]
+        root_name = root_spans[0].name if root_spans else ""
+
+        total_duration = sum(s.duration_ms for s in spans if not s.is_active)
+        has_error = any(s.status == "error" for s in spans)
+        status = "error" if has_error else "ok"
+
+        return {
+            "trace_id": trace_id,
+            "span_count": len(spans),
+            "active_span_count": len(active),
+            "total_duration_ms": round(total_duration, 2),
+            "root_span": root_name,
+            "status": status,
+            "service_name": self.service_name,
+        }
+
+    def clear(self) -> None:
+        """Remove all spans."""
+        with self._lock:
+            self._spans.clear()
+            self._active_spans.clear()
+            self._current_trace_id = ""
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get tracer statistics."""
+        with self._lock:
+            return {
+                "service_name": self.service_name,
+                "total_spans": len(self._spans),
+                "active_spans": len(self._active_spans),
+                "current_trace_id": self._current_trace_id,
+            }
+
+
+# ── Debug Logging ───────────────────────────────────────────
+
+
+class DebugLogLevel(StrEnum):
+    """Debug log levels."""
+
+    TRACE = "trace"
+    DEBUG = "debug"
+    INFO = "info"
+    WARN = "warn"
+    ERROR = "error"
+
+
+_DEBUG_LEVEL_ORDER: dict[str, int] = {
+    DebugLogLevel.TRACE: 0,
+    DebugLogLevel.DEBUG: 1,
+    DebugLogLevel.INFO: 2,
+    DebugLogLevel.WARN: 3,
+    DebugLogLevel.ERROR: 4,
+}
+
+
+@dataclass
+class DebugLogEntry:
+    """A single debug log entry."""
+
+    entry_id: str = ""
+    level: str = DebugLogLevel.DEBUG
+    message: str = ""
+    timestamp: float = 0.0
+    context: dict[str, Any] = field(default_factory=dict)
+    trace_id: str = ""
+    span_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.entry_id:
+            self.entry_id = uuid.uuid4().hex[:12]
+        if self.timestamp == 0.0:
+            self.timestamp = time.time()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to a JSON-serializable dictionary."""
+        return {
+            "entry_id": self.entry_id,
+            "level": self.level,
+            "message": self.message,
+            "timestamp": self.timestamp,
+            "context": self.context,
+            "trace_id": self.trace_id,
+            "span_id": self.span_id,
+        }
+
+
+class DebugLogger:
+    """Structured debug logger for request debugging."""
+
+    def __init__(
+        self,
+        level: DebugLogLevel | str = DebugLogLevel.DEBUG,
+        max_entries: int = 5000,
+    ) -> None:
+        self._level = level if isinstance(level, str) else level.value
+        self._max_entries = max_entries
+        self._entries: list[DebugLogEntry] = []
+        self._lock = threading.Lock()
+        self._stats = {"total_logged": 0, "total_filtered": 0}
+
+    @property
+    def level(self) -> str:
+        """Current minimum log level."""
+        return self._level
+
+    @level.setter
+    def level(self, value: str | DebugLogLevel) -> None:
+        """Update the minimum log level."""
+        self._level = value if isinstance(value, str) else value.value
+
+    def _should_log(self, level: str) -> bool:
+        """Check if a message at this level should be captured."""
+        return _DEBUG_LEVEL_ORDER.get(level, 0) >= _DEBUG_LEVEL_ORDER.get(self._level, 0)
+
+    def log(
+        self,
+        level: str | DebugLogLevel,
+        message: str,
+        context: dict[str, Any] | None = None,
+        trace_id: str = "",
+        span_id: str = "",
+    ) -> DebugLogEntry | None:
+        """Log a debug entry."""
+        level_str = level if isinstance(level, str) else level.value
+
+        if not self._should_log(level_str):
+            with self._lock:
+                self._stats["total_filtered"] += 1
+            return None
+
+        entry = DebugLogEntry(
+            level=level_str,
+            message=message,
+            context=context or {},
+            trace_id=trace_id,
+            span_id=span_id,
+        )
+
+        with self._lock:
+            self._entries.append(entry)
+            if len(self._entries) > self._max_entries:
+                self._entries = self._entries[-self._max_entries:]
+            self._stats["total_logged"] += 1
+
+        return entry
+
+    def get_entries(
+        self,
+        level: str | None = None,
+        trace_id: str | None = None,
+        limit: int = 100,
+    ) -> list[DebugLogEntry]:
+        """Get log entries with optional filtering."""
+        with self._lock:
+            entries = list(self._entries)
+
+        if level:
+            min_order = _DEBUG_LEVEL_ORDER.get(level, 0)
+            entries = [e for e in entries if _DEBUG_LEVEL_ORDER.get(e.level, 0) >= min_order]
+        if trace_id:
+            entries = [e for e in entries if e.trace_id == trace_id]
+
+        return entries[-limit:]
+
+    def export_json(self) -> str:
+        """Export all entries as JSON string."""
+        with self._lock:
+            data = [e.to_dict() for e in self._entries]
+        return json.dumps(data, ensure_ascii=False, indent=2)
+
+    def clear(self) -> int:
+        """Remove all entries. Returns count."""
+        with self._lock:
+            count = len(self._entries)
+            self._entries.clear()
+            return count
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get logger statistics."""
+        with self._lock:
+            return {
+                "entry_count": len(self._entries),
+                "max_entries": self._max_entries,
+                "level": self._level,
+                **self._stats,
+            }
+
+
+# ── Debug Breakpoints ───────────────────────────────────────
+
+
+@dataclass
+class DebugBreakpoint:
+    """A configurable debug breakpoint for request debugging."""
+
+    breakpoint_id: str = ""
+    name: str = ""
+    enabled: bool = True
+    condition: Callable[..., bool] | None = field(default=None, repr=False)
+    hit_count: int = 0
+    action: str = "log"
+    tags: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.breakpoint_id:
+            self.breakpoint_id = uuid.uuid4().hex[:12]
+
+    def evaluate(self, **kwargs: Any) -> bool:
+        """Evaluate whether this breakpoint should trigger."""
+        if not self.enabled:
+            return False
+        if self.condition is None:
+            return True
+        try:
+            return self.condition(**kwargs)
+        except Exception:
+            return False
+
+    def hit(self) -> None:
+        """Record a breakpoint hit."""
+        self.hit_count += 1
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to a JSON-serializable dictionary (excludes condition callable)."""
+        return {
+            "breakpoint_id": self.breakpoint_id,
+            "name": self.name,
+            "enabled": self.enabled,
+            "hit_count": self.hit_count,
+            "action": self.action,
+            "tags": self.tags,
+            "has_condition": self.condition is not None,
+        }
+
+
+class DebugBreakpointManager:
+    """Manages debug breakpoints for request debugging."""
+
+    def __init__(self) -> None:
+        self._breakpoints: dict[str, DebugBreakpoint] = {}
+        self._lock = threading.Lock()
+        self._stats = {"total_checks": 0, "total_hits": 0}
+        self._hit_history: list[dict[str, Any]] = []
+
+    def add_breakpoint(
+        self,
+        name: str = "",
+        action: str = "log",
+        condition: Callable[..., bool] | None = None,
+        tags: list[str] | None = None,
+    ) -> DebugBreakpoint:
+        """Add a new breakpoint."""
+        bp = DebugBreakpoint(
+            name=name,
+            action=action,
+            condition=condition,
+            tags=tags or [],
+        )
+        with self._lock:
+            self._breakpoints[bp.breakpoint_id] = bp
+        logger.debug(f"Breakpoint added: {bp.name} [{bp.breakpoint_id}]")
+        return bp
+
+    def remove_breakpoint(self, breakpoint_id: str) -> bool:
+        """Remove a breakpoint by ID."""
+        with self._lock:
+            if breakpoint_id in self._breakpoints:
+                del self._breakpoints[breakpoint_id]
+                return True
+        return False
+
+    def enable_breakpoint(self, breakpoint_id: str) -> bool:
+        """Enable a breakpoint."""
+        with self._lock:
+            bp = self._breakpoints.get(breakpoint_id)
+            if bp:
+                bp.enabled = True
+                return True
+        return False
+
+    def disable_breakpoint(self, breakpoint_id: str) -> bool:
+        """Disable a breakpoint."""
+        with self._lock:
+            bp = self._breakpoints.get(breakpoint_id)
+            if bp:
+                bp.enabled = False
+                return True
+        return False
+
+    def get_breakpoint(self, breakpoint_id: str) -> DebugBreakpoint | None:
+        """Get a breakpoint by ID."""
+        with self._lock:
+            return self._breakpoints.get(breakpoint_id)
+
+    def list_breakpoints(
+        self,
+        enabled_only: bool = False,
+        tags: list[str] | None = None,
+    ) -> list[DebugBreakpoint]:
+        """List breakpoints with optional filtering."""
+        with self._lock:
+            bps = list(self._breakpoints.values())
+        if enabled_only:
+            bps = [bp for bp in bps if bp.enabled]
+        if tags:
+            tag_set = set(tags)
+            bps = [bp for bp in bps if tag_set & set(bp.tags)]
+        return bps
+
+    def should_break(self, **kwargs: Any) -> DebugBreakpoint | None:
+        """Check if any breakpoint should trigger."""
+        with self._lock:
+            self._stats["total_checks"] += 1
+            bps = [bp for bp in self._breakpoints.values() if bp.enabled]
+
+        for bp in bps:
+            if bp.evaluate(**kwargs):
+                bp.hit()
+                self._record_hit(bp, kwargs)
+                with self._lock:
+                    self._stats["total_hits"] += 1
+                return bp
+
+        return None
+
+    def _record_hit(self, bp: DebugBreakpoint, context: dict[str, Any]) -> None:
+        """Record a breakpoint hit in history."""
+        self._hit_history.append({
+            "breakpoint_id": bp.breakpoint_id,
+            "name": bp.name,
+            "timestamp": time.time(),
+            "context": context,
+        })
+        if len(self._hit_history) > 1000:
+            self._hit_history = self._hit_history[-500:]
+
+    def get_hit_history(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Get recent breakpoint hit history."""
+        return self._hit_history[-limit:]
+
+    def clear(self) -> None:
+        """Remove all breakpoints and clear history."""
+        with self._lock:
+            self._breakpoints.clear()
+            self._hit_history.clear()
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get breakpoint manager statistics."""
+        with self._lock:
+            return {
+                "breakpoint_count": len(self._breakpoints),
+                "enabled_count": sum(1 for bp in self._breakpoints.values() if bp.enabled),
+                **self._stats,
+                "hit_history_count": len(self._hit_history),
+            }
+
+    def reset_stats(self) -> None:
+        """Reset collected statistics."""
+        self._stats = {"total_checks": 0, "total_hits": 0}
+        self._hit_history.clear()

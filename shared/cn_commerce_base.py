@@ -927,7 +927,6 @@ class PriorityQueue:
             max_size: Maximum number of items the queue can hold.
                       Enqueue raises ``RuntimeError`` when full.
         """
-        import heapq
 
         self._heap: list[tuple[int, float, int, PrioritizedRequest]] = []
         self._counter = 0
@@ -1931,8 +1930,6 @@ class CacheWarmer:
         ]
 
 
-
-
 # ── Request Timeout ─────────────────────────────────────────
 
 
@@ -2308,12 +2305,14 @@ class RequestCancelManager:
                 if not token.cancelled:
                     token.request_cancel(reason=reason)
                     count += 1
-            self._cancel_history.append({
-                "action": "cancel_all",
-                "reason": reason,
-                "timestamp": time.time(),
-                "tokens_affected": count,
-            })
+            self._cancel_history.append(
+                {
+                    "action": "cancel_all",
+                    "reason": reason,
+                    "timestamp": time.time(),
+                    "tokens_affected": count,
+                }
+            )
         logger.info(f"Cancel manager: {count} tokens cancelled ({reason})")
         return count
 
@@ -2332,12 +2331,14 @@ class RequestCancelManager:
             for token in self._tokens.values():
                 token.request_cancel(request_ids=request_ids, reason=reason)
                 count += 1
-            self._cancel_history.append({
-                "action": "cancel_batch",
-                "request_ids": list(request_ids),
-                "reason": reason,
-                "timestamp": time.time(),
-            })
+            self._cancel_history.append(
+                {
+                    "action": "cancel_batch",
+                    "request_ids": list(request_ids),
+                    "reason": reason,
+                    "timestamp": time.time(),
+                }
+            )
         logger.info(f"Cancel manager: batch cancel for {len(request_ids)} IDs ({reason})")
         return count
 
@@ -2374,6 +2375,7 @@ class RequestCancelManager:
                 "cancel_history_count": len(self._cancel_history),
                 "recent_history": self._cancel_history[-10:],
             }
+
 
 # ── Request Compression ────────────────────────────────────
 

@@ -343,3 +343,6 @@ mcp-cn-commerce/
 ## 许可证
 
 MIT — 详见 [LICENSE](LICENSE)。
+
+<!-- MCP Registry ownership marker, do not remove -->
+mcp-name: io.github.tonywang-hub/mcp-cn-commerce

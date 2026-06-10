@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
   "name": "io.github.tonywang-hub/mcp-cn-commerce",
-  "description": "Read-only MCP servers for Chinese e-commerce merchant data: Ocean Engine ads, Douyin Shop, JD.com, Taobao, Pinduoduo, Kuaishou, Xiaohongshu, WeChat Store",
+  "description": "Read-only merchant data from 8 Chinese e-commerce platforms: orders, products, after-sales, ads",
   "repository": {
     "url": "https://github.com/TonyWang-hub/mcp-cn-commerce",
     "source": "github"

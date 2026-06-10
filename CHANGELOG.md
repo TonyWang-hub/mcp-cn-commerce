@@ -4,6 +4,17 @@ All notable changes to mcp-cn-commerce will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.3] - 2026-06-10
+
+### Fixed
+
+- **修复 oceanengine / doudian 两个 server 无法启动的问题**：二者使用底层
+  `mcp.server.Server` 却调用只有 FastMCP 才有的 `@server.tool()`，在真实
+  MCP SDK 下导入即抛 `AttributeError`（`mcp-cn-oceanengine` / `mcp-cn-doudian`
+  命令此前从未真正可用）。现已迁移到 FastMCP，与其余 6 个平台一致。
+- 移除测试中掩盖该问题的 `Server.tool` monkey-patch 兼容垫片；
+  `tests/test_common_tools.py` 统一按 FastMCP 路径校验全部 8 个 server。
+
 ## [0.1.2] - 2026-06-10
 
 ### Fixed

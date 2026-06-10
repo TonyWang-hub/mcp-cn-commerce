@@ -6,31 +6,8 @@ import os
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-# ═════════════════════════════════════════════════════════════════════
-#  Compatibility shim — MCP >=1.27 moved the tool() decorator to
-#  FastMCP.  The server under test was written for an older MCP API
-#  where Server had a .tool() method.  Monkey-patch it so the module
-#  can be imported and the decorator is a transparent pass-through.
-# ═════════════════════════════════════════════════════════════════════
-import mcp.server  # noqa: E402
 import pytest
 
-_orig_server_cls = mcp.server.Server
-
-if not hasattr(_orig_server_cls, "tool"):
-
-    def _mock_tool(self, *args: Any, **kwargs: Any) -> Any:
-        """Pass-through decorator — returns the function unchanged."""
-
-        def decorator(func: Any) -> Any:
-            return func
-
-        return decorator
-
-    _orig_server_cls.tool = _mock_tool  # type: ignore[attr-defined]
-
-
-# Now safe to import the module under test.
 import servers.doudian.server as _srv  # noqa: E402 — the module itself (for patching)
 from servers.doudian.server import (  # noqa: E402
     ConfigError,

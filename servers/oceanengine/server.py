@@ -6,12 +6,10 @@ Uses OAuth 2.0 for authentication via open.oceanengine.com.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
+from mcp.server.fastmcp import FastMCP
 
 from shared.cn_commerce_base import (
     CommerceMCPBase,
@@ -46,7 +44,7 @@ def _get_client() -> OceanEngine:
 # ── MCP Server ───────────────────────────────────────────
 
 
-server = Server("mcp-cn-oceanengine")
+server = FastMCP("mcp-cn-oceanengine")
 
 
 # ── Helpers ──────────────────────────────────────────────
@@ -593,12 +591,7 @@ register_common_tools(server, _get_client)
 
 def main() -> None:
     """Entry point: run the MCP server over stdio."""
-
-    async def _run() -> None:
-        async with stdio_server() as (read, write):
-            await server.run(read, write)
-
-    asyncio.run(_run())
+    server.run()
 
 
 if __name__ == "__main__":

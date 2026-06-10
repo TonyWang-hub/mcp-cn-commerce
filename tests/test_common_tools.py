@@ -5,17 +5,9 @@ Item 3B verifies that ``register_common_tools`` (defined in
 servers, exposing the four operational tools ``get_metrics``, ``get_traces``,
 ``get_alerts`` and ``export_data`` on each one.
 
-Two server families exist:
-
-* **FastMCP servers** (jd, kuaishou, pinduoduo, taobao, weixin_store,
-  xiaohongshu) expose a ``mcp = FastMCP(...)`` instance whose registered tools
-  are introspectable via ``await mcp.list_tools()``.
-* **Low-level ``Server`` servers** (doudian, oceanengine) use ``@server.tool()``.
-  Newer MCP releases moved ``tool()`` off ``Server`` onto FastMCP, so — exactly
-  like the existing per-server test suites — we monkey-patch a pass-through
-  ``Server.tool`` before import. Here the shim additionally *records* the names
-  of every function it decorates, letting us assert the four common tools were
-  registered.
+All eight servers expose a FastMCP instance (named ``mcp`` on six of them,
+``server`` on doudian/oceanengine) whose registered tools are introspectable
+via ``await <instance>.list_tools()``.
 """
 
 from __future__ import annotations
@@ -61,30 +53,7 @@ for _k, _v in _ENV.items():
     os.environ.setdefault(_k, _v)
 
 
-# ── Compatibility shim for the low-level ``Server`` servers ──────────────────
-# Record decorated tool names so we can assert what was registered. The real
-# FastMCP servers don't need this; only doudian/oceanengine use Server.tool().
-
-import mcp.server  # noqa: E402
-
-_REGISTERED_TOOLS: list[str] = []
-_orig_server_cls = mcp.server.Server
-
-if not hasattr(_orig_server_cls, "tool"):
-
-    def _recording_tool(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-        """Pass-through ``.tool()`` decorator that records the function name."""
-
-        def decorator(func):  # noqa: ANN001
-            _REGISTERED_TOOLS.append(func.__name__)
-            return func
-
-        return decorator
-
-    _orig_server_cls.tool = _recording_tool  # type: ignore[attr-defined]
-
-
-# ── Import every server module (after env + shim are in place) ───────────────
+# ── Import every server module (after env is in place) ───────────────────────
 
 import servers.doudian.server as doudian_server  # noqa: E402
 import servers.jd.server as jd_server  # noqa: E402
@@ -98,7 +67,8 @@ from shared.cn_commerce_base import CommerceMCPBase  # noqa: E402
 
 COMMON_TOOLS = {"get_metrics", "get_traces", "get_alerts", "export_data"}
 
-# FastMCP servers: (module, attr name of the FastMCP instance).
+# All servers expose a FastMCP instance; the attribute is ``mcp`` on six of
+# them and ``server`` on doudian/oceanengine.
 FASTMCP_SERVERS = [
     pytest.param(jd_server, id="jd"),
     pytest.param(kuaishou_server, id="kuaishou"),
@@ -106,13 +76,14 @@ FASTMCP_SERVERS = [
     pytest.param(taobao_server, id="taobao"),
     pytest.param(weixin_store_server, id="weixin_store"),
     pytest.param(xiaohongshu_server, id="xiaohongshu"),
-]
-
-# Low-level Server servers.
-LOWLEVEL_SERVERS = [
     pytest.param(doudian_server, id="doudian"),
     pytest.param(oceanengine_server, id="oceanengine"),
 ]
+
+
+def _fastmcp(module):
+    """Return the module's FastMCP instance regardless of its attribute name."""
+    return getattr(module, "mcp", None) or module.server
 
 
 # ── FastMCP servers: introspect via list_tools() ────────────────────────────
@@ -122,7 +93,7 @@ LOWLEVEL_SERVERS = [
 @pytest.mark.parametrize("module", FASTMCP_SERVERS)
 async def test_fastmcp_server_registers_common_tools(module):
     """Each FastMCP server exposes all four common operational tools."""
-    tools = await module.mcp.list_tools()
+    tools = await _fastmcp(module).list_tools()
     names = {t.name for t in tools}
     missing = COMMON_TOOLS - names
     assert not missing, f"{module.__name__} missing common tools: {sorted(missing)}"
@@ -131,43 +102,9 @@ async def test_fastmcp_server_registers_common_tools(module):
 @pytest.mark.parametrize("module", FASTMCP_SERVERS)
 def test_fastmcp_server_keeps_platform_tools(module):
     """Wiring common tools must not drop a server's existing platform tools."""
-    registered = set(module.mcp._tool_manager._tools.keys())
+    registered = set(_fastmcp(module)._tool_manager._tools.keys())
     # Every server has more than just the four common tools.
     assert len(registered - COMMON_TOOLS) > 0
-
-
-# ── Low-level Server servers: introspect via the recording shim ──────────────
-
-
-@pytest.mark.parametrize("module", LOWLEVEL_SERVERS)
-def test_lowlevel_server_registers_common_tools(module):
-    """doudian / oceanengine register the four common tools via @server.tool()."""
-    # The module is likely already imported (e.g. by test_integration), so its
-    # registration won't re-run on a plain import, and another module may have
-    # installed its own Server.tool shim. Install our own recording shim
-    # unconditionally, reload to re-run registration, then restore.
-    import importlib
-
-    import mcp.server
-
-    captured: list[str] = []
-
-    def _recording_tool(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-        def decorator(func):  # noqa: ANN001
-            captured.append(func.__name__)
-            return func
-
-        return decorator
-
-    original = mcp.server.Server.tool
-    mcp.server.Server.tool = _recording_tool  # type: ignore[attr-defined]
-    try:
-        importlib.reload(module)
-    finally:
-        mcp.server.Server.tool = original  # type: ignore[attr-defined]
-
-    missing = COMMON_TOOLS - set(captured)
-    assert not missing, f"{module.__name__} common tools not registered: {sorted(missing)}"
 
 
 # ── End-to-end: invoke the registered FastMCP tools against a real client ────

@@ -1,7 +1,7 @@
 # Registry / 市场提交操作指南
 
 > 目标：让 mcp-cn-commerce 出现在所有主流 MCP 发现入口。
-> 前置条件：**v0.1.2 已发布到 PyPI**（依赖声明修复必须先上线，否则用户从 Registry 装回来还是坏的）。
+> 前置条件：**v0.1.3 已发布到 PyPI**（依赖声明修复必须先上线，否则用户从 Registry 装回来还是坏的）。
 
 ## 0. 先发 v0.1.2（前置）
 
@@ -83,7 +83,7 @@ Fork 后在 **Finance / E-commerce 相关分类**追加一行，提 PR：
 
 | 渠道 | 状态 | 日期 | 备注 |
 |---|---|---|---|
-| PyPI v0.1.2 | ⬜ | | 前置 |
+| PyPI v0.1.3 | ✅ | 2026-06-10 | 0.1.1/0.1.2 为坏包，建议 yank |
 | MCP 官方 Registry | ⬜ | | 需 mcp-publisher login |
 | awesome-mcp-servers | ⬜ | | PR |
 | Awesome-MCP-ZH | ⬜ | | PR |

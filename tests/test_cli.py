@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from unittest.mock import patch
 
 import pytest
@@ -32,7 +33,7 @@ class TestVersion:
     """Tests for version info."""
 
     def test_version_string(self):
-        assert __version__ == "0.1.1"
+        assert re.fullmatch(r"\d+\.\d+\.\d+", __version__)
 
     def test_version_from_parser(self, capsys):
         parser = build_parser()
@@ -40,7 +41,7 @@ class TestVersion:
             parser.parse_args(["--version"])
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
-        assert "0.1.1" in captured.out
+        assert __version__ in captured.out
 
 
 # ── Server Registry Tests ─────────────────────────────────
@@ -332,13 +333,13 @@ class TestMain:
         main(["info"])
         captured = capsys.readouterr()
         assert "mcp-cn-commerce" in captured.out
-        assert "0.1.1" in captured.out
+        assert __version__ in captured.out
 
     def test_info_json_output(self, capsys):
         main(["info", "--json"])
         captured = capsys.readouterr()
         data = json.loads(captured.out)
-        assert data["version"] == "0.1.1"
+        assert data["version"] == __version__
         assert "servers" in data
         assert len(data["servers"]) == len(SERVER_REGISTRY)
 
@@ -363,11 +364,11 @@ class TestShowVersion:
     def test_basic_version(self, capsys):
         show_version(verbose=False)
         captured = capsys.readouterr()
-        assert "0.1.1" in captured.out
+        assert __version__ in captured.out
 
     def test_verbose_version(self, capsys):
         show_version(verbose=True)
         captured = capsys.readouterr()
-        assert "0.1.1" in captured.out
+        assert __version__ in captured.out
         assert "Python:" in captured.out
         assert "Available servers:" in captured.out

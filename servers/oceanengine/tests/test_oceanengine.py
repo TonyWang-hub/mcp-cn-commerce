@@ -15,25 +15,6 @@ import pytest
 # Repo root, used by tests that probe the on-disk project layout (e.g. .env).
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
-# ── Compatibility shim: MCP >=1.27 moved the tool() decorator to ──
-# FastMCP. The server under test uses @server.tool().  Monkey-patch
-# Server so the module can be imported under newer MCP versions.
-import mcp.server
-
-_orig_server_cls = mcp.server.Server
-
-if not hasattr(_orig_server_cls, "tool"):
-
-    def _mock_tool(self, *args, **kwargs):
-        """Pass-through decorator — returns the function unchanged."""
-
-        def decorator(func):
-            return func
-
-        return decorator
-
-    _orig_server_cls.tool = _mock_tool  # type: ignore[attr-defined]
-
 from shared.cn_commerce_base import CommerceAPIError  # noqa: E402
 
 # ── Fixtures ────────────────────────────────────────────────

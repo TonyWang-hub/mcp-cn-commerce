@@ -4,6 +4,13 @@ All notable changes to mcp-cn-commerce will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.4] - 2026-06-10
+
+### Fixed
+
+- MCP Registry 归属标记大小写修正：`mcp-name: io.github.TonyWang-hub/mcp-cn-commerce`
+  （Registry 按 GitHub 用户名原始大小写做精确匹配）；server.json 命名空间同步修正。
+
 ## [0.1.3] - 2026-06-10
 
 ### Fixed

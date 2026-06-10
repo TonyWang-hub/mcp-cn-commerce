@@ -48,6 +48,10 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 urls = {Repository = "https://github.com/TonyWang-hub/mcp-cn-commerce", Issues = "https://github.com/TonyWang-hub/mcp-cn-commerce/issues", Documentation = "https://github.com/TonyWang-hub/mcp-cn-commerce#readme", Changelog = "https://github.com/TonyWang-hub/mcp-cn-commerce/blob/main/CHANGELOG.md"}
+dependencies = [
+    "mcp>=1.2,<2",
+    "httpx>=0.27,<1",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-asyncio", "pytest-cov", "black", "ruff"]

@@ -4,6 +4,19 @@ All notable changes to mcp-cn-commerce will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.2] - 2026-06-10
+
+### Fixed
+
+- **修复 PyPI 安装不可用的问题**：`pyproject.toml` 此前未声明运行时依赖，
+  干净环境 `pip install mcp-cn-commerce` 后缺少 `mcp` / `httpx` 无法启动。
+  现已声明 `dependencies = ["mcp>=1.2,<2", "httpx>=0.27,<1"]`。
+
+### Added
+
+- `server.json` — MCP 官方 Registry 发布清单
+- `docs/registry-submission.md` — 各 Registry / 市场提交操作指南
+
 ## [0.1.1] - 2026-06-10
 
 ### Added

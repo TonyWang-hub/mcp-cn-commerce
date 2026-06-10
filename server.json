@@ -1,0 +1,83 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.tonywang-hub/mcp-cn-commerce",
+  "description": "Read-only MCP servers for Chinese e-commerce merchant data: Ocean Engine ads, Douyin Shop, JD.com, Taobao, Pinduoduo, Kuaishou, Xiaohongshu, WeChat Store",
+  "repository": {
+    "url": "https://github.com/TonyWang-hub/mcp-cn-commerce",
+    "source": "github"
+  },
+  "version": "0.1.2",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "mcp-cn-commerce",
+      "version": "0.1.2",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "OCEANENGINE_APP_KEY",
+          "description": "Ocean Engine open platform App Key (only needed for the oceanengine server)",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "OCEANENGINE_APP_SECRET",
+          "description": "Ocean Engine open platform App Secret",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "OCEANENGINE_ACCESS_TOKEN",
+          "description": "Ocean Engine OAuth access token",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "DOUDIAN_APP_KEY",
+          "description": "Douyin Shop App Key (only needed for the doudian server)",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "DOUDIAN_APP_SECRET",
+          "description": "Douyin Shop App Secret",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "DOUDIAN_SHOP_ID",
+          "description": "Douyin Shop ID",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "DOUDIAN_ACCESS_TOKEN",
+          "description": "Douyin Shop OAuth access token",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "JD_APP_KEY",
+          "description": "JD open platform App Key (only needed for the jd server)",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "JD_APP_SECRET",
+          "description": "JD open platform App Secret",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "JD_ACCESS_TOKEN",
+          "description": "JD OAuth access token",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

@@ -22,8 +22,7 @@ import os
 import time
 from typing import Any
 
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
+from mcp.server.fastmcp import FastMCP
 
 from shared.cn_commerce_base import (
     CommerceAPIError,
@@ -36,7 +35,7 @@ from shared.cn_commerce_base import (
 
 logger = logging.getLogger(__name__)
 
-server = Server("mcp-cn-doudian")
+server = FastMCP("mcp-cn-doudian")
 
 # ── Exceptions ──────────────────────────────────────────────
 
@@ -1695,17 +1694,7 @@ register_common_tools(server, _get_client)
 
 def main() -> None:
     """Run the Doudian MCP server via stdio transport."""
-    import asyncio
-
-    async def _run() -> None:
-        async with stdio_server() as (read_stream, write_stream):
-            await server.run(
-                read_stream,
-                write_stream,
-                server.create_initialization_options(),
-            )
-
-    asyncio.run(_run())
+    server.run()
 
 
 if __name__ == "__main__":

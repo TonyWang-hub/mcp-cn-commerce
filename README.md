@@ -345,4 +345,4 @@ mcp-cn-commerce/
 MIT — 详见 [LICENSE](LICENSE)。
 
 <!-- MCP Registry ownership marker, do not remove -->
-mcp-name: io.github.tonywang-hub/mcp-cn-commerce
+mcp-name: io.github.TonyWang-hub/mcp-cn-commerce

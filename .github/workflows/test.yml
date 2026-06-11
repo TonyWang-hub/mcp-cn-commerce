@@ -50,6 +50,32 @@ jobs:
           name: test-results-py${{ matrix.python-version }}
           path: test-results.xml
 
+  # Build the wheel, install it into a clean venv, and exercise the INSTALLED
+  # package against the real MCP SDK. Catches broken packaging and modules
+  # that only import under mocked tests (both shipped in 0.1.x releases).
+  install-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel
+
+      - name: Install into clean venv and run smoke test
+        run: |
+          python -m venv "$RUNNER_TEMP/smoke-venv"
+          source "$RUNNER_TEMP/smoke-venv/bin/activate"
+          pip install dist/*.whl
+          cd "$RUNNER_TEMP"
+          python "$GITHUB_WORKSPACE/scripts/smoke_install.py"
+
   lint:
     runs-on: ubuntu-latest
     steps:

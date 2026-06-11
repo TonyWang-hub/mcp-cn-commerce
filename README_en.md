@@ -296,6 +296,13 @@ This project handles sensitive e-commerce API credentials. Our security guarante
 - 🖥️ **Direct API calls** — connects directly to platform APIs; no intermediate server or proxy
 - 🔑 **Env-var config** — credentials are loaded from environment variables, never hardcoded
 
+## 💼 Pro (private beta)
+
+The open-source version is complete and free forever (single shop, manual token management). **Pro** adds what agencies / ISVs / multi-shop merchants need: **automatic OAuth token refresh** (Ocean Engine's 24h expiry handled for you), a local **`auth` wizard** for the authorization-code flow, and **multi-shop management** (`shops.yaml`, alias routing, cross-shop aggregation) — still fully local, offline license, zero telemetry. Phase 1 covers Ocean Engine / Douyin Shop / JD.
+
+> 🎯 Recruiting seed users: free beta access in exchange for real-world feedback.
+> [Open a Pro inquiry](https://github.com/TonyWang-hub/mcp-cn-commerce/issues/new?labels=pro-inquiry&title=%5BPro%5D%20Inquiry)
+
 ## Roadmap
 
 ### Phase 1 — Foundation ✅

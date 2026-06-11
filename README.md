@@ -300,6 +300,25 @@ mcp-cn-commerce/
 **问：支持哪些 AI Client？**
 答：所有支持 MCP 协议的客户端：Claude Desktop、Cherry Studio、Kimi Work、Cline、Continue 等。
 
+## 💼 Pro 版（内测招募中）
+
+开源版永久免费、功能完整（单店铺 + 手动管理 token）。如果你是**代运营公司 / 电商 SaaS / 多店铺商家**，Pro 版解决两个开源版没有的问题：
+
+| 能力 | 开源版 | Pro 版 |
+|---|---|---|
+| 8 平台只读数据工具（147 个） | ✅ | ✅ |
+| Access Token 管理 | 手动获取、过期手动换 | **自动刷新**（过期前自动续约，巨量引擎 24h 过期不再是问题） |
+| OAuth 授权 | 自己去开放平台抓 token | **`auth` 向导**：本地一条命令走完授权流程 |
+| 店铺数量 | 单店铺（一进程一套凭证） | **多店铺**：`shops.yaml` 统一管理，按别名路由，跨店聚合 |
+| 数据流向 | 全部本地 | 同样全部本地（**无任何上报**，license 离线校验） |
+| 支持 | GitHub Issues | 优先支持 |
+
+> 🎯 **正在招募首批种子用户**：免费使用 Pro 内测版，换取你的真实场景反馈。
+> 特别欢迎管理多个店铺的代运营 TP / ISV。
+> 👉 [提交 Pro 咨询](https://github.com/TonyWang-hub/mcp-cn-commerce/issues/new?labels=pro-inquiry&title=%5BPro%5D%20%E5%92%A8%E8%AF%A2&body=%E8%AF%B7%E7%AE%80%E5%8D%95%E4%BB%8B%E7%BB%8D%EF%BC%9A%0A-%20%E4%BD%A0%E7%9A%84%E8%A7%92%E8%89%B2%EF%BC%88%E5%95%86%E5%AE%B6%2F%E4%BB%A3%E8%BF%90%E8%90%A5%2FISV%2F%E5%BC%80%E5%8F%91%E8%80%85%EF%BC%89%EF%BC%9A%0A-%20%E7%AE%A1%E7%90%86%E7%9A%84%E5%BA%97%E9%93%BA%E6%95%B0%E9%87%8F%E5%92%8C%E5%B9%B3%E5%8F%B0%EF%BC%9A%0A-%20%E6%9C%80%E6%83%B3%E8%A7%A3%E5%86%B3%E7%9A%84%E9%97%AE%E9%A2%98%EF%BC%9A)
+
+Pro 版闭源、私有分发（GitHub Release + 专属 token 安装），首期覆盖**巨量引擎 / 抖店 / 京东**的 token 自动刷新，其余平台按用户反馈排期。
+
 ## 路线图
 
 ### Phase 1 — 基础 ✅

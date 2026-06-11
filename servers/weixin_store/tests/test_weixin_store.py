@@ -319,7 +319,7 @@ def shop_info_payload() -> dict:
         "errcode": 0,
         "errmsg": "ok",
         "shop_info": {
-            "shop_id": "wx1234567890abcdef",
+            "shop_id": "test_shop_id_001",
             "shop_name": "数码旗舰店",
             "shop_type": 1,
             "shop_logo": "https://wximg.com/logo.png",
@@ -732,7 +732,7 @@ async def test_get_shop_info_returns_shop_details(mock_request, shop_info_payloa
 
     assert result["errcode"] == 0
     shop = result["shop_info"]
-    assert shop["shop_id"] == "wx1234567890abcdef"
+    assert shop["shop_id"] == "test_shop_id_001"
     assert shop["shop_name"] == "数码旗舰店"
     assert shop["shop_type"] == 1
     assert "shop_logo" in shop

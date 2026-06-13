@@ -71,7 +71,47 @@ Fork 后在 **Finance / E-commerce 相关分类**追加一行，提 PR：
 |---|---|
 | Cherry Studio | GitHub 提 issue/PR 到其内置 MCP 列表仓库 + 邮件联系收录 |
 | Kimi Work | 官网开发者渠道提交 MCP 服务收录申请 |
-| Cline / Continue | 其 marketplace 仓库提 PR |
+| Cline | **开 issue**（不是 PR）到 `cline/mcp-marketplace`，详见下方第 6 节 |
+| Continue | 其 marketplace 仓库提 PR |
+
+## 6. Cline MCP Marketplace（cline/mcp-marketplace）
+
+Cline 内置 MCP 市场，用户可一键安装。提交方式是 **在 `github.com/cline/mcp-marketplace` 开一个 issue**（不是 PR）。
+
+**必交材料**：
+
+1. **GitHub 仓库 URL**：`https://github.com/TonyWang-hub/mcp-cn-commerce`
+2. **400×400 PNG logo**：✅ 已就绪 —— `assets/logo-400.png`（源文件 `assets/logo.svg`，可用 `rsvg-convert -w 400 -h 400 assets/logo.svg -o assets/logo-400.png` 重新生成）。
+3. **能被 Cline 自动安装的 README**：提交前务必本地验证——只把 `README.md`（或 `llms-install.md`）喂给 Cline，看它能否独立完成安装与配置。建议补一个 `llms-install.md`（本项目要按平台设置环境变量凭证，自动安装容易卡在这一步）。
+
+**审核维度**（Cline 团队会看）：
+- 社区采纳度（GitHub star / 讨论 / 生态存在感）
+- 维护者可信度（身份与背景，偏好有可验证背景的组织/开发者）
+
+**Issue 正文（复制即用）**：
+
+```markdown
+### GitHub Repo URL
+https://github.com/TonyWang-hub/mcp-cn-commerce
+
+### Logo
+（附 400×400 PNG）
+
+### What it does
+mcp-cn-commerce — the first open-source MCP server suite for Chinese e-commerce
+*merchant operations data*. Read-only access to orders, products, after-sales and
+ad reports across 8 platforms (Douyin Shop, JD.com, Taobao, Pinduoduo, Kuaishou,
+Xiaohongshu, WeChat Store, Ocean Engine ads). Runs locally with the user's own
+API credentials — no data leaves the machine, all tools are read-only.
+
+### Install (PyPI)
+`pip install mcp-cn-commerce` — 8 platform servers ship in one package, selected
+via MCP client config. Per-platform credentials are supplied through environment
+variables (see README "配置凭证").
+
+### Pre-submission check
+- [ ] Confirmed Cline can set up the server using only README.md / llms-install.md
+```
 
 ## 统一推广文案（复制即用）
 
@@ -91,3 +131,4 @@ Fork 后在 **Finance / E-commerce 相关分类**追加一行，提 PR：
 | 阿里云百炼 | ⬜ | | 表单/审核 |
 | Cherry Studio | ⬜ | | issue + 邮件 |
 | Kimi Work | ⬜ | | 表单 |
+| Cline Marketplace | ⬜ | | 开 issue，需 400×400 logo |

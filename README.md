@@ -142,23 +142,77 @@ export JD_ACCESS_TOKEN="你的 Access Token"
 
 ### 接入 AI Agent
 
-支持 **Claude Desktop**、**Cherry Studio**、**Kimi Work** 等所有 MCP 兼容客户端：
+本项目是标准 stdio MCP server，所有支持 MCP 协议的客户端都能直接接入。下面给出主流客户端的配置方式（凭证可在 shell 里 `export`，也可写进客户端配置的 `env` 段，两种都行）。
+
+#### Claude Desktop / Cherry Studio / Cline / Continue / Kimi Work（`mcpServers` JSON）
+
+这类客户端用同一套 `mcpServers` 配置格式（Cline 写在 `cline_mcp_settings.json`，Claude Desktop 写在 `claude_desktop_config.json`）：
 
 ```json
 {
   "mcpServers": {
     "oceanengine": {
-      "command": "mcp-cn-oceanengine"
+      "command": "mcp-cn-oceanengine",
+      "env": {
+        "OCEANENGINE_APP_KEY": "你的 App Key",
+        "OCEANENGINE_APP_SECRET": "你的 App Secret",
+        "OCEANENGINE_ACCESS_TOKEN": "你的 Access Token"
+      }
     },
-    "doudian": {
-      "command": "mcp-cn-doudian"
-    },
-    "jd": {
-      "command": "mcp-cn-jd"
+    "doudian": { "command": "mcp-cn-doudian" },
+    "jd": { "command": "mcp-cn-jd" }
+  }
+}
+```
+
+#### Claude Code（CLI）
+
+```bash
+claude mcp add oceanengine \
+  --env OCEANENGINE_APP_KEY=你的Key \
+  --env OCEANENGINE_APP_SECRET=你的Secret \
+  --env OCEANENGINE_ACCESS_TOKEN=你的Token \
+  -- mcp-cn-oceanengine
+```
+
+#### Codex（CLI）
+
+```bash
+codex mcp add oceanengine -- mcp-cn-oceanengine
+```
+
+或写进 `~/.codex/config.toml`：
+
+```toml
+[mcp_servers.oceanengine]
+command = "mcp-cn-oceanengine"
+env = { OCEANENGINE_APP_KEY = "你的Key", OCEANENGINE_APP_SECRET = "你的Secret", OCEANENGINE_ACCESS_TOKEN = "你的Token" }
+```
+
+#### OpenCode / MiMo Code（`mcp` 段）
+
+这两者（MiMo Code 是 OpenCode 的 fork）用 `mcp` 配置格式：
+
+```json
+{
+  "mcp": {
+    "oceanengine": {
+      "type": "local",
+      "command": ["mcp-cn-oceanengine"],
+      "enabled": true,
+      "environment": {
+        "OCEANENGINE_APP_KEY": "你的Key",
+        "OCEANENGINE_APP_SECRET": "你的Secret",
+        "OCEANENGINE_ACCESS_TOKEN": "你的Token"
+      }
     }
   }
 }
 ```
+
+> MiMo Code 还能直接从 Claude Code 自动导入已配置的 MCP server，无需重复配置。
+
+> 其余平台 server 命令同理：`mcp-cn-doudian`、`mcp-cn-jd`、`mcp-cn-taobao`、`mcp-cn-pinduoduo`、`mcp-cn-kuaishou`、`mcp-cn-xiaohongshu`、`mcp-cn-weixin-store`。按需添加，凭证见上方[配置凭证](#配置凭证)。
 
 ### AI Agent 使用示例
 

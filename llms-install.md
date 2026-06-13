@@ -16,10 +16,27 @@ server selected via client config.
 - Per-platform API credentials, supplied as **environment variables**. The agent
   **cannot** obtain these — they must be requested from the user (see Step 3).
 
-## Step 1 — Install the package
+## Step 0 — Check the Python version FIRST
+
+This package requires Python **3.11+**. On macOS the default `python3` is often
+3.9, in which case `pip install` fails with a *misleading* error
+(`No matching distribution found for mcp-cn-commerce` — it does NOT mention the
+Python version). Always check first:
 
 ```bash
-pip install mcp-cn-commerce
+python3 --version
+```
+
+If it is below 3.11, look for a newer interpreter (`python3.11`, `python3.12`,
+`python3.13`) and use that explicitly in the next step. If none exists, tell the
+user to install Python 3.11+ before continuing.
+
+## Step 1 — Install the package
+
+Use a 3.11+ interpreter (substitute `python3.12` etc. if `python3` is too old):
+
+```bash
+python3 -m pip install mcp-cn-commerce
 ```
 
 Verify:

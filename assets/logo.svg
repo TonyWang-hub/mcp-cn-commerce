@@ -1,0 +1,32 @@
+<svg width="400" height="400" viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="400" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0c1c3b"/>
+      <stop offset="1" stop-color="#070f24"/>
+    </linearGradient>
+    <linearGradient id="bag" x1="120" y1="160" x2="280" y2="310" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#bcd6ff"/>
+      <stop offset="1" stop-color="#8fc0ff"/>
+    </linearGradient>
+  </defs>
+
+  <!-- rounded-square background -->
+  <rect width="400" height="400" rx="92" fill="url(#bg)"/>
+  <!-- faint brand glow, top-right -->
+  <circle cx="360" cy="48" r="120" fill="#ffffff" opacity="0.05"/>
+
+  <!-- shopping bag handle (arc) with MCP connection nodes -->
+  <path d="M160 164 C160 108 240 108 240 164" stroke="#8fc0ff" stroke-width="16" stroke-linecap="round" fill="none"/>
+  <circle cx="160" cy="164" r="12" fill="#bcd6ff"/>
+  <circle cx="240" cy="164" r="12" fill="#bcd6ff"/>
+
+  <!-- shopping bag body -->
+  <rect x="118" y="160" width="164" height="152" rx="22" fill="url(#bag)"/>
+
+  <!-- ascending bar chart on the bag face = business data -->
+  <g fill="#0b1a36">
+    <rect x="150" y="258" width="26" height="30" rx="6"/>
+    <rect x="187" y="236" width="26" height="52" rx="6"/>
+    <rect x="224" y="212" width="26" height="76" rx="6"/>
+  </g>
+</svg>

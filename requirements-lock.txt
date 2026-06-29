@@ -9,7 +9,7 @@
 # copying the versions of the packages below from `pip freeze`.
 #
 # Use:  pip install -r requirements-lock.txt
-mcp==1.28.0
+mcp==1.28.1
 httpx==0.28.1
 anyio==4.14.0
 httpcore==1.0.9

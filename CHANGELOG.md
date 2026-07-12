@@ -4,6 +4,17 @@ All notable changes to mcp-cn-commerce will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- Dependabot 每周对 `/servers/oceanengine`、`/servers/doudian`、`/servers/jd` 三个目录报 update failure：
+  这三个目录自 0.1.1 重构为单一包架构后已不再有独立的 `pyproject.toml`，`dependabot.yml`
+  却仍在扫描它们，导致每周一持续产生失败噪音（实测 2026-06-29、2026-07-06 两次）。移除这三段配置。
+- "Auto-merge Dependabot PRs" workflow 里的 `Approve PR` 步骤持续失败：GitHub 平台层面不允许
+  Actions bot 自我批准 PR（`GitHub Actions is not permitted to approve pull requests`）。
+  该仓库分支保护本就是 `required_approving_review_count: 0`，这一步从一开始就是多余的，直接移除。
+
 ## [0.1.4] - 2026-06-10
 
 ### Fixed

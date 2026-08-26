@@ -9,7 +9,7 @@
 1. **把底子好的四个平台修到真能调通** —— 淘宝（11/13）、小红书（9/13）、快手（9/12）、拼多多（8/13），共 37 个真实 endpoint。修正范围含 endpoint 名称、契约（网关/参数/签名/时间戳/信封）、以及分页范式。
 2. **把对外口径改到与事实一致** —— 移除全部 8 个平台中不存在的 endpoint 所对应的工具，修正 README / FAQ / `docs/platforms.md` 的能力声明。
 
-**暂缓（另立 mission）**：抖店（0/20）、京东（0/15）、巨量引擎（2/18）、微信小店（6/11）—— 这四个的性质是「按真实接口重建」，研究成果已保留在 `deferred/`。
+**暂缓（另立 mission）**：抖店（0/20）、京东（0/15）、巨量引擎（2/18）—— 这三个的性质是「按真实接口重建」，研究成果已保留在 `deferred/`。京东另需先决定网关方向（routerjson 为官方标注的历史接口，SP-API 为推荐方向且鉴权完全不同）。
 
 **验收标准是「符合官方文档」，不需要真实商家凭证。** 依据是四个平台提供官方签名算例、八个平台提供公开无鉴权的文档清单接口（见 §5、§2.3.1）。
 
@@ -133,6 +133,7 @@
 | FR-008 | 小红书：改为单一网关 `ark.xiaohongshu.com/ark/open_api/v3/common_controller` + POST body + 官方 method 名（9 个）+ 参数名 `appId`/`method`/`version`/`timestamp`(秒)/`accessToken` + 签名仅覆盖 4 个系统参数且小写 + 判错 `error_code==0 && success==true` 并解包 `data`；**删除 4 个平台不提供的工具**（评价列表、营销活动列表、优惠券列表、店铺信息） | wire 断言 + 契约声明 |
 | FR-010 | 快手：改为官方 method 点换斜杠的真实 path（9 个，注意 `open.order.cursor.list` 而非已退役的 `pcursor.list`）+ 参数名 `appkey`/`signMethod` + 补 `method`/`version` + 业务参数打包进单个 `param` JSON（camelCase）+ 签名 `k=v&…&signSecret=X` 小写 + `result==1` 判错 + **按接口实现各自的分页范式**（订单游标 / 退款混合 / 商品页码 / 评价 offset）；**删除 3 个平台不提供的工具** | wire 断言 + 契约声明 |
 | FR-011 | 拼多多：timestamp 改 UNIX 秒 + endpoint 修正（`logistics.trace.query`→`logistics.ordertrace.get`、`refund.list.get`→`refund.list.increment.get`、`promotion.list.get`→按语义选定具体接口）；**删除 2 个平台不提供的工具**（全站商品搜索、商品评价）；**移出 `pdd.ddk.goods.search`**（属多多进宝联盟体系，需独立开发者身份与应用类型） | 官方签名向量 + wire 断言 |
+| FR-012 | 微信小店：5 个不存在路径改为官方正确（`GET /channels/ec/basics/info/get`、`GET /shop/ec/category/all`、`POST /channels/ec/coupon/get_list`、物流改用 `order/get` 内嵌 `delivery_info`、供应商订单需先定小店/供货商体系）+ 4 个编造请求体按官方字段契约修正 + 改用 `stable_token` + 覆盖 HTTP 403 | wire 断言 + 契约声明 |
 | FR-013 | 文档与对外声明一致性：README / `README_en.md` 的能力声明与实际状态一致、`docs/platforms.md` 记载与官方文档一致、`docs/FAQ.md` 更正巨量资质要求（企业认证 + 企业打款认证）与各平台阶段口径 | 人工复核 |
 | FR-015 | **移除不存在 endpoint 对应的工具**（覆盖全部 8 个平台，含暂缓的四个）：删除或明确标记为不可用，并在 `docs/platforms.md` 记录每个被移除工具的原因（不存在 / 已下线 / 平台不对三方开放） | 工具注册数与真实可用 endpoint 一致 |
 
@@ -149,7 +150,7 @@
 ### 4.1 In scope
 
 1. 契约测试框架 + endpoint 存在性巡检（FR-001、FR-002、FR-003、FR-014）
-2. 四个平台修到可调通：淘宝、小红书、快手、拼多多（FR-006、FR-008、FR-010、FR-011）
+2. 五个平台修到可调通：淘宝、小红书、快手、拼多多、微信小店（FR-006、FR-008、FR-010、FR-011、FR-012）
 3. 移除全部 8 个平台中不存在 endpoint 对应的工具（FR-015）
 4. 对外声明与文档口径修正（FR-013）
 
@@ -157,10 +158,11 @@
 
 **暂缓至后续 mission（研究成果已在 `deferred/`，不要重新调研）**：
 
+（微信小店已于审计后拉回本 mission —— 其 5 个不存在的路径与 4 个编造请求体均已取得字段级官方契约，工作量与淘宝相当。）
+
 1. **抖店重建**（0/20）—— 20 个 endpoint 全需重写路径，其中 8 个能力平台不对三方开放
 2. **京东重建**（0/15）—— `jd.pop.*` 命名空间不存在；且 SP-API（`api-cn.jd.com`，header 签名且 header 名参与签名）为现役网关，routerjson 官方标注为历史接口，整套调用约定需重估
 3. **巨量引擎重建**（2/18）—— 需按 v3.0 `project/list` + `promotion/list` + `report/custom/get` 重建，其中原版"广告计划"无 1:1 替代需 join 两个接口
-4. **微信小店修正**（6/11）—— 四者中最轻（5 个不存在 + 4 个请求体编造），可优先纳入后续 mission
 
 **其他不做**：
 
@@ -211,7 +213,8 @@ WP 的权威定义在 `tasks/`。暂缓平台的 WP 已移至 `deferred/`（不�
 | WP07 | 小红书：单一网关重写 + 9 个 method + 删 4 个工具 | WP02 | FR-008 |
 | WP09 | 快手：真实 path + 协议四层重写 + 删 3 个工具 | WP02 | FR-010 |
 | WP10 | 拼多多：timestamp + 3 个改名 + 删 2 个工具 + 移出 ddk | WP02 | FR-011 |
-| WP12 | 工具清理（全 8 平台）+ 文档与对外声明一致性 | WP05, WP07, WP09, WP10 | FR-013, FR-015 |
+| WP11 | 微信小店：5 个路径修正 + 4 个请求体修正 + stable_token + HTTP 403 | WP02 | FR-012 |
+| WP12 | 工具清理（全 8 平台）+ 文档与对外声明一致性 | WP05, WP07, WP09, WP10, WP11 | FR-013, FR-015 |
 
 WP01/WP02 为前置；WP05、WP07、WP09、WP10 之间无相互依赖可并行；WP12 收尾。WP 编号保留原值以便与 `deferred/` 对应，故不连续。
 

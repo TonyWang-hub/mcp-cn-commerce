@@ -495,7 +495,7 @@ class TestVersionNegotiationCompatibility:
 
         client = OceanEngine(app_key="k", app_secret="s", access_token="t")
         # API paths start with version number
-        assert client.BASE_URL == "https://ad.oceanengine.com/open_api/"
+        assert client.BASE_URL == "https://api.oceanengine.com/open_api/"
         _compat_results.add(
             "version_negotiation",
             "oceanengine_version_in_path",

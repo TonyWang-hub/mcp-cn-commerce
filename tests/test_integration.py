@@ -68,7 +68,15 @@ from shared.cn_commerce_base import (  # noqa: E402
 
 
 class TestOceanEngineFullRequestFlow:
-    """Integration: OceanEngine tool function → CommerceMCPBase._request → HTTP."""
+    """巨量引擎的端到端请求流。
+
+    此前这里有两条断言编码了**错误的**巨量契约 —— 一条要求 query 里出现
+    ``sign`` / ``sign_method`` / ``app_key`` / ``access_token``，一条要求按
+    ``error_response`` 信封判错。官方契约恰好相反：凭证走 header ``Access-Token``、
+    **完全不签名**、失败判据是 body 的 ``code != 0`` 且消息字段是 ``message``。
+
+    按 FR-003 移除，正确断言在 ``tests/contract/test_wire_oceanengine.py``。
+    """
 
     @pytest.fixture
     def oe_client(self):
@@ -100,57 +108,6 @@ class TestOceanEngineFullRequestFlow:
         data = json.loads(result)
         assert data["code"] == 0
         assert data["data"]["list"][0]["advertiser_id"] == 123
-
-    @pytest.mark.asyncio
-    async def test_get_campaign_report_sign_params_passed(self, oe_client):
-        """Verify that sign, sign_method, timestamp are injected into request params."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"code": 0, "data": {"list": []}}
-        mock_response.status_code = 200
-
-        mock_http = AsyncMock()
-        mock_http.get.return_value = mock_response
-        mock_http.is_closed = False
-
-        from servers.oceanengine.server import get_campaign_report
-
-        with patch("servers.oceanengine.server._get_client", return_value=oe_client):
-            with patch.object(oe_client, "_ensure_client", return_value=mock_http):
-                await get_campaign_report(
-                    advertiser_id="456",
-                    start_date="2024-01-01",
-                    end_date="2024-01-31",
-                )
-
-        # Inspect the params passed to httpx.get
-        call_args = mock_http.get.call_args
-        params = call_args[1]["params"] if "params" in call_args[1] else call_args.kwargs.get("params", {})
-        assert "sign" in params
-        assert "sign_method" in params
-        assert "timestamp" in params
-        assert params["app_key"] == "test_key"
-        assert params["access_token"] == "tok"
-
-    @pytest.mark.asyncio
-    async def test_api_error_response_raises_commerce_api_error(self, oe_client):
-        """When the API returns error_response, _request raises CommerceAPIError."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"error_response": {"code": 40001, "msg": "Invalid advertiser"}}
-        mock_response.status_code = 200
-
-        mock_http = AsyncMock()
-        mock_http.get.return_value = mock_response
-        mock_http.is_closed = False
-
-        from servers.oceanengine.server import get_advertiser_info
-
-        with patch("servers.oceanengine.server._get_client", return_value=oe_client):
-            with patch.object(oe_client, "_ensure_client", return_value=mock_http):
-                result = await get_advertiser_info(advertiser_ids="999")
-
-        data = json.loads(result)
-        assert "error" in data
-        assert data["error"]["code"] == 40001
 
 
 class TestJDFlow:

@@ -89,6 +89,18 @@ def _install(monkeypatch: pytest.MonkeyPatch, captured: list[CapturedRequest]) -
             self.post = _record("POST")
             self.headers: dict[str, str] = {}
 
+            # 基类 _ensure_client 建连时会先向 BASE_URL 发 HEAD 探针并读 is_closed。
+            # 那个探针打的是 API 路由而不是健康端点（多个平台的契约声明都记了这点），
+            # 但它确实会发生，录制器必须能承接，否则测试会死在建连而不是断言上。
+            # 探针不记入 captured —— 它不是业务请求，记了会让每个平台断言都要绕开它。
+            async def _probe(*_a, **_k):
+                response = MagicMock()
+                response.status_code = 200
+                return response
+
+            self.head = _probe
+            self.is_closed = False
+
         async def __aenter__(self):
             return self
 

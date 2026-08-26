@@ -23,6 +23,7 @@ import os
 from mcp.server.mcpserver import MCPServer
 
 from shared.cn_commerce_base import (
+    CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,
     handle_tool_errors,
@@ -33,10 +34,77 @@ from shared.cn_commerce_base import (
 
 
 class OceanEngine(CommerceMCPBase):
-    """Ocean Engine (巨量引擎) API client using MD5 signing."""
+    """Ocean Engine (巨量引擎) Marketing API client.
 
-    BASE_URL: str = "https://ad.oceanengine.com/open_api/"
-    sign_method: str = "md5"
+    巨量引擎与本仓库其他平台的契约差异极大，故不复用基类的请求组装：
+
+    - 凭证走 HTTP header ``Access-Token``，**不是** query 参数
+    - **完全不签名** —— 官方公共参数里没有 ``sign`` / ``sign_method`` / ``app_key`` / ``timestamp``
+      （全量 1053 篇官方文档中 ``sign_method`` 零命中；header 字段全语料只有
+      ``Access-Token`` / ``Content-Type`` / ``App-Access-Token`` 三种）
+    - 失败判据是响应体的 ``code != 0``，消息字段是 ``message``（**不是** ``msg``），
+      且官方从未规定错误时的 HTTP 状态码 → 不能依赖 HTTP status
+    - v3.0 接口 host 一律 ``api.oceanengine.com``（487 篇 v3.0 文档 100% 如此）
+
+    ``ad.`` 与 ``api.`` 的适用范围官方**零说明**（1053 篇文档 + 246 篇更新日志均无），
+    v2 接口在两个 host 上混用（177 : 152）。此处统一 ``api.``，依据是官方接口参考页、
+    官方代码示例与两个官方 SDK 三方一致；这属**推断**，v2 接口在 ``api.`` 上的可用性
+    待真机回归（见 mission spec §8）。
+
+    注意：本 server 的大部分 endpoint 已按 FR-015 下架（16/18 已下线或查无此接口），
+    仅 ``2/advertiser/info/`` 与 ``2/advertiser/fund/get/`` 仍注册。
+    """
+
+    BASE_URL: str = "https://api.oceanengine.com/open_api/"
+    #: 入门指南给出的另一个官方 host，保留仅为可追溯；不声明与 BASE_URL 等价。
+    LEGACY_BASE_URL: str = "https://ad.oceanengine.com/open_api/"
+
+    async def _request(  # type: ignore[override]
+        self,
+        method: str,
+        path: str,
+        params: dict | None = None,
+        data: dict | None = None,
+        **_: object,
+    ) -> dict:
+        """Call the Marketing API: token in a header, no signature at all.
+
+        基类的 ``_request`` 会加上 ``app_key`` / ``access_token`` / ``timestamp`` /
+        ``sign`` / ``sign_method`` 五个参数并按 ``error_response`` 判错 —— 这五个参数
+        巨量一个都不要，那个信封巨量也不用。故整段覆写。
+        """
+        if self.rate_limiter:
+            await self.rate_limiter.acquire()
+
+        url = f"{self.BASE_URL.rstrip('/')}/{path.lstrip('/')}"
+        headers = {"Access-Token": self.access_token}
+        query = {k: v for k, v in (params or {}).items() if v not in (None, "")}
+        # 列表/字典型参数按官方示例序列化为 JSON 字符串
+        for key, value in list(query.items()):
+            if isinstance(value, (list, dict)):
+                query[key] = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+        span = self._tracer.start_span(f"{method} {path}", attributes={"method": method, "path": path})
+        try:
+            client = await self._ensure_client()
+            if method.upper() == "GET":
+                resp = await client.get(url, params=query, headers=headers)
+            else:
+                resp = await client.post(url, params=query, json=data or {}, headers=headers)
+            payload = resp.json()
+
+            # 官方从未规定错误时的 HTTP 状态码 —— 以 body 的 code 为唯一判据。
+            if payload.get("code", 0) != 0:
+                raise CommerceAPIError(
+                    code=payload.get("code", -1),
+                    # 消息字段是 message 而非 msg；读错会让所有巨量报错退化成 "unknown"
+                    msg=payload.get("message", "unknown"),
+                )
+        except Exception:
+            self._tracer.finish_span(span, status="error")
+            raise
+        self._tracer.finish_span(span, status="ok")
+        return payload
 
 
 def _get_client() -> OceanEngine:

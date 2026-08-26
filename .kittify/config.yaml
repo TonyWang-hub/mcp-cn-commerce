@@ -1,0 +1,12 @@
+project:
+  uuid: 98bcfe75-8227-4414-89a0-4c117e08d2c0
+  slug: mcp-cn-commerce
+  node_id: 4c48aa9c980c
+  build_id: d5a6c849-dc26-5a63-be83-f9b393e28330
+vcs:
+  type: git
+agents:
+  available:
+  - claude
+  auto_commit: true
+  lint_on_edit: false

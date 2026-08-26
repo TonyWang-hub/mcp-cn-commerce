@@ -1,0 +1,192 @@
+{
+  "entries": [
+    {
+      "file_hash": "3ed76a94a690c494d80082b11fb4089ef531f9bf45036abb7fa21a525096d21e",
+      "format": "claude-agent",
+      "output_path": "/Users/tony/Documents/work/ai/mcp-cn-commerce/.claude/agents/architect-alphonso.md",
+      "profile_urn": "agent_profile:architect-alphonso",
+      "projection_version": 1,
+      "source_hash": "b72c3652d738616f1abe683c415542a2a813b95787fe4f610885d7237b706f02",
+      "source_layer": "builtin",
+      "source_path": "/Users/tony/.local/share/uv/tools/spec-kitty-cli/lib/python3.13/site-packages/doctrine/agent_profiles/built-in/architect-alphonso.agent.yaml",
+      "tool_key": "claude"
+    },
+    {
+      "file_hash": "d530b0822fde2e35e4d1b1cb76a09dcd5ae403d7e5715245ac09de01536d7001",
+      "format": "claude-agent",
+      "output_path": "/Users/tony/Documents/work/ai/mcp-cn-commerce/.claude/agents/curator-carla.md",
+      "profile_urn": "agent_profile:curator-carla",
+      "projection_version": 1,
+      "source_hash": "cc6b08c3391abe890ff2dc35b4d7faa3e6cb6566cacedfab2eb570fa9248cb0a",
+      "source_layer": "builtin",
+      "source_path": "/Users/tony/.local/share/uv/tools/spec-kitty-cli/lib/python3.13/site-packages/doctrine/agent_profiles/built-in/curator-carla.agent.yaml",
+      "tool_key": "claude"
+    },
+    {
+      "file_hash": "92294ad835fc1fb021dac94190edd5d078c3cbd5959e34d4d173f7ab518dee01",
+      "format": "claude-agent",
+      "output_path": "/Users/tony/Documents/work/ai/mcp-cn-commerce/.claude/agents/debugger-debbie.md",
+      "profile_urn": "agent_profile:debugger-debbie",
+      "projection_version": 1,
+      "source_hash": "2aa4396ee2d102e49d4a0f076ed7d1a7a8e3d2da8c9d1dc6cc32843db780e7ac",
+      "source_layer": "builtin",
+      "source_path": "/Users/tony/.local/share/uv/tools/spec-kitty-cli/lib/python3.13/site-packages/doctrine/agent_profiles/built-in/debugger-debbie.agent.yaml",
+      "tool_key": "claude"
+    },
+    {
+      "file_hash": "771d15d67f7d95a61235a3c599585b87355a4d2a595df5fb5aeb55c3e7e9cd6d",
+      "format": "claude-agent",
+      "output_path": "/Users/tony/Documents/work/ai/mcp-cn-commerce/.claude/agents/designer-dagmar.md",
+      "profile_urn": "agent_profile:designer-dagmar",
+      "projection_version": 1,
+      "source_hash": "1428bfeabd57c8cd636d72d587b11799b84a0f4d325aea24880f6d8e4083f6c7",
+      "source_layer": "builtin",
+      "source_path": "/Users/tony/.local/share/uv/tools/spec-kitty-cli/lib/python3.13/site-packages/doctrine/agent_profiles/built-in/designer-dagmar.agent.yaml",
+      "tool_key": "claude"
+    },
+    {
+      "file_hash": "097fb87e2464b80f2e3f4ae449d18794c6ffc13d91587bb72f94a9fe34bc356c",
+      "format": "claude-agent",
+      "output_path": "/Users/tony/Documents/work/ai/mcp-cn-commerce/.claude/agents/doctrine-daphne.md",
+      "profile_urn": "agent_profile:doctrine-daphne",
+      "projection_version": 1,
+      "source_hash": "e020d03f500b0501eb754fd66069ec76a49bc4324bf5c0c337ca261775ad7b36",
+      "source_layer": "builtin",
+      "source_path": "/Users/tony/.local/share/uv/tools/spec-kitty-cli/lib/python3.13/site-packages/doctrine/agent_profiles/built-in/doctrine-daphne.agent.yaml",
+      "tool_key": "claude"
+    },
+    {
+      "file_hash": "c1b9cffbf3bdffafae644af7c3367be2e8402332dd842b21257b59b2c9181c88",
+      "format": "claude-agent",
+      "output_path": "/Users/tony/Documents/work/ai/mcp-cn-commerce/.claude/agents/frontend-freddy.md",
+      "profile_urn": "agent_profile:frontend-freddy",
+      "projection_version": 1,
+      "source_hash": "2d6b7785333d57e6dd36e2871b25c0da20ff94915d472035c59546b4b5bd97ea",
+      "source_layer": "builtin",
+      "source_path": "/Users/tony/.local/share/uv/tools/spec-kitty-cli/lib/python3.13/site-packages/doctrine/agent_profiles/built-in/frontend-freddy.agent.yaml",
+      "tool_key": "claude"
+    },
+    {
+      "file_hash": "1540c46b8e617ba1e5a5a783b13fd9e4062d9556f142866c6ee1e13f66425360",
+      "format": "claude-agent",
+      "output_path": "/Users/tony/Documents/work/ai/mcp-cn-commerce/.claude/agents/generic-agent.md",
+      "profile_urn": "agent_profile:generic-agent",
+      "projection_version": 1,
+      "source_hash": "0e01f1d14aa139e2611966b14d8087d0bb87cbcd1cdc969287e453e2c871a449",
+      "source_layer": "builtin",
+      "source_path": "/Users/tony/.local/share/uv/tools/spec-kitty-cli/lib/python3.13/site-packages/doctrine/agent_profiles/built-in/generic-agent.agent.yaml",
+      "tool_key": "claude"
+    },
+    {
+      "file_hash": "4870efd119c0832c3d05b9534c9197c8583143d56fe946547d64215c5bc511d9",
+      "format": "claude-agent",
+      "output_path": "/Users/tony/Documents/work/ai/mcp-cn-commerce/.claude/agents/implementer-ivan.md",
+      "profile_urn": "agent_profile:implementer-ivan",
+      "projection_version": 1,
+      "source_hash": "5878a5a84f9f306a91d0895498984fb3523f1f12ba05cf7bb57576093f5722e5",
+      "source_layer": "builtin",
+      "source_path": "/Users/tony/.local/share/uv/tools/spec-kitty-cli/lib/python3.13/site-packages/doctrine/agent_profiles/built-in/implementer-ivan.agent.yaml",
+      "tool_key": "claude"
+    },
+    {
+      "file_hash": "11347576888da9dad7f6a6e5177691b99062f265c92ab3895ef55da461448470",
+      "format": "claude-agent",
+      "output_path": "/Users/tony/Documents/work/ai/mcp-cn-commerce/.claude/agents/java-jenny.md",
+      "profile_urn": "agent_profile:java-jenny",
+      "projection_version": 1,
+      "source_hash": "3957cf4907bc3be2867f517b2fd93639634be8ae887f62b7121e0b2a43d0a731",
+      "source_layer": "builtin",
+      "source_path": "/Users/tony/.local/share/uv/tools/spec-kitty-cli/lib/python3.13/site-packages/doctrine/agent_profiles/built-in/java-jenny.agent.yaml",
+      "tool_key": "claude"
+    },
+    {
+      "file_hash": "f246a7471c7806a4746ee2e7c604cbced21b260d6ead8c8bb5559a99a68049f5",
+      "format": "claude-agent",
+      "output_path": "/Users/tony/Documents/work/ai/mcp-cn-commerce/.claude/agents/node-norris.md",
+      "profile_urn": "agent_profile:node-norris",
+      "projection_version": 1,
+      "source_hash": "f34314aa278528c127e19a44ec49daae17850366cf2e980d62bf751088e7ea4b",
+      "source_layer": "builtin",
+      "source_path": "/Users/tony/.local/share/uv/tools/spec-kitty-cli/lib/python3.13/site-packages/doctrine/agent_profiles/built-in/node-norris.agent.yaml",
+      "tool_key": "claude"
+    },
+    {
+      "file_hash": "986d55ac2b43dcd6c64a9f77d7a2d340173443c115a4aab4b83bfd57e30dde3b",
+      "format": "claude-agent",
+      "output_path": "/Users/tony/Documents/work/ai/mcp-cn-commerce/.claude/agents/paula-patterns.md",
+      "profile_urn": "agent_profile:paula-patterns",
+      "projection_version": 1,
+      "source_hash": "9e9a7e204fe7f3c66a120e2c36d9e9cf519e489f88982cce1c65114fde527899",
+      "source_layer": "builtin",
+      "source_path": "/Users/tony/.local/share/uv/tools/spec-kitty-cli/lib/python3.13/site-packages/doctrine/agent_profiles/built-in/paula-patterns.agent.yaml",
+      "tool_key": "claude"
+    },
+    {
+      "file_hash": "86d34e608590f264ce75d9cdcfb58af9e032b2cf5edec8a94e816c7c44cf2e3b",
+      "format": "claude-agent",
+      "output_path": "/Users/tony/Documents/work/ai/mcp-cn-commerce/.claude/agents/planner-priti.md",
+      "profile_urn": "agent_profile:planner-priti",
+      "projection_version": 1,
+      "source_hash": "a75a69594825554fc286c1c7a6d7a70707ba6a0724686cf6f3546a33b92a4a87",
+      "source_layer": "builtin",
+      "source_path": "/Users/tony/.local/share/uv/tools/spec-kitty-cli/lib/python3.13/site-packages/doctrine/agent_profiles/built-in/planner-priti.agent.yaml",
+      "tool_key": "claude"
+    },
+    {
+      "file_hash": "0020b8f701e2e8ed548264c9c178dd49f69f05803d93d4f306cb16abc49e990b",
+      "format": "claude-agent",
+      "output_path": "/Users/tony/Documents/work/ai/mcp-cn-commerce/.claude/agents/python-pedro.md",
+      "profile_urn": "agent_profile:python-pedro",
+      "projection_version": 1,
+      "source_hash": "41eb7c5fdfa1831426b6c511049b20f1bc504a36407e7ab308eb2e7f4b479e1e",
+      "source_layer": "builtin",
+      "source_path": "/Users/tony/.local/share/uv/tools/spec-kitty-cli/lib/python3.13/site-packages/doctrine/agent_profiles/built-in/python-pedro.agent.yaml",
+      "tool_key": "claude"
+    },
+    {
+      "file_hash": "6427419082a58c4d2826bac8c0aa147a347b96136ccaaa18a48600a7ad2ed3e9",
+      "format": "claude-agent",
+      "output_path": "/Users/tony/Documents/work/ai/mcp-cn-commerce/.claude/agents/randy-reducer.md",
+      "profile_urn": "agent_profile:randy-reducer",
+      "projection_version": 1,
+      "source_hash": "495904c9937c2977f2696a6c0e5ce38903a6b3eb85600953882c81caaea7d098",
+      "source_layer": "builtin",
+      "source_path": "/Users/tony/.local/share/uv/tools/spec-kitty-cli/lib/python3.13/site-packages/doctrine/agent_profiles/built-in/randy-reducer.agent.yaml",
+      "tool_key": "claude"
+    },
+    {
+      "file_hash": "c2c398f4d63776757ef19dc3942e22ef9904a7e7770f15b6a45971fe4bcaf8b3",
+      "format": "claude-agent",
+      "output_path": "/Users/tony/Documents/work/ai/mcp-cn-commerce/.claude/agents/researcher-robbie.md",
+      "profile_urn": "agent_profile:researcher-robbie",
+      "projection_version": 1,
+      "source_hash": "35db0efc2dcf050a4fe337f474998150c4ab47dc2a28b8a1e4cbaab6c64cff5d",
+      "source_layer": "builtin",
+      "source_path": "/Users/tony/.local/share/uv/tools/spec-kitty-cli/lib/python3.13/site-packages/doctrine/agent_profiles/built-in/researcher-robbie.agent.yaml",
+      "tool_key": "claude"
+    },
+    {
+      "file_hash": "b96fe0da65a0accd7e3c0c1f9b55bf89810faeb87746d513f8e5fac6171ea838",
+      "format": "claude-agent",
+      "output_path": "/Users/tony/Documents/work/ai/mcp-cn-commerce/.claude/agents/retrospective-facilitator.md",
+      "profile_urn": "agent_profile:retrospective-facilitator",
+      "projection_version": 1,
+      "source_hash": "de4e2d2c641e773180e84ea3bc60beb937e66aadcef6012db392289a088275c4",
+      "source_layer": "builtin",
+      "source_path": "/Users/tony/.local/share/uv/tools/spec-kitty-cli/lib/python3.13/site-packages/doctrine/agent_profiles/built-in/retrospective-facilitator.agent.yaml",
+      "tool_key": "claude"
+    },
+    {
+      "file_hash": "f087cc97448daabdb3954991b5c669e12192e4ba36902d63afc38dff68c59b02",
+      "format": "claude-agent",
+      "output_path": "/Users/tony/Documents/work/ai/mcp-cn-commerce/.claude/agents/reviewer-renata.md",
+      "profile_urn": "agent_profile:reviewer-renata",
+      "projection_version": 1,
+      "source_hash": "fbde36d76efb02fa83ee3968cc6f84dde6e1d758d236ba6c389da638636eb286",
+      "source_layer": "builtin",
+      "source_path": "/Users/tony/.local/share/uv/tools/spec-kitty-cli/lib/python3.13/site-packages/doctrine/agent_profiles/built-in/reviewer-renata.agent.yaml",
+      "tool_key": "claude"
+    }
+  ],
+  "schema_version": 1
+}

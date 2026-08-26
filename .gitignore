@@ -59,3 +59,41 @@ coverage.xml
 
 # Ruff
 .ruff_cache/
+
+# Added by Spec Kitty CLI (auto-managed)
+.claude/
+.codex/
+.vibe/
+.pi/
+.letta/
+.opencode/
+.windsurf/
+.gemini/
+.cursor/
+.qwen/
+.kilocode/
+.augment/
+.amazonq/
+.kiro/
+.agent/
+.github/copilot/
+.agents/skills/
+.kittify/.dashboard
+.kittify/charter/context-state.json
+.kittify/charter/directives.yaml
+.kittify/charter/governance.yaml
+.kittify/charter/metadata.yaml
+.kittify/charter/references.yaml
+.kittify/derived/
+.kittify/dossiers/
+.kittify/encoding-provenance/
+.kittify/events/
+.kittify/logs/
+.kittify/merge-state.json
+.kittify/migrations/
+.kittify/missions/__pycache__/
+.kittify/runtime/
+.kittify/skills-manifest.json
+.kittify/sync-state.json
+.kittify/workspaces/
+kitty-ops/ops-index.jsonl

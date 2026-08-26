@@ -10,47 +10,89 @@
 
 ## 2. 背景与证据
 
-### 2.1 根因
+### 2.1 根因（两层，此前只识别了第二层）
 
-`shared/cn_commerce_base.py` 的 `_request` / `_sign` 假设"所有中国电商平台的系统参数长一个样"：统一发 `access_token` 参数、统一发 epoch 毫秒 `timestamp`、统一附带 `sign` + `sign_method`、统一按 `error_response` 判错。
+**第一层：endpoint 层面 —— 115 个 endpoint 里只有 45 个真实存在（39%）。**
 
-这个假设恰好只对**拼多多**成立（base class 的签名算法逐字等于拼多多规范）。其余平台的参数名、时间格式、签名范围、签名拼接方式、传输位置、错误信封各不相同，没有一家与该假设吻合。
+已对 8 个平台全部 115 个 endpoint 做官方文档清单比对（判据：各平台公开的文档后端接口 + 官方公告全文语料，非活体探测）。结果：
 
-四个平台（巨量、淘宝、京东、快手）直接复用 base `_request`，因此全部继承了错误假设。唯一完全正确的是**微信小店** —— 因为微信不需要签名，没有可继承的错误。
+| 平台 | 存在 / 总数 | 性质 |
+|---|---|---|
+| 淘宝 | **11 / 13** | 2 个已官方公告下线（2018/2019），有指定替代 |
+| 小红书 | 9 / 13 | REST path 全部虚构；实为单一网关 + body 内 `method` |
+| 快手 | 9 / 12 | path / 参数结构 / 命名风格 / 分页范式四层全错 |
+| 拼多多 | 8 / 13 | 3 个可改名，2 个平台无此能力 |
+| 微信小店 | 6 / 11 | 其中**仅 2 个请求体也正确** |
+| 巨量引擎 | 2 / 18 | 见 §2.3 |
+| 抖店 | **0 / 20** | 成片"域名幻觉"，见 §2.2 |
+| 京东 | **0 / 15** | `jd.pop.*` 命名空间不存在，见 §2.2 |
+| **合计** | **45 / 115** | |
 
-### 2.2 附带发现：部分 endpoint 路径是虚构的
+且这 45 个里仍有相当比例的请求体、参数命名、分页范式不符（微信 4 个、快手全部、小红书全部）。
 
-- 快手：代码调用 `/open/api/order/list`，官方是 `/open/seller/order/pcursor/list`（`method` 的点换斜杠）
-- 小红书：代码调用 `/api/order/list` 等 REST 路径，而小红书**根本没有 REST 路径** —— 它是单一网关 `ark.xiaohongshu.com/ark/open_api/v3/common_controller` + `method` 放 body
+**另有约 22 个工具对应的能力平台根本不对三方开放**，无法通过改名修复，只能删除或申请定向开放：抖店 8（评价×2、直播×2、店铺基础信息、店铺流量、短视频数据、IM 消息）、京东 4（店铺评分、单条评价详情、实时售价、订单级物流轨迹）、小红书 4（评价列表、营销活动列表、优惠券列表、店铺信息）、快手 3（物流轨迹、物流公司列表实为静态文档表、营销活动列表）、拼多多 2（全站商品搜索、商品评价）、微信 1（订单物流拉取）。
 
-两个平台使用同一个虚构模板 `/api/<名词>/<动作>`，在任何官方文档、镜像或 SDK 中均不存在。
+**第二层：契约层面 —— `shared/cn_commerce_base.py` 的统一假设。**
 
-### 2.3 巨量引擎：18 个 endpoint 里只有 2 个是真的
+`_request` / `_sign` 假设"所有中国电商平台的系统参数长一个样"：统一发 `access_token` 参数、统一发 epoch 毫秒 `timestamp`、统一附带 `sign` + `sign_method`、统一按 `error_response` 判错。该假设恰好只对拼多多成立（其签名算法逐字等于拼多多规范）。
 
-已完成对 oceanengine server 全部 18 个 endpoint 的存在性审计（依据：官方文档导航树 866 条 path 全量比对 + 246 篇更新日志全文检索 + 网关活体探测三重交叉）。
+四个平台（巨量、淘宝、京东、快手）直接复用 base `_request`，全部继承了错误假设。另有一处跨平台缺陷：`:2900` 先算 `sign`、`:2901` 才补 `sign_method`，而 `_sign`（`:3010`）又排除它 —— 导致 `sign_method` 全平台**发而不签**。
+
+**结论：本 mission 的性质是「按真实接口重建」，不是「修契约」。** 契约修对了，绝大多数工具依然打在不存在的路径上。
+
+### 2.2 编造的形态（三种可识别的模式）
+
+**模式一：域名幻觉（抖店）。** 官方**根本不存在**这些一级路径段：`/comment/`（全平台无评价接口）、`/coupon/`（真名 `/coupons/` 复数）、`/finance/`（账单在 `/order/getSettleBill*`）、`/im/`（真名 `/pigeon/`）、`/promotion/`（真名 `/marketing/`）、`/video/`（真名 `/shopVideo/`）。另有规律性错误：多加 `get` 前缀、按"业务语义=路径首段"归属（抖店实际不遵守该规律）。
+
+**模式二：命名空间外推（京东）。** `jd.` 是真前缀，但**只属于京东联盟**（`jd.union.open.*`，90 个）。商家/POP 接口全部是 `jingdong.*`（3147 个）。`jd.pop.*` 在 3514 个官方 API 中命中数为 **0** —— 从真实前缀外推出了一个不存在的命名空间。
+
+**模式三：通用 REST 模板（快手、小红书）。** 两平台使用同一个虚构模板 `/api/<名词>/<动作>`（快手为 `/open/api/...`）。快手官方规则是 `method` 点换斜杠（`open.order.cursor.list` → `/open/order/cursor/list`），中间无 `api` 段；小红书根本没有 REST path。
+
+### 2.3 巨量引擎详情（18 个中 2 个有效）
 
 | 判定 | 数量 | endpoint |
 |---|---|---|
 | 2024-05-06 官方下线 | 5 | `2/ad/get/`、`2/campaign/get/`、`2/report/ad/get/`、`2/report/audience/`、`2/report/creative/get/` |
-| **2025-08-31 官方下线** | 1 | `2/report/advertiser/get/`（早前以为只是 `platform_version` V1 枚举下线，实为整接口下线，已迁至自定义报表 `BASIC_DATA` 主题） |
-| **官方文档查无此接口 / 网关 404** | **10** | `2/ad/read/`、`2/campaign/read/`、`2/dmp/audience/list/`、`2/material/list/`、`2/qianchuan/campaign/list/get/`、`2/qianchuan/report/ad/get/`、`2/star/report/`、`2/star/task/list/`、`2/tools/bid_suggest/`、`2/tools/diagnosis/` |
-| ✅ 存在且在维护 | **2** | `2/advertiser/info/`、`2/advertiser/fund/get/` |
+| 2025-08-31 官方下线 | 1 | `2/report/advertiser/get/` |
+| 官方文档查无此接口 | 10 | `2/ad/read/`、`2/campaign/read/`、`2/dmp/audience/list/`、`2/material/list/`、`2/qianchuan/campaign/list/get/`、`2/qianchuan/report/ad/get/`、`2/star/report/`、`2/star/task/list/`、`2/tools/bid_suggest/`、`2/tools/diagnosis/` |
+| ✅ 存在且在维护 | 2 | `2/advertiser/info/`、`2/advertiser/fund/get/` |
 
-那 10 个不是"过时"而是**从未存在**（在 866 条官方 path 与 246 篇日志中零命中）。已知的真实对应物举例：`2/dmp/audience/list/` → `2/dmp/custom_audience/select/`；`2/star/report/` 与 `2/tools/diagnosis/` 是**前缀不是接口**；`2/qianchuan/*` 用的是 **`v1.0`** 且文档 host 为 `ad.oceanengine.com`。
+替代路径（依据官方《升级版与原版差异说明》 `labels/7/docs/1758611573659724`：原版五层结构变为四层，「计划组」对标「项目」、「营销创意」对标「营销」、「营销计划」拆分至两者）：`2/campaign/get/` → `v3.0/project/list/`；`2/ad/get/`（实为**广告计划**列表，非创意列表 —— 代码 docstring 亦标错）→ 需 join `v3.0/project/list/` + `v3.0/promotion/list/`；报表族 → `v3.0/report/custom/get/`。官方下线公告本身**未指定替代**（41 条 path 的替代栏均为"-"）。
 
-**一条关键方法论**（对其余平台的审计同样适用）：**已下线的路由仍返回 `40105 access_token无效` 而不是 404**，因此活体探测不能作为存在性证据 —— 只有「官方文档清单里有 **且** 探测能通」才算存在。
+### 2.3.1 审计方法论（供后续巡检复用）
 
-**已下线实体接口的官方替代**（依据官方迁移文档《升级版与原版差异说明》 `labels/7/docs/1758611573659724`：原版五层结构变为四层，「计划组」对标「项目」、「营销创意」对标「营销」、「营销计划」拆分至两者）：
+**活体探测不能作为存在性证据。** 三处实证：巨量已下线路由仍返回 `40105 access_token无效` 而非 404；淘宝 `getApiParamList` 对 2018 年就下线的 `taobao.items.list.get` 仍返回参数；京东目录对"已下线"与"从未存在"返回同一个 `API不存在`。
 
-- `2/campaign/get/` → `v3.0/project/list/`
-- `2/ad/get/`（实为**广告计划**列表，非创意列表 —— 我们代码的 docstring 也标错了）→ 需 **join** `v3.0/project/list/` + `v3.0/promotion/list/`，原版"计划"无 1:1 替代
-- 报表族 → `v3.0/report/custom/get/`
+**唯一可靠判据是「官方文档清单」+「官方公告语料」双重比对**：
 
-注意官方**下线公告本身并未指定替代接口**（41 条 path 的替代栏均为"-"），上述对应来自另一篇迁移文档的实体映射；「该模块内哪个接口是列表接口」属无歧义推定，需在契约声明中如实标注。
+| 平台 | 公开的文档清单接口 | 备注 |
+|---|---|---|
+| 抖店 | `queryDocDirTree?dirId=3` + `queryDocArticleList?dirId=&pageSize=500` | 1664 篇；条目带 `status`（1 在线 / **3 定向开放需加白** / 0 已下线）；已下线接口正文长度为 **0**（墓碑判定） |
+| 巨量 | `skiff/api/doc/client/tree/get/?identify_key=<lib>` | 866 条 path + 246 篇更新日志 |
+| 淘宝 | `handler/document/getApiCatelogConfig.json` | 6601 个 API；**TOP 无"已废弃"标签**，废弃只体现为"从目录移除 + 公告"，故必须翻公告（885 条可程序化拉取） |
+| 京东 | `sff.jd.com/api?...api=dsm.jdo.open.cms.api4home.detail4Api` | 3514 个 API；存在性 oracle 直接返回 `API不存在` |
+| 拼多多 | `pop/doc/category/list` + `pop/doc/info/list/byCat` | **注意有 16 个隐藏分类**，只按公开分类会漏（290 vs 493）；公告 344 条正文可读 |
+| 快手 | 官方 Java SDK（452 个 `*Request` 类）+ `rest/open/platform/doc/api/category/list`（339 个 API） | 双 oracle；**注意 SDK 里 71 个 `@Deprecated` 多是旧包装类而非死接口**，须"全部候选类废弃 **且** 目录中缺失"才判退役 |
+| 小红书 | `api/doc/listNew` + `api/doc/second/listNew?apiNavigationId=<id>` | **106 个 method / 11 个分组**（不止 8 个） |
+| 微信小店 | 文档站侧边导航树（`crwl` 抓任一 API 页即带全量）+ `changelog.html` | 站内搜索**不索引 API 路径**，搜不到不能当负面证据 |
 
-另有三条官方已公告、需在实现时规避的变更：`2/advertiser/fund/get/` 自 2026 年 6 月中上旬起不再接受旧工作台的 `bp_id` 参数；`v3.0/report/custom/*` 的 `clue_connected_*`/`clue_count_all`/`clue_dialed_count` 指标已于 2026-06-08 移除（带这些字段的请求会**报错**）；`in_app_order_net_refund_pay_amount_fen` 于 2026-08-27 改名为 `stat_in_app_order_net_refund_pay_amount`。
+**"编造"与"下线"的区分判据**（拼多多最清晰）：该平台历史上所有下线都点名到具体接口且公告永久可查，因此「在全部公告语料中 0 命中 **且** 不在现行清单中」= **从未存在**。
 
-**这使 oceanengine 的问题性质从「鉴权错」升级为「需按真实接口重建」** —— 16 个工具指向不存在或已死的路径，鉴权修对了也拿不到数据。其余 7 个平台的同类审计正在进行，审计结果出来后再定 WP03 的最终范围（见 §6 备注）。
+### 2.3.2 本轮修正的自身错误（避免重复踩）
+
+1. 抖店 timestamp：官方《API调用指南》注解明确 Unix 秒为推荐、datetime 格式"支持但不推荐"，**现有 epoch 秒实现是正确的**（早前误判为 bug）；API 详情页那张参数表是陈旧模板。
+2. 快手：`open.seller.order.pcursor.list` **本身已退役**（迁移公告"11.30 下线"，SDK 标 `@Deprecated` 且已从官方目录移除），现役为 `open.order.cursor.list`（入参已删除 `currentPage`，只支持游标）。同类：`open.seller.order.detail`→`open.order.detail`、`open.item.detail`→`open.item.get`、`open.item.list`→`open.item.list.get`。
+3. 微信小店**不是"唯一完全正确的平台"**：11 个 endpoint 中 5 个不存在，存在的 6 个里 4 个请求体也是编造的（`start_create_time`/`page` 等字段官方不存在，会 `40097`；售后列表契约与订单列表完全不同，跨度上限 24h 而非 7d 且无分页字段）。
+4. 京东 `format` 参数：是**已入签**（`jd._call` 放进 params，`:2898` 合入后 `:2900` 入签），问题在于官方验证向量里没有它 —— 与"发而不签"方向相反。
+5. 小红书 `data.batchDesensitise`：官方文档描述中**逐字包含同一句「店铺单日限额10次」**，无法确认脱敏接口不受限额约束，待官方澄清。只读分析的正确路径是 `order.getOrderList`/`getOrderDetail` 已明文返回的省/市/区，以及 `data.batchIndex`（不解密做匹配）。
+6. 淘宝 `taobao.promotionmisc.activity.range.list.get` **真实存在**（官方目录 docId=22252，出现在 53 条大促公告中），早前的怀疑不成立。
+
+### 2.3.3 平台侧的架构性约束（非改名可解）
+
+- **拼多多**：`pdd.open.decrypt.batch` 自 2026-05-12 起云外调用限制为 **1次/10秒 + 单应用单日 100 次**，官方明文"请勿将云外解密作为正式业务场景使用"。云外连接器每日仅能解密 100 条订单收件人信息。
+- **淘宝**：订单接口 `receiver_address` 字段自 **2026-08-31** 起全脱敏（公告 25845）。「订单信息查询」权限包仅开放给 20 种特定应用类型，**通用 MCP 连接器不在其中**，使用者须自有该类 ISV 应用并申请通过。
+- **京东**：SP-API（`api-cn.jd.com`，RESTful，约 277 个接口）为现役网关，routerjson 官方标注"历史接口，逐步迁移"。SP-API 鉴权走 `X-JOS-*` header 且**header 名参与签名** —— 整个调用约定需重估。
+- **抖店**：多个"最近似替代"处于 `status=3`（定向开放），需联系行业小二加白，非拿到 token 即可调用。
 
 ### 2.4 测试为何没有拦住
 

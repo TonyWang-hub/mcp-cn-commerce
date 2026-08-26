@@ -13,7 +13,7 @@ import os
 import time
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from shared.cn_commerce_base import (
     CommerceAPIError,
@@ -94,7 +94,7 @@ pdd = _create_pinduoduo_client()
 
 # ── MCP server ─────────────────────────────────────────────────────────────
 
-mcp = FastMCP("mcp-cn-pinduoduo")
+mcp = MCPServer("mcp-cn-pinduoduo")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

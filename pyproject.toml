@@ -49,8 +49,8 @@ classifiers = [
 ]
 urls = {Repository = "https://github.com/TonyWang-hub/mcp-cn-commerce", Issues = "https://github.com/TonyWang-hub/mcp-cn-commerce/issues", Documentation = "https://github.com/TonyWang-hub/mcp-cn-commerce#readme", Changelog = "https://github.com/TonyWang-hub/mcp-cn-commerce/blob/main/CHANGELOG.md"}
 dependencies = [
-    "mcp>=1.2,<2",
-    "httpx>=0.27,<1",
+    "mcp>=2.1.1,<3",
+    "httpx>=0.27,<1",  # our own outbound platform calls; mcp v2 uses httpx2 internally
 ]
 
 [project.optional-dependencies]
@@ -123,16 +123,6 @@ exclude = [
     "docs/",
     "examples/",
 ]
-
-[[tool.mypy.overrides]]
-module = [
-    "mcp.*",
-    "mcp.server.*",
-    "mcp.server.stdio",
-]
-ignore_missing_imports = true
-# mcp library lacks proper type stubs for Server.tool decorator
-follow_imports = "skip"
 
 [[tool.mypy.overrides]]
 module = "shared.*"

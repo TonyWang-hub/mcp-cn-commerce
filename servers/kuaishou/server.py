@@ -13,7 +13,7 @@ import json
 import os
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from shared.cn_commerce_base import (
     CommerceMCPBase,
@@ -97,7 +97,7 @@ ks = _create_kuaishou_client()
 
 # ── MCP server ────────────────────────────────────────────────────────────────
 
-mcp = FastMCP("mcp-cn-kuaishou")
+mcp = MCPServer("mcp-cn-kuaishou")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

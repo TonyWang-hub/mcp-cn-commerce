@@ -192,10 +192,10 @@ class TestModuleImportability:
 
     @pytest.mark.parametrize("platform", _ALL_PLATFORMS)
     def test_platform_has_server_or_mcp_instance(self, platform):
-        """Each platform module must expose a 'server' MCP Server or FastMCP instance."""
+        """Each platform module must expose an 'MCPServer' or lowlevel Server instance."""
         module = _safe_import_module(platform)
         module_name = _PLATFORM_MODULE_MAP[platform]
-        # Some modules use mcp.server.Server, others use FastMCP
+        # Some modules name the instance 'server', others 'mcp'
         has_server = hasattr(module, "server") or hasattr(module, "mcp")
         assert has_server, f"{module_name} missing 'server' or 'mcp' attribute"
 

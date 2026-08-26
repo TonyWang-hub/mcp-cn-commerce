@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from shared.cn_commerce_base import (
     CommerceAPIError,
@@ -77,7 +77,7 @@ taobao = _create_taobao_client()
 
 # ── MCP server ─────────────────────────────────────────────────────────────────
 
-mcp = FastMCP("mcp-cn-taobao")
+mcp = MCPServer("mcp-cn-taobao")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════

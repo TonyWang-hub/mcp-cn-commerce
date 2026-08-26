@@ -833,7 +833,9 @@ class TestSigningIntegration:
         )
         sig = client._sign({"app_key": "ks_key", "timestamp": "123"})
         assert len(sig) == 32
-        assert sig == sig.upper()
+        # 官方 SDK 用 DigestUtils.md5Hex → 小写 hex（文档 §4 示例的 anchor 文本与
+        # href 大小写自相矛盾，以 SDK 为准）。
+        assert sig == sig.lower()
 
 
 # ====================================================================

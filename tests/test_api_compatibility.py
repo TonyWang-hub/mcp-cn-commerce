@@ -463,7 +463,12 @@ class TestVersionNegotiationCompatibility:
 
         client = TaobaoMCP(app_key="k", app_secret="s", access_token="t")
         # The _call method should include version parameter
-        assert client.BASE_URL == "https://eco.taobao.com/router/rest"
+        # 协议版本 v=2.0 由 tests/contract/test_wire_taobao.py 在 wire 层断言
+        # （此处拿不到出网请求，只断言网关常量）。
+        # 主接入文档《API调用》给的正式环境地址；per-API 详情页另列 eco.taobao.com
+        # 为 HTTPS 地址，两者均有官方出处、关系无官方说明，故 eco 保留为兼容常量。
+        assert client.BASE_URL == "https://gw.api.taobao.com/router/rest"
+        assert client.LEGACY_BASE_URL == "https://eco.taobao.com/router/rest"
         _compat_results.add(
             "version_negotiation",
             "taobao_api_version_v2",
@@ -662,9 +667,17 @@ class TestSigningMethodCompatibility:
         from servers.kuaishou.server import KuaishouMCP
 
         client = KuaishouMCP(app_key="k", app_secret="s", sign_secret="ss", access_token="t")
-        sig = client._sign({"app_key": "k", "timestamp": "123"})
+        params = {"appkey": "k", "timestamp": "123"}
+        sig = client._sign(params)
         assert len(sig) == 32
-        assert sig == sig.upper()
+        # 官方 SDK 用 DigestUtils.md5Hex → 小写 hex。文档 §4 的示例 URL 里
+        # anchor 文本是小写而 href 是大写，自相矛盾；以 SDK 为准。
+        assert sig == sig.lower()
+
+        # 本测试名称主张的正是"用 signSecret 而非 appSecret"——直接验证它：
+        # 换 signSecret 签名必变，换 appSecret 签名必不变。
+        assert KuaishouMCP(app_key="k", app_secret="s", sign_secret="other", access_token="t")._sign(params) != sig
+        assert KuaishouMCP(app_key="k", app_secret="other", sign_secret="ss", access_token="t")._sign(params) == sig
         _compat_results.add(
             "signing_compat",
             "kuaishou_sign_secret_used",

@@ -1173,11 +1173,12 @@ class TestWeixinStoreTokenCache:
     @pytest.mark.asyncio
     async def test_token_is_cached_and_reused(self, wx_env):
         """WeixinStoreMCP caches the access_token and reuses it."""
-        import importlib
-
+        # 不要 reload —— reload 会在同一个 globals 字典里把模块级 client
+        # 换成新对象，而各平台测试文件 import 时捕获的工具函数在调用时才查
+        # 该全局名，于是拿到新对象、patch 却打在旧对象上，全量跑时整片变红。
+        # 这里只需要类，用显式参数自建实例即可。
         import servers.weixin_store.server as wx_mod
 
-        importlib.reload(wx_mod)
         weixin_store_cls = wx_mod.WeixinStoreMCP
 
         client = weixin_store_cls(app_key="wx_id", app_secret="wx_secret")
@@ -1213,11 +1214,12 @@ class TestWeixinStoreTokenCache:
     @pytest.mark.asyncio
     async def test_static_token_bypasses_fetch(self, wx_env):
         """When WX_ACCESS_TOKEN is set directly, no token fetch occurs."""
-        import importlib
-
+        # 不要 reload —— reload 会在同一个 globals 字典里把模块级 client
+        # 换成新对象，而各平台测试文件 import 时捕获的工具函数在调用时才查
+        # 该全局名，于是拿到新对象、patch 却打在旧对象上，全量跑时整片变红。
+        # 这里只需要类，用显式参数自建实例即可。
         import servers.weixin_store.server as wx_mod
 
-        importlib.reload(wx_mod)
         weixin_store_cls = wx_mod.WeixinStoreMCP
 
         client = weixin_store_cls(access_token="static_token_xyz")
@@ -1313,12 +1315,9 @@ class TestPinduoduoFullRequestFlow:
             "PINDUODUO_ACCESS_TOKEN": "pdd_tok",
         }
         with patch.dict(os.environ, env, clear=False):
-            import importlib
+            # 同上：不 reload，只需模块已加载。
+            import servers.pinduoduo.server  # noqa: F401
 
-            if "servers.pinduoduo.server" in sys.modules:
-                importlib.reload(sys.modules["servers.pinduoduo.server"])
-            else:
-                import servers.pinduoduo.server  # noqa: F401
             pdd_mod = sys.modules["servers.pinduoduo.server"]
             pinduoduo_cls = pdd_mod.PinduoduoMCP
 

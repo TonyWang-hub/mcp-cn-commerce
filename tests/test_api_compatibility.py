@@ -537,12 +537,12 @@ class TestVersionNegotiationCompatibility:
             "XHS_ACCESS_TOKEN": "xhs_tok",
         }
         with patch.dict(os.environ, env, clear=False):
-            import importlib
+            # 仅需模块已加载即可 —— 下面用显式参数自建 client。
+            # 曾用 importlib.reload 重建模块全局，那会把各平台测试文件在
+            # import 时捕获的 client 对象变成陈旧引用，导致它们 patch 到旧对象、
+            # 全量跑时整片变红（曾达 104 条）。此处不需要重建，故不重建。
+            import servers.xiaohongshu.server  # noqa: F401
 
-            if "servers.xiaohongshu.server" in sys.modules:
-                importlib.reload(sys.modules["servers.xiaohongshu.server"])
-            else:
-                import servers.xiaohongshu.server  # noqa: F401
             xhs_mod = sys.modules["servers.xiaohongshu.server"]
             client = xhs_mod.XiaohongshuMCP(app_key="k", app_secret="s", access_token="t")
             assert "xiaohongshu.com" in client.BASE_URL
@@ -557,12 +557,12 @@ class TestVersionNegotiationCompatibility:
         """WeChat Store uses api.weixin.qq.com gateway."""
         env = {"WX_APP_ID": "wx_id", "WX_APP_SECRET": "wx_secret"}
         with patch.dict(os.environ, env, clear=False):
-            import importlib
+            # 仅需模块已加载即可 —— 下面用显式参数自建 client。
+            # 曾用 importlib.reload 重建模块全局，那会把各平台测试文件在
+            # import 时捕获的 client 对象变成陈旧引用，导致它们 patch 到旧对象、
+            # 全量跑时整片变红（曾达 104 条）。此处不需要重建，故不重建。
+            import servers.weixin_store.server  # noqa: F401
 
-            if "servers.weixin_store.server" in sys.modules:
-                importlib.reload(sys.modules["servers.weixin_store.server"])
-            else:
-                import servers.weixin_store.server  # noqa: F401
             wx_mod = sys.modules["servers.weixin_store.server"]
             client = wx_mod.WeixinStoreMCP(app_key="k", app_secret="s", access_token="t")
             assert "weixin.qq.com" in client.BASE_URL
@@ -581,12 +581,12 @@ class TestVersionNegotiationCompatibility:
             "PINDUODUO_ACCESS_TOKEN": "pdd_tok",
         }
         with patch.dict(os.environ, env, clear=False):
-            import importlib
+            # 仅需模块已加载即可 —— 下面用显式参数自建 client。
+            # 曾用 importlib.reload 重建模块全局，那会把各平台测试文件在
+            # import 时捕获的 client 对象变成陈旧引用，导致它们 patch 到旧对象、
+            # 全量跑时整片变红（曾达 104 条）。此处不需要重建，故不重建。
+            import servers.pinduoduo.server  # noqa: F401
 
-            if "servers.pinduoduo.server" in sys.modules:
-                importlib.reload(sys.modules["servers.pinduoduo.server"])
-            else:
-                import servers.pinduoduo.server  # noqa: F401
             pdd_mod = sys.modules["servers.pinduoduo.server"]
             client = pdd_mod.PinduoduoMCP(app_key="k", app_secret="s", access_token="t")
             assert "pinduoduo.com" in client.BASE_URL
@@ -872,12 +872,12 @@ class TestCrossPlatformInterfaceConsistency:
         # WeixinStore needs env vars to import
         env = {"WX_APP_ID": "wx_id", "WX_APP_SECRET": "wx_secret"}
         with patch.dict(os.environ, env, clear=False):
-            import importlib
+            # 仅需模块已加载即可 —— 下面用显式参数自建 client。
+            # 曾用 importlib.reload 重建模块全局，那会把各平台测试文件在
+            # import 时捕获的 client 对象变成陈旧引用，导致它们 patch 到旧对象、
+            # 全量跑时整片变红（曾达 104 条）。此处不需要重建，故不重建。
+            import servers.weixin_store.server  # noqa: F401
 
-            if "servers.weixin_store.server" in sys.modules:
-                importlib.reload(sys.modules["servers.weixin_store.server"])
-            else:
-                import servers.weixin_store.server  # noqa: F401
             wx_mod = sys.modules["servers.weixin_store.server"]
             base_names = [c.__name__ for c in wx_mod.WeixinStoreMCP.__mro__]
             assert "CommerceMCPBase" in base_names

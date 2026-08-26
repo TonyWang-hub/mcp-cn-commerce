@@ -60,9 +60,11 @@ EXPECTED_TOOLS = {
     "doudian": 24,
     "jd": 19,
     "taobao": 17,
-    "pinduoduo": 17,
-    "kuaishou": 16,
-    "xiaohongshu": 17,
+    # 以下三个平台的工具数因移除「平台不对三方开放」的能力而下降，
+    # 详见 docs/api-contracts/<platform>.md 与 kitty-specs 的 mission spec §2。
+    "pinduoduo": 14,
+    "kuaishou": 13,
+    "xiaohongshu": 16,
     "weixin_store": 15,
 }
 

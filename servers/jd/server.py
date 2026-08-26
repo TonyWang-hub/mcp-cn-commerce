@@ -1,7 +1,30 @@
-"""JD (京东) MCP server — provides tools for reading merchant orders, products, and shop info.
+"""JD (京东) MCP server.
+
+FR-015（工具下架）状态：**本 server 当前不暴露任何平台业务工具。** 从官方文档后端拉取
+覆盖三个网关的完整目录（3514 个 API）后确认：`jd.pop.*` 命名空间在京东任何网关上都不
+存在（命中数 **0**）。`jd.` 确是真前缀，但**只属于京东联盟** `jd.union.open.*`（90 个）；
+商家 / POP / VC 接口一律是 `jingdong.*`（3147 个）。原有 15 个 method 全部编造。
+
+因此全部 15 个工具的 `@mcp.tool()` 装饰器已移除 —— 函数体与 docstring 原样保留（作为按
+真实接口重建时的意图记录），但 MCP server 不再对外暴露它们。每个函数上方的注释写明原因，
+并区分两类：11 个有已验证的正确 `jingdong.*` method 名；4 个**京东无官方等价能力**
+（店铺评分 / 单条评价详情 / 实时售价 / 订单级物流轨迹）。
+
+⚠️ 重建前需先决定网关方向：官方《开放平台API对接指南》明文把本文件使用的
+`https://api.jd.com/routerjson` 标为「**历史接口，逐步迁移至 SP-API**」，而
+`https://api-cn.jd.com` 的 SP-API 标为「新一代标准化接口（推荐使用）」，POP 所需能力已
+全覆盖。两者鉴权完全不同 —— SP-API 凭证走 `X-JOS-*` header，timestamp 为 epoch 毫秒，
+签名 `upper(md5(secret + sorted_kv + secret))` 且 **header 名本身参与签名串**。选 SP-API
+则下方 routerjson 的签名实现与契约细节全部作废。
+
+逐条清单见 `docs/platforms.md`「下架工具清单（FR-015）」；重建工作另立 mission，研究成果
+在 `kitty-specs/api-contract-conformance-01M0ZHQN/deferred/WP08-*.md`。
+
+注意：`register_common_tools()` 注册的 4 个通用运维工具不依赖平台 endpoint，未受影响 ——
+它们是本 server 目前唯一对外暴露的工具。
 
 Auth via env vars: JD_APP_KEY, JD_APP_SECRET, JD_ACCESS_TOKEN.
-API endpoint: https://api.jd.com/routerjson
+API endpoint: https://api.jd.com/routerjson (官方标注为历史接口)
 Sign method: HMAC-MD5
 """
 
@@ -84,7 +107,9 @@ jd = _create_jd_client()
 mcp = MCPServer("mcp-cn-jd")
 
 
-@mcp.tool()
+# 下架（FR-015）：`jd.pop.order.search` —— `jd.pop.*` 命名空间在京东任何网关上都不存在。
+# 替代：`jingdong.pop.order.search`（apiId 4246，权限 R3）。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_order_list(
     start_time: str,
     end_time: str,
@@ -119,7 +144,9 @@ async def get_order_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+# 下架（FR-015）：`jd.pop.order.get` —— `jd.pop.*` 命名空间不存在。
+# 替代：`jingdong.pop.order.get`（权限 R3）。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_order_detail(order_id: str) -> str:
     """Get full details of a single order.
 
@@ -131,7 +158,9 @@ async def get_order_detail(order_id: str) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+# 下架（FR-015）：`jd.pop.ware.search` —— `jd.pop.*` 命名空间不存在。
+# 替代：`jingdong.ware.read.searchWare4Valid`。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_product_list(
     page: int = 1,
     page_size: int = 20,
@@ -157,7 +186,9 @@ async def get_product_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+# 下架（FR-015）：`jd.pop.shop.get` —— `jd.pop.*` 命名空间不存在。
+# 替代：`jingdong.vender.shop.query`（权限 R1）。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_shop_info(shop_id: str = "") -> str:
     """Get shop basic information.
 
@@ -177,7 +208,10 @@ async def get_shop_info(shop_id: str = "") -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+# 下架（FR-015）：`jd.pop.afs.search` —— `jd.pop.*` 命名空间不存在。
+# 替代：`jingdong.ServiceInfoProvider.queryServicePageSafe` 或
+# `jingdong.afsservice.alltask.get`（权限 R1）。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_after_sale_list(
     start_time: str,
     end_time: str,
@@ -213,7 +247,9 @@ async def get_after_sale_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+# 下架（FR-015）：`jd.pop.afs.get` —— `jd.pop.*` 命名空间不存在。
+# 替代：`jingdong.ServiceDetailProvider.findServiceDetail`（权限 R1）。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_after_sale_detail(after_sale_id: str) -> str:
     """Get full details of a single after-sale (return/refund/exchange) record.
 
@@ -230,7 +266,9 @@ async def get_after_sale_detail(after_sale_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+# 下架（FR-015）：`jd.pop.logistics.trace` —— `jd.pop.*` 命名空间不存在，且**京东无订单级等价能力**：
+# `jingdong.ldop.receive.trace.get` 需青龙业主号 + 运单号，不是订单号入口。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_logistics_tracking(order_id: str) -> str:
     """Get logistics tracking information for an order.
 
@@ -247,7 +285,9 @@ async def get_logistics_tracking(order_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+# 下架（FR-015）：`jd.pop.comment.search` —— `jd.pop.*` 命名空间不存在。
+# 替代：`jingdong.pop.PopCommentJsfService.getVenderCommentsForJos`（权限 R1）。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_review_list(
     product_id: str,
     page: int = 1,
@@ -270,7 +310,9 @@ async def get_review_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+# 下架（FR-015）：`jd.pop.comment.get` —— `jd.pop.*` 命名空间不存在，且**京东无官方等价能力**：
+# 评价类 API 仅 6 个，均无单条评价详情。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_review_detail(review_id: str) -> str:
     """Get full details of a single review.
 
@@ -287,7 +329,9 @@ async def get_review_detail(review_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+# 下架（FR-015）：`jd.pop.price.get` —— `jd.pop.*` 命名空间不存在，且**京东无官方等价能力**：
+# 没有 POP 实时售价读接口，价格随 `jingdong.ware.read.findWareById` 一并返回。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_price_info(sku_ids: str) -> str:
     """Get real-time price information for given SKUs, including promotion overlay.
 
@@ -306,7 +350,9 @@ async def get_price_info(sku_ids: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+# 下架（FR-015）：`jd.pop.inventory.get` —— `jd.pop.*` 命名空间不存在。
+# 替代：`jingdong.ware.stock.sku.query`（权限 R1）。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_inventory(ware_ids: str) -> str:
     """Query current inventory/stock levels for given ware IDs.
 
@@ -325,7 +371,9 @@ async def get_inventory(ware_ids: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+# 下架（FR-015）：`jd.pop.promotion.search` —— `jd.pop.*` 命名空间不存在。
+# 替代：`jingdong.seller.promotion.list`（权限 R1）。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def list_promotions(
     status: str = "",
     page: int = 1,
@@ -351,7 +399,9 @@ async def list_promotions(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+# 下架（FR-015）：`jd.pop.coupon.search` —— `jd.pop.*` 命名空间不存在。
+# 替代：`jingdong.seller.coupon.read.getCouponList`（权限 R1）。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def list_coupons(
     status: str = "",
     page: int = 1,
@@ -382,7 +432,9 @@ async def list_coupons(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+# 下架（FR-015）：`jd.pop.category.search` —— `jd.pop.*` 命名空间不存在。
+# 替代：`jingdong.category.read.findByPId`（`parent_id` 对应其 `pid`）。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def list_categories(parent_id: str = "0") -> str:
     """List product categories under a given parent category.
 
@@ -400,7 +452,9 @@ async def list_categories(parent_id: str = "0") -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+# 下架（FR-015）：`jd.pop.shop.score.get` —— `jd.pop.*` 命名空间不存在，且**京东无官方等价能力**：
+# 3514 个官方 API 中 DSR / 店铺评分 / 口碑 / 服务分零命中。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_shop_score() -> str:
     """Get shop DSR (Detail Seller Rating) scores including product description,
     service attitude, and delivery speed ratings.

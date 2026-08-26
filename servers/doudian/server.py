@@ -1,7 +1,24 @@
 """MCP Server for 抖店 (Douyin Shop / Doudian) e-commerce platform.
 
-Read-only tools for AI agents to query merchant business data:
-orders, products, refunds, and shop info.
+FR-015（工具下架）状态：**本 server 当前不暴露任何平台业务工具。** 对官方 API 文档
+69 个业务域目录、1664 篇文档（去重 1652 个路径）做全量比对后，原有的 20 个 endpoint
+无一可用：3 个已官方下线、17 个查无此路径（成片的「域名幻觉」—— 抖店根本没有
+`/comment/`、`/coupon/`、`/finance/`、`/im/`、`/promotion/`、`/video/` 这些一级路径段）。
+
+因此全部 20 个工具的 `@server.tool()` 装饰器已移除 —— 函数体与 docstring 原样保留
+（作为按真实接口重建时的意图记录），但 MCP server 不再对外暴露它们。每个函数上方的注释
+写明原因，并区分两类：
+
+* 12 个有已验证的官方替代路径（注释里给出替代 endpoint）；
+* 8 个能力**抖店不对三方开放**，改名无法修复 —— 评价×2、直播×2、店铺基础信息、
+  店铺流量、短视频数据、IM 消息（其中 IM / 直播 / 罗盘属 `status=3` 定向开放，需联系
+  行业小二加白；评价与店铺基础信息则不可申请）。
+
+逐条清单见 `docs/platforms.md`「下架工具清单（FR-015）」；重建工作另立 mission，研究
+成果在 `kitty-specs/api-contract-conformance-01M0ZHQN/deferred/WP06-*.md`。
+
+注意：`register_common_tools()` 注册的 4 个通用运维工具不依赖平台 endpoint，未受影响 ——
+它们是本 server 目前唯一对外暴露的工具。
 
 Authentication via environment variables:
   DOUDIAN_APP_KEY       — App Key from Douyin Open Platform
@@ -248,7 +265,9 @@ def _safe_get(d: dict, *keys: str, default: Any = "") -> Any:
 # ═══════════════════════════════════════════════════════════════
 
 
-@server.tool()
+# 下架（FR-015）：`order/list` 于 2021-08-30 官方下线（文档墓碑：正文长度 0）。
+# 替代：`/order/searchList`。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_order_list(
     start_time: str = "",
     end_time: str = "",
@@ -333,7 +352,9 @@ async def get_order_list(
         return {"error": f"Unexpected error: {e}", "orders": []}
 
 
-@server.tool()
+# 下架（FR-015）：`order/detail` 于 2021-08-30 官方下线（文档墓碑：正文长度 0）。
+# 替代：`/order/orderDetail`。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_order_detail(
     order_id: str = "",
     shop_order_id: str = "",
@@ -445,7 +466,9 @@ async def get_order_detail(
         return {"error": f"Unexpected error: {e}", "order": None}
 
 
-@server.tool()
+# 下架（FR-015）：`product/list` 于 2022-01-20 官方下线（文档墓碑：正文长度 0）。
+# 替代：`/product/listV2`。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_product_list(
     page: int = 0,
     page_size: int = 10,
@@ -520,7 +543,9 @@ async def get_product_list(
         return {"error": f"Unexpected error: {e}", "products": []}
 
 
-@server.tool()
+# 下架（FR-015）：`refund/listSearch` 官方文档查无此路径（真名 `/trade/refundListSearch`，
+# 且该真名亦已于 2022-01-20 下线）。替代：`/afterSale/List`。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_refund_list(
     start_time: str = "",
     end_time: str = "",
@@ -603,7 +628,9 @@ async def get_refund_list(
         return {"error": f"Unexpected error: {e}", "refunds": []}
 
 
-@server.tool()
+# 下架（FR-015）：`shop/basicInfo` —— **抖店不对三方开放该能力**：主站没有「店铺基础信息」接口，
+# 仅有 `/shop/status`（店铺状态）与 `/open/getAuthInfo`（授权信息）。无等价替代。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_shop_info() -> dict:
     """获取抖店基本信息。
 
@@ -653,7 +680,9 @@ async def get_shop_info() -> dict:
 # ── 物流 (logistics) ────────────────────────────────────────────
 
 
-@server.tool()
+# 下架（FR-015）：`order/logisticsTrace` 官方文档查无此路径（零命中）。
+# 替代：`/order/queryOrderLogistics`。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_logistics_tracking(
     order_id: str = "",
 ) -> dict:
@@ -716,7 +745,9 @@ async def get_logistics_tracking(
         return {"error": f"Unexpected error: {e}", "tracking": None}
 
 
-@server.tool()
+# 下架（FR-015）：`order/getLogisticsCompanyList` 官方文档查无此路径（多加了 `get` 前缀）。
+# 替代：`/order/logisticsCompanyList` 或 `/order/queryLogisticsCompanyList`。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def list_logistics_companies() -> dict:
     """物流公司列表 — 获取抖店支持的物流/快递公司列表。
 
@@ -760,7 +791,10 @@ async def list_logistics_companies() -> dict:
 # ── 评价 (reviews) ─────────────────────────────────────────────
 
 
-@server.tool()
+# 下架（FR-015）：`comment/list` —— **抖店不对三方开放该能力**：全平台无评价列表接口（抖店没有
+# `/comment/` 域）；仅 `/product/commentCounter` 提供计数，且属二方权限组。
+# 不可申请定向开放。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_review_list(
     start_time: str = "",
     end_time: str = "",
@@ -839,7 +873,9 @@ async def get_review_list(
         return {"error": f"Unexpected error: {e}", "reviews": []}
 
 
-@server.tool()
+# 下架（FR-015）：`comment/detail` —— **抖店不对三方开放该能力**：全平台无评价详情接口。
+# 不可申请定向开放。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_review_detail(
     review_id: str = "",
 ) -> dict:
@@ -906,7 +942,9 @@ async def get_review_detail(
 # ── 客服 (customer service — 飞鸽) ────────────────────────────
 
 
-@server.tool()
+# 下架（FR-015）：`im/getMessageList` —— **抖店不对三方开放该能力**：没有 `/im/` 域，真名是
+# `/pigeon/messageList`，文档 `status=3`（**定向开放，需联系行业小二加白**）。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_feige_messages(
     user_id: str = "",
     start_time: str = "",
@@ -989,7 +1027,9 @@ async def get_feige_messages(
 # ── 直播 (live streaming) ──────────────────────────────────────
 
 
-@server.tool()
+# 下架（FR-015）：`live/getLiveRoomData` —— **抖店不对三方开放该能力**：`/live/` 下仅 2 个
+# `status=3` 接口（**定向开放，需加白**），无直播间数据接口。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_live_data(
     room_id: str = "",
     start_time: str = "",
@@ -1064,7 +1104,9 @@ async def get_live_data(
         return {"error": f"Unexpected error: {e}", "live_data": None}
 
 
-@server.tool()
+# 下架（FR-015）：`live/getLiveRoomList` —— **抖店不对三方开放该能力**：`/live/` 下仅 2 个
+# `status=3` 接口（**定向开放，需加白**），无直播间列表接口。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def list_live_rooms(
     start_time: str = "",
     end_time: str = "",
@@ -1144,7 +1186,9 @@ async def list_live_rooms(
 # ── 流量 (traffic) ─────────────────────────────────────────────
 
 
-@server.tool()
+# 下架（FR-015）：`shop/getTrafficData` —— **抖店不对三方开放该能力**：罗盘 API 目录只有 1 篇
+# `/compass/getProductSaleData`（**定向开放，需加白**），无店铺流量接口。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_traffic_data(
     start_date: str = "",
     end_date: str = "",
@@ -1210,7 +1254,9 @@ async def get_traffic_data(
 # ── 短视频 (short video) ───────────────────────────────────────
 
 
-@server.tool()
+# 下架（FR-015）：`video/getVideoData` —— **抖店不对三方开放该能力**：没有 `/video/` 域（真实域是
+# `/shopVideo/*`），且无短视频数据接口。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_short_video_data(
     video_id: str = "",
     start_date: str = "",
@@ -1285,7 +1331,9 @@ async def get_short_video_data(
 # ── 营销 (marketing) ──────────────────────────────────────────
 
 
-@server.tool()
+# 下架（FR-015）：`promotion/list` 官方文档查无此路径 —— 抖店**没有 `/promotion/` 域**，真实域是 `/marketing/`。
+# 替代：`/marketing/pageQueryActivity`（营销玩法）。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def list_promotions(
     status: str = "",
     page: int = 0,
@@ -1354,7 +1402,9 @@ async def list_promotions(
         return {"error": f"Unexpected error: {e}", "promotions": []}
 
 
-@server.tool()
+# 下架（FR-015）：`coupon/list` 官方文档查无此路径 —— 抖店**没有 `/coupon/` 域**（真名为复数 `/coupons/`）。
+# 替代：卡券核销 `/coupons/list`；店铺券 `/marketing/queryShopCouponList`。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def list_coupons(
     status: str = "",
     page: int = 0,
@@ -1429,7 +1479,9 @@ async def list_coupons(
 # ── 资金 (billing) ────────────────────────────────────────────
 
 
-@server.tool()
+# 下架（FR-015）：`finance/getBillList` 官方文档查无此路径 —— 抖店**没有 `/finance/` 域**。
+# 替代：结算账单 `/order/getSettleBillDetailV3`；资金流水 `/order/getShopAccountItem`。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_bill_list(
     start_date: str = "",
     end_date: str = "",
@@ -1505,7 +1557,9 @@ async def get_bill_list(
 # ── 店铺 (shop extended) ──────────────────────────────────────
 
 
-@server.tool()
+# 下架（FR-015）：`shop/getShopScore` 官方文档查无此路径（零命中）。
+# 替代：`/shop/reputation`（商家评分）或 `/shop/getExperienceScore`（体验分）。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def get_shop_score() -> dict:
     """店铺评分详情 — 获取抖店DSR评分、商品体验、服务体验、物流体验等详细评分。
 
@@ -1562,7 +1616,9 @@ async def get_shop_score() -> dict:
         return {"error": f"Unexpected error: {e}", "shop_score": None}
 
 
-@server.tool()
+# 下架（FR-015）：`product/getCategoryList` 官方文档查无此路径（零命中）。
+# 替代：`/shop/getShopCategory`（店铺类目树）或 `/product/getCategories`。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def list_categories(
     parent_id: str = "0",
 ) -> dict:
@@ -1613,7 +1669,9 @@ async def list_categories(
         return {"error": f"Unexpected error: {e}", "categories": []}
 
 
-@server.tool()
+# 下架（FR-015）：`product/getBrandList` 官方文档查无此路径（零命中）。
+# 替代：`/brand/list`（按类目取可选品牌）。
+# 保留函数体仅为记录重建意图，不再注册为 MCP 工具；详见 docs/platforms.md。
 async def list_brands(
     category_id: str = "",
     page: int = 0,

@@ -2147,3 +2147,115 @@ class TestNewToolsConfigErrorHandling:
             result = await get_shop_score()
         assert "error" in result
         assert result["shop_score"] is None
+
+
+# ── FR-015: every doudian endpoint was fabricated or retired ─────────────────
+#
+# 判据：官方 API 文档 69 个业务域目录、1664 篇文档（去重 1652 个路径）全量比对 ——
+# 原有 20 个 endpoint 无一可用。因此全部 20 个工具已取消 @server.tool() 注册（函数体保留
+# 作为重建意图记录），本 server 目前只暴露 4 个不依赖平台 endpoint 的通用运维工具。
+# 这些断言的作用是防回归：任何把它们重新注册的改动都会在这里变红。
+# 逐条清单见 docs/platforms.md「下架工具清单（FR-015）」。
+
+# 已被官方下线（附公告日期；文档墓碑：正文长度 0）
+_DOUDIAN_RETIRED_TOOLS = {
+    "get_order_detail": "order/detail",  # 2021-08-30
+    "get_order_list": "order/list",  # 2021-08-30
+    "get_product_list": "product/list",  # 2022-01-20
+}
+
+# 官方文档查无此路径，但有已验证的官方替代
+_DOUDIAN_FABRICATED_TOOLS = {
+    "get_refund_list": "refund/listSearch",
+    "get_logistics_tracking": "order/logisticsTrace",
+    "list_logistics_companies": "order/getLogisticsCompanyList",
+    "list_promotions": "promotion/list",
+    "list_coupons": "coupon/list",
+    "get_bill_list": "finance/getBillList",
+    "get_shop_score": "shop/getShopScore",
+    "list_categories": "product/getCategoryList",
+    "list_brands": "product/getBrandList",
+}
+
+# 抖店不对三方开放该能力 —— 改名无法修复
+_DOUDIAN_NOT_OPEN_TOOLS = {
+    "get_review_list": "comment/list",
+    "get_review_detail": "comment/detail",
+    "get_live_data": "live/getLiveRoomData",
+    "list_live_rooms": "live/getLiveRoomList",
+    "get_shop_info": "shop/basicInfo",
+    "get_traffic_data": "shop/getTrafficData",
+    "get_short_video_data": "video/getVideoData",
+    "get_feige_messages": "im/getMessageList",
+}
+
+_DOUDIAN_UNREGISTERED_TOOLS = {
+    **_DOUDIAN_RETIRED_TOOLS,
+    **_DOUDIAN_FABRICATED_TOOLS,
+    **_DOUDIAN_NOT_OPEN_TOOLS,
+}
+
+# register_common_tools() 注册的通用运维工具 —— 不依赖平台 endpoint，不受 FR-015 影响。
+_COMMON_TOOLS = {"get_metrics", "get_traces", "get_alerts", "export_data"}
+
+
+class TestFR015Unregistration:
+    """No doudian business tool may be exposed over MCP."""
+
+    def test_audit_lists_cover_all_20_endpoints(self):
+        """Guard the guard: 3 retired + 9 replaceable + 8 not-open = 20."""
+        assert len(_DOUDIAN_RETIRED_TOOLS) == 3
+        assert len(_DOUDIAN_NOT_OPEN_TOOLS) == 8
+        assert len(_DOUDIAN_UNREGISTERED_TOOLS) == 20
+
+    @pytest.mark.asyncio
+    async def test_only_common_ops_tools_remain_registered(self):
+        """list_tools() exposes the 4 common ops tools and nothing else."""
+        from servers.doudian.server import server as mcp_server
+
+        names = {tool.name for tool in await mcp_server.list_tools()}
+        assert names == _COMMON_TOOLS
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tool_name", sorted(_DOUDIAN_UNREGISTERED_TOOLS))
+    async def test_dead_endpoint_tool_is_not_registered(self, tool_name):
+        """Each fabricated/retired tool is absent from the MCP tool registry."""
+        from servers.doudian.server import server as mcp_server
+
+        names = {tool.name for tool in await mcp_server.list_tools()}
+        endpoint = _DOUDIAN_UNREGISTERED_TOOLS[tool_name]
+        assert tool_name not in names, f"{tool_name} still exposed; its endpoint {endpoint} does not exist"
+
+    @pytest.mark.parametrize("tool_name", sorted(_DOUDIAN_UNREGISTERED_TOOLS))
+    def test_dead_endpoint_function_body_is_retained(self, tool_name):
+        """The function itself survives: it is the record of rebuild intent."""
+        func = getattr(_srv, tool_name, None)
+        assert func is not None, f"{tool_name} was deleted; FR-015 asks for unregistration, not deletion"
+        assert func.__doc__, f"{tool_name} lost its docstring"
+
+    @pytest.mark.parametrize("tool_name", sorted(_DOUDIAN_UNREGISTERED_TOOLS))
+    def test_dead_endpoint_function_carries_reason_comment(self, tool_name):
+        """A `# 下架（FR-015）` comment above the def states why and what replaces it."""
+        import pathlib
+
+        source = pathlib.Path(_srv.__file__).read_text(encoding="utf-8")
+        head = source.split(f"async def {tool_name}(")[0]
+        preceding = [line for line in head.rstrip().split("\n") if line.startswith("#")]
+        assert preceding, f"no comment block above {tool_name}"
+        assert any(
+            "下架（FR-015）" in line for line in preceding[-6:]
+        ), f"{tool_name} is missing its FR-015 reason comment"
+
+    @pytest.mark.parametrize("tool_name", sorted(_DOUDIAN_NOT_OPEN_TOOLS))
+    def test_not_open_tools_say_so_explicitly(self, tool_name):
+        """The 8 platform-restricted capabilities must be distinguishable from
+        the 12 merely-misnamed ones — a rebuild mission cannot fix them by
+        renaming, so the comment says '不对三方开放' rather than offering a替代."""
+        import pathlib
+
+        source = pathlib.Path(_srv.__file__).read_text(encoding="utf-8")
+        head = source.split(f"async def {tool_name}(")[0]
+        preceding = [line for line in head.rstrip().split("\n") if line.startswith("#")]
+        assert any(
+            "不对三方开放" in line for line in preceding[-6:]
+        ), f"{tool_name} must be marked as a capability doudian does not open to third parties"

@@ -1450,3 +1450,123 @@ async def test_new_tool_call_passthrough(mock_call):
     api_method, biz_params = mock_call.call_args[0]
     assert api_method == "jd.pop.price.get"
     assert biz_params == {"sku_ids": "S1,S2,S3"}
+
+
+# ── FR-015: the whole `jd.pop.*` namespace is fabricated ─────────────────────
+#
+# 判据：从官方文档后端拉取覆盖三个网关的完整目录（3514 个 API），做前缀直方图 —— `jd.pop.`
+# 命中数为 0。`jd.` 是真前缀但只属京东联盟（`jd.union.open.*`，90 个）；商家/POP/VC 接口
+# 一律 `jingdong.*`（3147 个）。原有 15 个 method 全部编造，因此 15 个工具已取消
+# @mcp.tool() 注册（函数体保留作为重建意图记录），本 server 目前只暴露 4 个不依赖平台
+# endpoint 的通用运维工具。
+#
+# ⚠️ 重建前需先决策网关方向：官方把 `api.jd.com/routerjson` 标为「历史接口，逐步迁移至
+# SP-API」，SP-API（`api-cn.jd.com`）鉴权走 `X-JOS-*` header 且 header 名参与签名。
+# 逐条清单见 docs/platforms.md「下架工具清单（FR-015）」。
+
+# 有已验证的正确 `jingdong.*` method 名
+_JD_REPLACEABLE_TOOLS = {
+    "get_order_list": "jd.pop.order.search",
+    "get_order_detail": "jd.pop.order.get",
+    "get_product_list": "jd.pop.ware.search",
+    "get_shop_info": "jd.pop.shop.get",
+    "get_after_sale_list": "jd.pop.afs.search",
+    "get_after_sale_detail": "jd.pop.afs.get",
+    "get_review_list": "jd.pop.comment.search",
+    "get_inventory": "jd.pop.inventory.get",
+    "list_promotions": "jd.pop.promotion.search",
+    "list_coupons": "jd.pop.coupon.search",
+    "list_categories": "jd.pop.category.search",
+}
+
+# 京东无官方等价能力
+_JD_NO_EQUIVALENT_TOOLS = {
+    "get_shop_score": "jd.pop.shop.score.get",
+    "get_review_detail": "jd.pop.comment.get",
+    "get_price_info": "jd.pop.price.get",
+    "get_logistics_tracking": "jd.pop.logistics.trace",
+}
+
+_JD_UNREGISTERED_TOOLS = {**_JD_REPLACEABLE_TOOLS, **_JD_NO_EQUIVALENT_TOOLS}
+
+# register_common_tools() 注册的通用运维工具 —— 不依赖平台 endpoint，不受 FR-015 影响。
+_COMMON_TOOLS = {"get_metrics", "get_traces", "get_alerts", "export_data"}
+
+
+class TestFR015Unregistration:
+    """No `jd.pop.*` tool may be exposed over MCP."""
+
+    def test_audit_lists_cover_all_15_endpoints(self):
+        """Guard the guard: 11 replaceable + 4 without equivalent = 15."""
+        assert len(_JD_REPLACEABLE_TOOLS) == 11
+        assert len(_JD_NO_EQUIVALENT_TOOLS) == 4
+        assert len(_JD_UNREGISTERED_TOOLS) == 15
+
+    def test_every_unregistered_method_is_in_the_jd_pop_namespace(self):
+        """All 15 are `jd.pop.*`, the namespace with 0 official hits."""
+        assert all(m.startswith("jd.pop.") for m in _JD_UNREGISTERED_TOOLS.values())
+
+    @pytest.mark.asyncio
+    async def test_only_common_ops_tools_remain_registered(self):
+        """list_tools() exposes the 4 common ops tools and nothing else."""
+        from servers.jd.server import mcp
+
+        names = {tool.name for tool in await mcp.list_tools()}
+        assert names == _COMMON_TOOLS
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tool_name", sorted(_JD_UNREGISTERED_TOOLS))
+    async def test_fabricated_tool_is_not_registered(self, tool_name):
+        """Each `jd.pop.*` tool is absent from the MCP tool registry."""
+        from servers.jd.server import mcp
+
+        names = {tool.name for tool in await mcp.list_tools()}
+        method = _JD_UNREGISTERED_TOOLS[tool_name]
+        assert tool_name not in names, f"{tool_name} still exposed; its method {method} does not exist"
+
+    @pytest.mark.parametrize("tool_name", sorted(_JD_UNREGISTERED_TOOLS))
+    def test_fabricated_function_body_is_retained(self, tool_name):
+        """The function itself survives: it is the record of rebuild intent."""
+        import servers.jd.server as _jd_srv
+
+        func = getattr(_jd_srv, tool_name, None)
+        assert func is not None, f"{tool_name} was deleted; FR-015 asks for unregistration, not deletion"
+        assert func.__doc__, f"{tool_name} lost its docstring"
+
+    @pytest.mark.parametrize("tool_name", sorted(_JD_UNREGISTERED_TOOLS))
+    def test_fabricated_function_carries_reason_comment(self, tool_name):
+        """A `# 下架（FR-015）` comment above the def states why and what replaces it."""
+        import pathlib
+
+        import servers.jd.server as _jd_srv
+
+        source = pathlib.Path(_jd_srv.__file__).read_text(encoding="utf-8")
+        head = source.split(f"async def {tool_name}(")[0]
+        preceding = [line for line in head.rstrip().split("\n") if line.startswith("#")]
+        assert preceding, f"no comment block above {tool_name}"
+        assert any(
+            "下架（FR-015）" in line for line in preceding[-6:]
+        ), f"{tool_name} is missing its FR-015 reason comment"
+
+    @pytest.mark.parametrize("tool_name", sorted(_JD_NO_EQUIVALENT_TOOLS))
+    def test_no_equivalent_tools_say_so_explicitly(self, tool_name):
+        """The 4 capabilities with no official equivalent must be distinguishable
+        from the 11 merely-misnamed ones — renaming cannot fix them."""
+        import pathlib
+
+        import servers.jd.server as _jd_srv
+
+        source = pathlib.Path(_jd_srv.__file__).read_text(encoding="utf-8")
+        head = source.split(f"async def {tool_name}(")[0]
+        preceding = [line for line in head.rstrip().split("\n") if line.startswith("#")]
+        assert any(
+            "无官方" in line or "无订单级" in line for line in preceding[-6:]
+        ), f"{tool_name} must be marked as having no official equivalent"
+
+    def test_module_docstring_flags_the_gateway_decision(self):
+        """A rebuild must not start before routerjson-vs-SP-API is decided."""
+        import servers.jd.server as _jd_srv
+
+        doc = _jd_srv.__doc__ or ""
+        assert "SP-API" in doc
+        assert "历史接口" in doc

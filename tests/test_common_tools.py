@@ -100,12 +100,23 @@ async def test_mcpserver_registers_common_tools(module):
     assert not missing, f"{module.__name__} missing common tools: {sorted(missing)}"
 
 
+# FR-015 下架了指向不存在 / 已下线 endpoint 的工具。抖店（0/20 可用）与京东
+# （0/15，`jd.pop.*` 命名空间不存在）因此**一个平台工具都不剩**，只保留 4 个不依赖平台
+# endpoint 的通用运维工具。逐条清单见 docs/platforms.md「下架工具清单（FR-015）」。
+_NO_PLATFORM_TOOLS = {"doudian", "jd"}
+
+
 @pytest.mark.parametrize("module", MCP_SERVERS)
-def test_mcpserver_keeps_platform_tools(module):
+def test_mcpserver_keeps_platform_tools(module, request):
     """Wiring common tools must not drop a server's existing platform tools."""
     registered = set(_mcp_server(module)._tool_manager._tools.keys())
-    # Every server has more than just the four common tools.
-    assert len(registered - COMMON_TOOLS) > 0
+    if request.node.callspec.id in _NO_PLATFORM_TOOLS:
+        # Nothing to keep: every endpoint this server used was fabricated or
+        # retired, so the four common tools are the whole surface.
+        assert registered == COMMON_TOOLS
+    else:
+        # Every other server has more than just the four common tools.
+        assert len(registered - COMMON_TOOLS) > 0
 
 
 # ── End-to-end: invoke the registered MCPServer tools against a real client ────

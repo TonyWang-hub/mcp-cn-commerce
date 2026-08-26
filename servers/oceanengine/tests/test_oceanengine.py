@@ -1576,3 +1576,102 @@ class TestPaginationCapping:
 
         actual_page_size = mock_request.call_args[1]["params"]["page_size"]
         assert actual_page_size == 100, f"{tool_name} passed page_size={actual_page_size}, expected 100"
+
+
+# ── FR-015: tools pointing at non-existent / retired endpoints ───────────────
+#
+# 官方文档清单比对结论：本 server 原有 18 个 endpoint 中只有 2 个真实存在且在维护。
+# 其余 16 个工具已取消 @server.tool() 注册（函数体保留作为重建意图记录）。这些断言的
+# 作用是防回归 —— 任何把它们重新注册的改动都会在这里变红，而不是等到线上才发现我们又
+# 在对外声明不存在的能力。逐条清单见 docs/platforms.md「下架工具清单（FR-015）」。
+
+# endpoint 存在且在维护 → 保持注册
+_OCEANENGINE_LIVE_TOOLS = {
+    "get_advertiser_info",  # 2/advertiser/info/
+    "get_account_balance",  # 2/advertiser/fund/get/
+}
+
+# 已被官方下线（附公告日期）
+_OCEANENGINE_RETIRED_TOOLS = {
+    "list_ads": "2/ad/get/",  # 2024-05-06
+    "list_campaigns": "2/campaign/get/",  # 2024-05-06
+    "get_ad_detail_report": "2/report/ad/get/",  # 2024-05-06
+    "get_audience_report": "2/report/audience/",  # 2024-05-06
+    "get_creative_report": "2/report/creative/get/",  # 2024-05-06
+    "get_campaign_report": "2/report/advertiser/get/",  # 2025-08-31
+}
+
+# 官方文档查无此接口（零命中，非下线）
+_OCEANENGINE_FABRICATED_TOOLS = {
+    "get_ad_detail": "2/ad/read/",
+    "get_campaign_detail": "2/campaign/read/",
+    "list_audience_packages": "2/dmp/audience/list/",
+    "list_materials": "2/material/list/",
+    "get_qianchuan_campaign_list": "2/qianchuan/campaign/list/get/",
+    "get_qianchuan_report": "2/qianchuan/report/ad/get/",
+    "get_star_report": "2/star/report/",  # 前缀，非接口
+    "list_star_tasks": "2/star/task/list/",
+    "get_bid_suggestion": "2/tools/bid_suggest/",
+    "get_diagnosis": "2/tools/diagnosis/",  # 前缀，非接口
+}
+
+_OCEANENGINE_UNREGISTERED_TOOLS = {
+    **_OCEANENGINE_RETIRED_TOOLS,
+    **_OCEANENGINE_FABRICATED_TOOLS,
+}
+
+# register_common_tools() 注册的通用运维工具 —— 不依赖平台 endpoint，不受 FR-015 影响。
+_COMMON_TOOLS = {"get_metrics", "get_traces", "get_alerts", "export_data"}
+
+
+class TestFR015Unregistration:
+    """The 16 dead-endpoint tools must not be exposed over MCP."""
+
+    def test_audit_lists_cover_all_18_endpoints(self):
+        """Guard the guard: 2 live + 16 unregistered = the audited 18 endpoints."""
+        assert len(_OCEANENGINE_LIVE_TOOLS) == 2
+        assert len(_OCEANENGINE_UNREGISTERED_TOOLS) == 16
+        assert not _OCEANENGINE_LIVE_TOOLS & set(_OCEANENGINE_UNREGISTERED_TOOLS)
+
+    @pytest.mark.asyncio
+    async def test_registered_tools_are_exactly_live_plus_common(self):
+        """list_tools() exposes only the 2 real endpoints + 4 common ops tools."""
+        from servers.oceanengine.server import server as mcp_server
+
+        names = {tool.name for tool in await mcp_server.list_tools()}
+        assert names == _OCEANENGINE_LIVE_TOOLS | _COMMON_TOOLS
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tool_name", sorted(_OCEANENGINE_UNREGISTERED_TOOLS))
+    async def test_dead_endpoint_tool_is_not_registered(self, tool_name):
+        """Each dead-endpoint tool is absent from the MCP tool registry."""
+        from servers.oceanengine.server import server as mcp_server
+
+        names = {tool.name for tool in await mcp_server.list_tools()}
+        endpoint = _OCEANENGINE_UNREGISTERED_TOOLS[tool_name]
+        assert tool_name not in names, f"{tool_name} still exposed; its endpoint {endpoint} does not exist"
+
+    @pytest.mark.parametrize("tool_name", sorted(_OCEANENGINE_UNREGISTERED_TOOLS))
+    def test_dead_endpoint_function_body_is_retained(self, tool_name):
+        """The function itself survives: it is the record of rebuild intent."""
+        import importlib
+
+        module = importlib.import_module("servers.oceanengine.server")
+        func = getattr(module, tool_name, None)
+        assert func is not None, f"{tool_name} was deleted; FR-015 asks for unregistration, not deletion"
+        assert func.__doc__, f"{tool_name} lost its docstring"
+
+    @pytest.mark.parametrize("tool_name", sorted(_OCEANENGINE_UNREGISTERED_TOOLS))
+    def test_dead_endpoint_function_carries_reason_comment(self, tool_name):
+        """A `# 下架（FR-015）` comment above the def states why and what replaces it."""
+        import importlib
+
+        module = importlib.import_module("servers.oceanengine.server")
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        head = source.split(f"async def {tool_name}(")[0]
+        # The nearest preceding comment block must be the FR-015 notice.
+        preceding = [line for line in head.rstrip().split("\n") if line.startswith("#")]
+        assert preceding, f"no comment block above {tool_name}"
+        assert any(
+            "下架（FR-015）" in line for line in preceding[-6:]
+        ), f"{tool_name} is missing its FR-015 reason comment"

@@ -56,9 +56,12 @@ _DUMMY_ENV = {
 # table when tools are added or removed — drift here also means the README
 # tool table is stale.
 EXPECTED_TOOLS = {
-    "oceanengine": 22,
-    "doudian": 24,
-    "jd": 19,
+    # FR-015：巨量引擎 / 抖店 / 京东的平台工具已全部或大部分下架（指向不存在或已下线的
+    # endpoint），只剩 4 个通用运维工具 + 巨量的 2 个真实存在的 endpoint。逐条清单见
+    # docs/platforms.md「下架工具清单（FR-015）」。
+    "oceanengine": 6,
+    "doudian": 4,
+    "jd": 4,
     "taobao": 17,
     # 以下三个平台的工具数因移除「平台不对三方开放」的能力而下降，
     # 详见 docs/api-contracts/<platform>.md 与 kitty-specs 的 mission spec §2。

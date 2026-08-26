@@ -28,6 +28,7 @@ owned_files:
 - servers/weixin_store/server.py
 - tests/contract/test_wire_weixin_store.py
 - docs/api-contracts/weixin_store.md
+- servers/weixin_store/tests/test_weixin_store.py
 tags: []
 ---
 

@@ -27,6 +27,7 @@ owned_files:
 - servers/pinduoduo/server.py
 - tests/contract/test_wire_pinduoduo.py
 - docs/api-contracts/pinduoduo.md
+- servers/pinduoduo/tests/test_pinduoduo.py
 tags: []
 ---
 

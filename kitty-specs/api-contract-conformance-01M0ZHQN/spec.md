@@ -46,6 +46,8 @@
 
 - 所有平台测试都 mock 在 `_call` / `_request` / client 层，系统参数的构造从未被执行
 - `tests/test_integration.py:128-132` 是全仓唯一检查出网参数的测试，它断言巨量请求**必须包含** `sign`、`sign_method`、`app_key`、`access_token` 参数 —— 而巨量的官方契约是 token 走 HTTP header 且**完全不签名**。该测试把错误契约钉成了"正确"，任何修复都会先撞红它。
+- 同文件 :135-153 又把 `error_response` 信封钉成巨量的错误契约（官方是 `code != 0` + `message`）。因此需要处理的不止那 5 行，而是整个 oceanengine 契约块。
+- 另有一批测试直接编码了错误契约，会在对应平台修复时变红，且**必须纳入相应 WP 的 owned_files**：`servers/kuaishou/tests/test_kuaishou.py`（:445/:506/:536/:567 硬编码虚构路径 `/open/api/*`）、`servers/xiaohongshu/tests/test_xiaohongshu.py`（断言 `_call("GET", "/api/order/list", ...)`）、`tests/test_api_compatibility.py`（:650 断言抖店签名 32 位小写、:660+ 断言快手签名大写）、`scripts/smoke_install.py`（硬编码各 server 工具数，而 install-smoke 在 NFR-003 验收清单内）。
 
 ### 2.5 各平台契约差异汇总
 
@@ -183,4 +185,10 @@ WP01 与 WP02 是其余全部 WP 的前置：WP01 提供验收手段，WP02 提�
 | 巨量 refresh_token 有效期 | 正文 30 天 vs 返回示例 7 天 | 读运行时 `expires_in`，不硬编码 |
 | 微信小店「无签名」 | 官方未明文，为参数表穷举推断 | 标注为推断 |
 
-另有一项跨平台约束：**签名集合必须恒等于发送集合减去 `sign`**。当前实现最大的结构性问题正是二者不一致（例如京东发 `format` 但不入签、抖店业务参数在 body 而签名用另一份数据）。框架应对此提供通用断言。
+另有一项跨平台约束：**签名集合必须恒等于发送集合减去 `sign`**。当前实现最大的结构性问题正是二者不一致，已核实的三处：
+
+1. **`sign_method` 全平台发而不签** —— `cn_commerce_base.py:2900` 先算 `sign`、:2901 才补 `sign_method`，而 `_sign`（:3010）又显式排除它。对淘宝这类「除 `sign` 外全部参数入签」的平台，这本身就是验签失败源。
+2. **抖店签名与发送用两份不同的序列化** —— 签的是 sorted-compact JSON，body 发的是原始 dict 经 httpx 默认序列化。
+3. **京东业务参数在 POST body 而不入签** —— 官方要求业务参数经 `360buy_param_json` 参与签名。（注意：`format` 是**签了但官方验证向量里没有它**，与"发而不签"方向相反。）
+
+框架应对此提供通用断言。

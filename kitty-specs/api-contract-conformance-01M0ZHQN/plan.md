@@ -20,7 +20,7 @@
 **Performance Goals**: 无吞吐目标（只读查询型）。但需尊重各平台限流：抖店应用维度 20 QPS、小红书应用 100 QPS + method 200 QPS、拼多多解密接口云外 1 次/10 秒
 **Constraints**:
 - CI 不得依赖真实凭证或外部网络（NFR-001）
-- **签名参与集合必须恒等于实际发送集合减去 `sign`** —— 当前实现最大的结构性缺陷正是二者不一致
+- **签名参与集合必须恒等于实际发送集合减去 `sign`** —— 当前实现最大的结构性缺陷正是二者不一致（已核实：`sign_method` 全平台发而不签；抖店签名与 body 用两份不同序列化；京东业务参数在 body 不入签）
 - 所有契约结论必须可追溯到官方出处 URL，并区分官方明文与推断（NFR-002）
 - 不得回归现有 CI（NFR-003）
 **Scale/Scope**: 8 个平台 server、147 个工具、`shared/cn_commerce_base.py` 约 7000 行；本 mission 触及其中的 `_request` / `_sign` / 错误解析路径与 8 个 server 的请求组装
@@ -139,7 +139,7 @@ tests/
 - **Relevant requirements**: FR-004, FR-008, FR-009, FR-010, FR-012
 - **Affected surfaces**: `shared/cn_commerce_base.py:2928-2932`、各 server 的响应处理
 - **Sequencing/depends-on**: IC-02
-- **Risks**: 现状是所有平台都按 `error_response.{code,msg}` 解析，导致巨量（`code`/`message`）、京东（`code`/`zh_desc`/`en_desc`）的错误信息全部退化成 `"unknown"`，而快手（`result==1`）和小红书（`error_code==0 && success==true`）的失败**根本检测不到**、还会把错误信封当业务数据返回给模型。后者是最危险的一类 —— 模型会拿到看似成功的垃圾数据。微信小店额外需要覆盖 HTTP 403（IP 白名单，不走 errcode）。
+- **Risks**: 现状是走 base `_request` 的平台一律按 `error_response.{code,msg}` 解析（抖店按 `code != 10000`、微信按 `errcode`，各自独立），导致巨量（`code`/`message`）、京东（`code`/`zh_desc`/`en_desc`）的错误信息全部退化成 `"unknown"`，而快手（`result==1`）和小红书（`error_code==0 && success==true`）的失败**根本检测不到**、还会把错误信封当业务数据返回给模型。后者是最危险的一类 —— 模型会拿到看似成功的垃圾数据。微信小店额外需要覆盖 HTTP 403（IP 白名单，不走 errcode）。
 
 ### IC-07 — endpoint 与 method 寻址
 

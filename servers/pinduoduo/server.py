@@ -1,9 +1,17 @@
 """Pinduoduo (拼多多) MCP server — provides tools for reading merchant orders,
-products, shop info, after-sale, logistics, reviews, marketing, and affiliate data.
+products, shop info, after-sale, logistics and marketing data.
 
 Auth via env vars: PINDUODUO_CLIENT_ID, PINDUODUO_CLIENT_SECRET, PINDUODUO_ACCESS_TOKEN.
 API endpoint: https://gw-api.pinduoduo.com/api/router
 Sign method: MD5 (params sorted, secret+string+secret → MD5 → uppercase)
+
+Contract declaration (official sources, open items, platform-side constraints):
+``docs/api-contracts/pinduoduo.md``.
+
+Scope note: this server speaks the *merchant* (商家 / ISV) API only. Affiliate
+selection (多多进宝 / 多多客, ``pdd.ddk.*``) needs a different developer
+identity and app type, so it cannot share this connector's access_token — see
+the contract declaration for details.
 """
 
 from __future__ import annotations
@@ -47,7 +55,11 @@ class PinduoduoMCP(CommerceMCPBase):
         params: dict[str, str] = {
             "type": api_type,
             "client_id": self.app_key,
-            "timestamp": str(int(time.time() * 1000)),
+            # UNIX seconds, 10 digits. The official parameter table says
+            # 「UNIX时间（秒）」 with example 1480411125; tolerance is 10 minutes,
+            # and pdd.time.get is offered for clock alignment. Milliseconds land
+            # ~45000 years in the future and are rejected outright.
+            "timestamp": str(int(time.time())),
             "data_type": "JSON",
         }
         if self.access_token:
@@ -182,26 +194,10 @@ async def get_product_detail(goods_id: str) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
-async def search_products(
-    keyword: str,
-    page: int = 1,
-    page_size: int = 20,
-) -> str:
-    """Search products by keyword.
-
-    Args:
-        keyword: Search keyword for product name or description.
-        page: Page number, starting from 1.
-        page_size: Number of products per page (max 100).
-    """
-    biz_params = {
-        "keyword": keyword,
-        "page": str(page),
-        "page_size": str(page_size),
-    }
-    result = await pdd._call("pdd.goods.search", biz_params)
-    return json.dumps(result, ensure_ascii=False, indent=2)
+# NOTE: no platform-wide product search tool exists here on purpose. The
+# merchant API has no "search all of Pinduoduo" capability — pdd.goods.list.get
+# lists only the authenticated merchant's own goods. See the "Removed tools"
+# section of docs/api-contracts/pinduoduo.md.
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -218,6 +214,10 @@ async def get_refund_list(
 ) -> str:
     """Query refund (after-sale) list by time range.
 
+    Backed by the incremental after-sale interface; its business parameter names
+    are not yet confirmed against the official table (open item in
+    docs/api-contracts/pinduoduo.md).
+
     Args:
         start_time: Query start time, e.g. "2024-01-01 00:00:00"
         end_time: Query end time, e.g. "2024-01-31 23:59:59"
@@ -230,7 +230,7 @@ async def get_refund_list(
         "page": str(page),
         "page_size": str(page_size),
     }
-    result = await pdd._call("pdd.refund.list.get", biz_params)
+    result = await pdd._call("pdd.refund.list.increment.get", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
@@ -255,11 +255,15 @@ async def get_refund_detail(refund_id: str) -> str:
 async def get_logistics_tracking(order_sn: str) -> str:
     """Get logistics tracking information for an order.
 
+    The business parameter names of the order-trace interface are not yet
+    confirmed against the official table (open item in
+    docs/api-contracts/pinduoduo.md).
+
     Args:
         order_sn: The PDD order serial number (e.g. "231215-1234567890123").
     """
     biz_params = {"order_sn": order_sn}
-    result = await pdd._call("pdd.logistics.trace.query", biz_params)
+    result = await pdd._call("pdd.logistics.ordertrace.get", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
@@ -270,31 +274,10 @@ async def list_logistics_companies() -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 评价 (Reviews)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-@mcp.tool()
-async def get_review_list(
-    goods_id: str,
-    page: int = 1,
-    page_size: int = 20,
-) -> str:
-    """Query product review (comment) list by goods ID.
-
-    Args:
-        goods_id: The PDD goods ID (e.g. "123456789").
-        page: Page number, starting from 1.
-        page_size: Number of reviews per page (max 100).
-    """
-    biz_params = {
-        "goods_id": goods_id,
-        "page": str(page),
-        "page_size": str(page_size),
-    }
-    result = await pdd._call("pdd.goods.comments.get", biz_params)
-    return json.dumps(result, ensure_ascii=False, indent=2)
+# NOTE: no product-review tool exists here on purpose. Pinduoduo has never
+# opened a review/comment API to third parties: zero hits for
+# comment/review/评价/评论 across the 493 live interfaces and 344 announcements.
+# See the "Removed tools" section of docs/api-contracts/pinduoduo.md.
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -319,7 +302,12 @@ async def list_promotions(
     page: int = 1,
     page_size: int = 20,
 ) -> str:
-    """List promotion activities for the authenticated shop.
+    """List the authenticated shop's coupon (店铺券) batches.
+
+    Pinduoduo has no single "all promotions" interface; shop-level coupon
+    batches are the closest published equivalent. The business parameter names
+    for this interface are not yet confirmed against the official table — see
+    the open items in docs/api-contracts/pinduoduo.md.
 
     Args:
         page: Page number, starting from 1.
@@ -329,35 +317,15 @@ async def list_promotions(
         "page": str(page),
         "page_size": str(page_size),
     }
-    result = await pdd._call("pdd.promotion.list.get", biz_params)
+    result = await pdd._call("pdd.promotion.merchant.coupon.list.get", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 多多客 (Affiliate) — 只读
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-@mcp.tool()
-async def search_affiliate_goods(
-    keyword: str,
-    page: int = 1,
-    page_size: int = 20,
-) -> str:
-    """Search affiliate (多多客) goods by keyword.
-
-    Args:
-        keyword: Search keyword for affiliate goods.
-        page: Page number, starting from 1.
-        page_size: Number of results per page (max 100).
-    """
-    biz_params = {
-        "keyword": keyword,
-        "page": str(page),
-        "page_size": str(page_size),
-    }
-    result = await pdd._call("pdd.ddk.goods.search", biz_params)
-    return json.dumps(result, ensure_ascii=False, indent=2)
+# NOTE: affiliate (多多进宝 / 多多客, pdd.ddk.*) selection tools were moved out of
+# this server. They belong to a separate identity system — 推手 role +
+# 多多客联盟类 app type + client_id ↔ 多多进宝账号 binding — so a merchant ISV
+# access_token cannot carry that permission. See the "Moved out" section of
+# docs/api-contracts/pinduoduo.md.
 
 
 # ── Cross-platform operational tools (get_metrics/get_traces/get_alerts/export_data) ──

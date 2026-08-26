@@ -14,6 +14,7 @@ os.environ.setdefault("PINDUODUO_CLIENT_ID", "test_client_id")
 os.environ.setdefault("PINDUODUO_CLIENT_SECRET", "test_client_secret")
 os.environ.setdefault("PINDUODUO_ACCESS_TOKEN", "test_access_token")
 
+from servers.pinduoduo import server as pdd_server
 from servers.pinduoduo.server import (
     get_logistics_tracking,
     get_order_detail,
@@ -22,13 +23,10 @@ from servers.pinduoduo.server import (
     get_product_list,
     get_refund_detail,
     get_refund_list,
-    get_review_list,
     get_shop_info,
     list_logistics_companies,
     list_promotions,
     pdd,
-    search_affiliate_goods,
-    search_products,
 )
 from shared.cn_commerce_base import CommerceAPIError
 
@@ -179,31 +177,6 @@ def product_detail_payload() -> dict:
     }
 
 
-@pytest.fixture
-def search_products_payload() -> dict:
-    return {
-        "goods_search_response": {
-            "goods_list": [
-                {
-                    "goods_id": "987654321",
-                    "goods_name": "无线蓝牙耳机 Pro 主动降噪",
-                    "min_price": "99.00",
-                    "sold_count": 1234,
-                    "mall_name": "数码旗舰店",
-                },
-                {
-                    "goods_id": "987654399",
-                    "goods_name": "无线蓝牙耳机 青春版",
-                    "min_price": "59.00",
-                    "sold_count": 5678,
-                    "mall_name": "耳机专营店",
-                },
-            ],
-            "total_count": 2,
-        },
-    }
-
-
 # ── Fixtures: After-Sale ────────────────────────────────────────────────────
 
 
@@ -265,7 +238,7 @@ def refund_detail_payload() -> dict:
 @pytest.fixture
 def logistics_tracking_payload() -> dict:
     return {
-        "logistics_trace_query_response": {
+        "logistics_ordertrace_get_response": {
             "logistics_info": {
                 "order_sn": "231215-1234567890123",
                 "logistics_no": "PDD0001234567890",
@@ -297,38 +270,6 @@ def logistics_companies_payload() -> dict:
     }
 
 
-# ── Fixtures: Reviews ───────────────────────────────────────────────────────
-
-
-@pytest.fixture
-def review_list_payload() -> dict:
-    return {
-        "goods_comments_get_response": {
-            "comment_list": [
-                {
-                    "comment_id": "CM00000001",
-                    "goods_id": "987654321",
-                    "content": "音质很好，佩戴舒适，推荐购买！",
-                    "score": 5,
-                    "create_time": "2024-01-20 12:00:00",
-                    "user_name": "匿***户",
-                    "reply": "感谢您的支持和认可！",
-                },
-                {
-                    "comment_id": "CM00000002",
-                    "goods_id": "987654321",
-                    "content": "续航还不错，但是蓝牙偶尔会断连",
-                    "score": 3,
-                    "create_time": "2024-01-18 09:30:00",
-                    "user_name": "匿***户",
-                    "reply": "",
-                },
-            ],
-            "total_count": 2,
-        },
-    }
-
-
 # ── Fixtures: Shop ──────────────────────────────────────────────────────────
 
 
@@ -354,67 +295,14 @@ def shop_info_payload() -> dict:
 
 @pytest.fixture
 def promotion_list_payload() -> dict:
-    return {
-        "promotion_list_get_response": {
-            "promotion_list": [
-                {
-                    "promotion_id": "PM00000001",
-                    "promotion_name": "新年大促满减",
-                    "promotion_type": "满减",
-                    "status": 1,
-                    "start_time": "2024-01-01 00:00:00",
-                    "end_time": "2024-01-31 23:59:59",
-                    "description": "满199减30，满399减60",
-                },
-                {
-                    "promotion_id": "PM00000002",
-                    "promotion_name": "限时秒杀",
-                    "promotion_type": "秒杀",
-                    "status": 1,
-                    "start_time": "2024-01-20 10:00:00",
-                    "end_time": "2024-01-20 12:00:00",
-                    "description": "无线蓝牙耳机限时秒杀99元",
-                },
-            ],
-            "total_count": 2,
-        },
-    }
+    """Envelope-only fixture for the shop-coupon-batch interface.
 
-
-# ── Fixtures: Affiliate ─────────────────────────────────────────────────────
-
-
-@pytest.fixture
-def affiliate_goods_payload() -> dict:
-    return {
-        "ddk_goods_search_response": {
-            "goods_list": [
-                {
-                    "goods_id": "987654321",
-                    "goods_name": "无线蓝牙耳机 Pro 主动降噪",
-                    "min_price": "99.00",
-                    "coupon_price": "79.00",
-                    "coupon_discount": "20.00",
-                    "commission_rate": 15,
-                    "commission_amount": "11.85",
-                    "sold_count": 1234,
-                    "mall_name": "数码旗舰店",
-                },
-                {
-                    "goods_id": "987654399",
-                    "goods_name": "无线蓝牙耳机 青春版",
-                    "min_price": "59.00",
-                    "coupon_price": "49.00",
-                    "coupon_discount": "10.00",
-                    "commission_rate": 10,
-                    "commission_amount": "4.90",
-                    "sold_count": 5678,
-                    "mall_name": "耳机专营店",
-                },
-            ],
-            "total_count": 2,
-        },
-    }
+    No official response schema for pdd.promotion.merchant.coupon.list.get was
+    recovered, so this fixture deliberately carries no invented business fields
+    (spec.md §8: official gaps must not be filled by speculation). The test
+    asserts pass-through and the API type only.
+    """
+    return {"promotion_merchant_coupon_list_get_response": {"total": 0}}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -517,6 +405,68 @@ async def test_get_order_detail_returns_single_order_with_all_fields(mock_call, 
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Tests: contact-field change of 2025-11-07
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Since 2025-11-07 the buyer phone is returned only in ``contact_mobile``;
+# ``receiver_phone`` / ``contact_phone`` are no longer included, and for those
+# orders empty ``receiver_name`` / ``receiver_address`` is normal rather than an
+# error. Order reads must survive that shape. See docs/api-contracts/pinduoduo.md.
+
+
+@pytest.mark.asyncio
+async def test_order_detail_tolerates_empty_receiver_fields(mock_call):
+    """An order whose receiver name/address are empty must still read cleanly."""
+    mock_call.return_value = {
+        "order_information_get_response": {
+            "order_info": {
+                "order_sn": "231215-1234567890123",
+                "order_status": 2,
+                "order_amount": "99.00",
+                "receiver_name": "",
+                "receiver_address": "",
+                "contact_mobile": "$Xk3f2==$",
+            },
+        },
+    }
+
+    result = json.loads(await get_order_detail(order_sn="231215-1234567890123"))
+    info = result["order_information_get_response"]["order_info"]
+
+    assert info["receiver_name"] == ""
+    assert info["receiver_address"] == ""
+    assert "receiver_phone" not in info
+    assert "contact_phone" not in info
+    assert info["contact_mobile"] == "$Xk3f2==$"
+
+
+@pytest.mark.asyncio
+async def test_order_list_tolerates_empty_receiver_fields(mock_call):
+    """The list endpoint returns the same post-2025-11-07 shape."""
+    mock_call.return_value = {
+        "order_list_get_response": {
+            "order_list": [
+                {
+                    "order_sn": "231215-1234567890123",
+                    "order_status": 5,
+                    "receiver_name": "",
+                    "receiver_address": "",
+                    "contact_mobile": "$Xk3f2==$",
+                },
+            ],
+            "total_count": 1,
+        },
+    }
+
+    result = json.loads(await get_order_list(start_time="2024-01-01 00:00:00", end_time="2024-01-31 23:59:59"))
+    order = result["order_list_get_response"]["order_list"][0]
+
+    assert order["receiver_name"] == ""
+    assert order["receiver_address"] == ""
+    assert "receiver_phone" not in order
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Tests: get_product_list
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -578,34 +528,6 @@ async def test_get_product_detail_returns_full_product_info(mock_call, product_d
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Tests: search_products
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.asyncio
-async def test_search_products_returns_matching_results(mock_call, search_products_payload):
-    """search_products should return goods matching the search keyword."""
-    mock_call.return_value = search_products_payload
-
-    result_json = await search_products(keyword="蓝牙耳机")
-    result = json.loads(result_json)
-
-    goods = result["goods_search_response"]["goods_list"]
-    assert len(goods) == 2
-
-    for g in goods:
-        assert "goods_id" in g
-        assert "goods_name" in g
-        assert "min_price" in g
-        assert "mall_name" in g
-
-    mock_call.assert_called_once_with(
-        "pdd.goods.search",
-        {"keyword": "蓝牙耳机", "page": "1", "page_size": "20"},
-    )
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # Tests: get_refund_list
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -633,7 +555,7 @@ async def test_get_refund_list_returns_refunds_with_expected_fields(mock_call, r
         assert "reason" in r
 
     mock_call.assert_called_once_with(
-        "pdd.refund.list.get",
+        "pdd.refund.list.increment.get",
         {
             "start_created_at": "2024-01-01 00:00:00",
             "end_created_at": "2024-01-31 23:59:59",
@@ -686,7 +608,7 @@ async def test_get_logistics_tracking_returns_tracking_nodes(mock_call, logistic
     result_json = await get_logistics_tracking(order_sn="231215-1234567890123")
     result = json.loads(result_json)
 
-    logistics = result["logistics_trace_query_response"]["logistics_info"]
+    logistics = result["logistics_ordertrace_get_response"]["logistics_info"]
     assert logistics["order_sn"] == "231215-1234567890123"
     assert logistics["logistics_no"] == "PDD0001234567890"
     assert logistics["company"] == "中通快递"
@@ -696,7 +618,7 @@ async def test_get_logistics_tracking_returns_tracking_nodes(mock_call, logistic
     assert logistics["nodes"][0]["desc"] == "您的快递已由本人签收"
 
     mock_call.assert_called_once_with(
-        "pdd.logistics.trace.query",
+        "pdd.logistics.ordertrace.get",
         {"order_sn": "231215-1234567890123"},
     )
 
@@ -724,36 +646,6 @@ async def test_list_logistics_companies_returns_companies(mock_call, logistics_c
     assert companies[0]["company_name"] == "中通快递"
 
     mock_call.assert_called_once_with("pdd.logistics.companies.get", {})
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Tests: get_review_list
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.asyncio
-async def test_get_review_list_returns_reviews_with_expected_fields(mock_call, review_list_payload):
-    """get_review_list should return reviews with content, score, and user info."""
-    mock_call.return_value = review_list_payload
-
-    result_json = await get_review_list(goods_id="987654321")
-    result = json.loads(result_json)
-
-    comments = result["goods_comments_get_response"]["comment_list"]
-    assert len(comments) == 2
-
-    for c in comments:
-        assert "comment_id" in c
-        assert "goods_id" in c
-        assert "content" in c
-        assert "score" in c
-        assert "create_time" in c
-        assert "user_name" in c
-
-    mock_call.assert_called_once_with(
-        "pdd.goods.comments.get",
-        {"goods_id": "987654321", "page": "1", "page_size": "20"},
-    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -787,59 +679,45 @@ async def test_get_shop_info_returns_shop_details(mock_call, shop_info_payload):
 
 
 @pytest.mark.asyncio
-async def test_list_promotions_returns_promotions_with_expected_fields(mock_call, promotion_list_payload):
-    """list_promotions should return promotion activities with timing and type."""
+async def test_list_promotions_calls_shop_coupon_batch_interface(mock_call, promotion_list_payload):
+    """list_promotions should pass the response through and hit the coupon-batch type.
+
+    Field-level assertions are deliberately absent: no official response schema
+    for this interface was recovered, and inventing one would re-create the
+    fabricated-contract defect this mission exists to remove (spec.md §8).
+    """
     mock_call.return_value = promotion_list_payload
 
-    result_json = await list_promotions()
-    result = json.loads(result_json)
+    result = json.loads(await list_promotions())
 
-    promos = result["promotion_list_get_response"]["promotion_list"]
-    assert len(promos) == 2
-
-    for p in promos:
-        assert "promotion_id" in p
-        assert "promotion_name" in p
-        assert "promotion_type" in p
-        assert "status" in p
-        assert "start_time" in p
-        assert "end_time" in p
+    assert result == promotion_list_payload
 
     mock_call.assert_called_once_with(
-        "pdd.promotion.list.get",
+        "pdd.promotion.merchant.coupon.list.get",
         {"page": "1", "page_size": "20"},
     )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Tests: search_affiliate_goods
+# Tests: removed / moved-out capabilities stay gone
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.asyncio
-async def test_search_affiliate_goods_returns_goods_with_commission(mock_call, affiliate_goods_payload):
-    """search_affiliate_goods should return affiliate goods with commission info."""
-    mock_call.return_value = affiliate_goods_payload
+@pytest.mark.parametrize(
+    ("tool_name", "reason"),
+    [
+        ("search_products", "商家侧无全站商品搜索能力；goods.list.get 只列本店商品"),
+        ("get_review_list", "拼多多从未对三方开放评价/评论接口"),
+        ("search_affiliate_goods", "多多进宝属独立身份体系，商家 access_token 拿不到该权限"),
+    ],
+)
+def test_unavailable_capability_is_not_re_registered(tool_name: str, reason: str) -> None:
+    """These tools were removed because the platform has no such capability.
 
-    result_json = await search_affiliate_goods(keyword="蓝牙耳机")
-    result = json.loads(result_json)
-
-    goods = result["ddk_goods_search_response"]["goods_list"]
-    assert len(goods) == 2
-
-    for g in goods:
-        assert "goods_id" in g
-        assert "goods_name" in g
-        assert "min_price" in g
-        assert "coupon_price" in g
-        assert "commission_rate" in g
-        assert "commission_amount" in g
-        assert "mall_name" in g
-
-    mock_call.assert_called_once_with(
-        "pdd.ddk.goods.search",
-        {"keyword": "蓝牙耳机", "page": "1", "page_size": "20"},
-    )
+    Re-adding one must be a deliberate act that also updates
+    docs/api-contracts/pinduoduo.md — not an accidental revert.
+    """
+    assert not hasattr(pdd_server, tool_name), f"{tool_name} came back — {reason}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -974,14 +852,13 @@ async def test_pagination_product_list_defaults(mock_call, product_list_payload)
 
 
 @pytest.mark.asyncio
-async def test_pagination_review_list_custom(mock_call, review_list_payload):
-    """Review list should support custom pagination."""
-    mock_call.return_value = review_list_payload
+async def test_pagination_promotion_list_custom(mock_call, promotion_list_payload):
+    """Promotion list should support custom pagination."""
+    mock_call.return_value = promotion_list_payload
 
-    await get_review_list(goods_id="987654321", page=2, page_size=10)
+    await list_promotions(page=2, page_size=10)
 
     _, biz_params = mock_call.call_args[0]
-    assert biz_params["goods_id"] == "987654321"
     assert biz_params["page"] == "2"
     assert biz_params["page_size"] == "10"
 
@@ -1050,15 +927,15 @@ async def test_call_passthrough_with_minimal_params(mock_call):
 
 
 @pytest.mark.asyncio
-async def test_call_passthrough_search_products(mock_call):
-    """Verify _call receives correct API type and params for search."""
+async def test_call_passthrough_logistics_tracking(mock_call):
+    """Verify _call receives the order-trace API type and params."""
     mock_call.return_value = _mock_response({"ok": True})
 
-    await search_products(keyword="耳机", page=2, page_size=10)
+    await get_logistics_tracking(order_sn="231215-1234567890123")
 
     api_type, biz_params = mock_call.call_args[0]
-    assert api_type == "pdd.goods.search"
-    assert biz_params == {"keyword": "耳机", "page": "2", "page_size": "10"}
+    assert api_type == "pdd.logistics.ordertrace.get"
+    assert biz_params == {"order_sn": "231215-1234567890123"}
 
 
 @pytest.mark.asyncio

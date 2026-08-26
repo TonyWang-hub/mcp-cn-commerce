@@ -177,7 +177,7 @@ def product_list_payload() -> dict:
 @pytest.fixture
 def product_detail_payload() -> dict:
     return {
-        "taobao_item_get_response": {
+        "taobao_item_seller_get_response": {
             "item": {
                 "num_iid": "10000001",
                 "title": "无线蓝牙耳机 Pro",
@@ -358,7 +358,7 @@ def review_list_payload() -> dict:
 @pytest.fixture
 def shop_info_payload() -> dict:
     return {
-        "taobao_shop_get_response": {
+        "taobao_shop_seller_get_response": {
             "shop": {
                 "sid": "12345678",
                 "cid": "50011972",
@@ -678,7 +678,7 @@ async def test_get_product_detail_returns_full_item_with_skus(mock_request, prod
     result_json = await get_product_detail(num_iid="10000001")
     result = json.loads(result_json)
 
-    item = result["taobao_item_get_response"]["item"]
+    item = result["taobao_item_seller_get_response"]["item"]
     assert item["num_iid"] == "10000001"
     assert item["title"] == "无线蓝牙耳机 Pro"
     assert item["nick"] == "seller_nick_001"
@@ -695,7 +695,7 @@ async def test_get_product_detail_returns_full_item_with_skus(mock_request, prod
 
     _, kwargs = mock_request.call_args
     params = kwargs["params"]
-    assert params["method"] == "taobao.item.get"
+    assert params["method"] == "taobao.item.seller.get"
     assert params["num_iid"] == "10000001"
 
 
@@ -845,7 +845,7 @@ async def test_get_shop_info_returns_shop_details(mock_request, shop_info_payloa
     result_json = await get_shop_info()
     result = json.loads(result_json)
 
-    shop = result["taobao_shop_get_response"]["shop"]
+    shop = result["taobao_shop_seller_get_response"]["shop"]
     assert shop["sid"] == "12345678"
     assert shop["nick"] == "seller_nick_001"
     assert shop["title"] == "XX官方旗舰店"
@@ -857,7 +857,7 @@ async def test_get_shop_info_returns_shop_details(mock_request, shop_info_payloa
 
     _, kwargs = mock_request.call_args
     params = kwargs["params"]
-    assert params["method"] == "taobao.shop.get"
+    assert params["method"] == "taobao.shop.seller.get"
 
 
 @pytest.mark.asyncio
@@ -870,7 +870,7 @@ async def test_get_shop_info_with_nick(mock_request, shop_info_payload):
     _, kwargs = mock_request.call_args
     params = kwargs["params"]
     assert params["nick"] == "other_nick"
-    assert params["method"] == "taobao.shop.get"
+    assert params["method"] == "taobao.shop.seller.get"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -1245,3 +1245,45 @@ async def test_request_seller_info_no_biz_params(mock_request):
     _, kwargs = mock_request.call_args
     params = kwargs["params"]
     assert params["method"] == "taobao.user.seller.get"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# Tests: use_has_next paging mode
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_order_list_requests_has_next_paging(mock_request, order_list_payload):
+    """Trade queries should opt into has_next paging, as the platform advises."""
+    mock_request.return_value = order_list_payload
+
+    await get_order_list(start_time="2024-01-01 00:00:00", end_time="2024-01-31 23:59:59")
+
+    _, kwargs = mock_request.call_args
+    assert kwargs["params"]["use_has_next"] == "true"
+
+
+@pytest.mark.asyncio
+async def test_increment_orders_requests_has_next_paging(mock_request, increment_orders_payload):
+    """The incremental trade query carries the same paging recommendation."""
+    mock_request.return_value = increment_orders_payload
+
+    await get_increment_orders(start_time="2024-01-01 00:00:00", end_time="2024-01-31 23:59:59")
+
+    _, kwargs = mock_request.call_args
+    assert kwargs["params"]["use_has_next"] == "true"
+
+
+@pytest.mark.asyncio
+async def test_non_trade_list_calls_omit_use_has_next(mock_request, product_list_payload):
+    """Only endpoints whose official parameter table declares use_has_next get it.
+
+    Sending it elsewhere would be an unverified guess, and it would also change
+    the signature base string for no documented reason.
+    """
+    mock_request.return_value = product_list_payload
+
+    await get_product_list()
+
+    _, kwargs = mock_request.call_args
+    assert "use_has_next" not in kwargs["params"]

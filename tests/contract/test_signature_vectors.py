@@ -25,8 +25,7 @@ def test_official_vector_reproduces(vector: SignatureVector) -> None:
         "add a branch here rather than loosening the assertion"
     )
     assert _md5_wrapped(vector.secret, vector.payload) == vector.expected, (
-        f"{vector.platform} signature disagrees with the platform's own worked "
-        f"example ({vector.source})"
+        f"{vector.platform} signature disagrees with the platform's own worked " f"example ({vector.source})"
     )
 
 

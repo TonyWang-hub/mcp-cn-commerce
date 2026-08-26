@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -118,15 +118,12 @@ def assert_signature_set_matches_sent():
     """
 
     def _assert(request: CapturedRequest, *, signed: set[str], sign_field: str = "sign") -> None:
-        sent = set(request.query) | (
-            set(request.body) if isinstance(request.body, dict) else set()
-        )
+        sent = set(request.query) | (set(request.body) if isinstance(request.body, dict) else set())
         expected = sent - {sign_field}
         missing = expected - signed
         extra = signed - expected
         assert not missing, (
-            f"sent but not signed: {sorted(missing)} — the platform will compute a "
-            "different signature than we did"
+            f"sent but not signed: {sorted(missing)} — the platform will compute a " "different signature than we did"
         )
         assert not extra, f"signed but not sent: {sorted(extra)}"
 

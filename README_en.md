@@ -75,7 +75,7 @@ This is the **first open-source MCP server suite for Chinese e-commerce business
 
 > **Phase 4** (exploratory): 闲鱼 (Xianyu), 美团 (Meituan), 饿了么 (Ele.me) — restricted APIs, awaiting policy clarity.
 >
-> **358 tests** across all 8 servers. CI runs on Python 3.11, 3.12, 3.13.
+> **1926 tests** passing, including a contract layer asserted against each platform's official documentation. CI runs on Python 3.11, 3.12, 3.13.
 
 ## Quick Start
 
@@ -264,17 +264,24 @@ See all templates: [`templates/`](templates/)
 
 ## Tools Summary
 
-| Server | Tools | Categories |
-|---|---|---|
-| oceanengine | 22 | Ads, Qianchuan, Star, Creative, Audience, Optimization |
-| doudian | 24 | Orders, Products, Refunds, Logistics, Reviews, Live, Traffic, Marketing, Billing, Shop |
-| jd | 19 | Orders, Products, After-Sale, Logistics, Reviews, Pricing, Inventory, Marketing, Shop |
-| taobao | 17 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Categories |
-| pinduoduo | 17 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Affiliate |
-| kuaishou | 16 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing |
-| xiaohongshu | 17 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Inventory, Finance |
-| weixin_store | 15 | Orders, Products, Refunds, Logistics, Shop, Marketing, Supply Chain, Categories |
-| **Total** | **147** | Platform tools + 4 shared operational tools each |
+| Server | Tools | Status | Coverage |
+|---|---|---|---|
+| taobao | 17 | ✅ Contract verified vs official docs | Orders, products, after-sale, logistics, reviews, shop, promotions, categories |
+| xiaohongshu | 16 | ✅ Contract verified vs official docs | Orders, products, after-sale, logistics, inventory, finance |
+| weixin_store | 15 | ✅ Contract verified vs official docs | Orders, products, after-sale, logistics, shop, coupons, dropship, categories |
+| pinduoduo | 14 | ✅ Contract verified vs official docs | Orders, products, after-sale, logistics, shop, promotions |
+| kuaishou | 13 | ✅ Contract verified vs official docs | Orders, products, after-sale, comments, shop, coupons |
+| oceanengine | 6 | ⚠️ Rebuild pending | Account info and balance only (the other 16 of 18 endpoints are retired or absent) |
+| doudian | 4 | ⚠️ Rebuild pending | No platform tools yet (all 20 endpoints unusable) |
+| jd | 4 | ⚠️ Rebuild pending | No platform tools yet (the `jd.pop.*` namespace does not exist) |
+| **Total** | **89** | | 57 platform tools + 4 shared operational tools per server |
+
+> **关于Tools的变化**：本项目对 8 个平台共 115 个 endpoint 做了逐个存在性审计
+> （依据各平台**官方文档清单**与**官方公告全文**，而非活体探测 —— 已下线的路由往往
+> 仍返回鉴权错误而非 404）。结果只有 45 个真实存在，其余为已下线或从未存在。
+> 指向不存在 endpoint 的工具已从注册中移除，而不是继续对外声明。
+> 逐工具的原因见 [`docs/platforms.md`](docs/platforms.md)，
+> 各平台契约与官方出处见 [`docs/api-contracts/`](docs/api-contracts/)。
 
 Every server also exposes **4 cross-platform operational tools** (counted above): `get_metrics`
 (per-endpoint latency / success / error stats), `get_traces` (recent request traces),

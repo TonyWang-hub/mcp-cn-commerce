@@ -22,7 +22,7 @@ import os
 import time
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from shared.cn_commerce_base import (
     CommerceAPIError,
@@ -35,7 +35,7 @@ from shared.cn_commerce_base import (
 
 logger = logging.getLogger(__name__)
 
-server = FastMCP("mcp-cn-doudian")
+server = MCPServer("mcp-cn-doudian")
 
 # ── Exceptions ──────────────────────────────────────────────
 

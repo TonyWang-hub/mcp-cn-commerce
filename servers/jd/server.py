@@ -12,7 +12,7 @@ import hmac
 import json
 import os
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from shared.cn_commerce_base import (
     CommerceMCPBase,
@@ -81,7 +81,7 @@ jd = _create_jd_client()
 
 # ── MCP server ─────────────────────────────────────────────────────────────
 
-mcp = FastMCP("mcp-cn-jd")
+mcp = MCPServer("mcp-cn-jd")
 
 
 @mcp.tool()

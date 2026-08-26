@@ -18,7 +18,7 @@ import time
 from typing import Any
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from shared.cn_commerce_base import (
     CommerceAPIError,
@@ -146,7 +146,7 @@ _wx = _create_weixin_store_client()
 
 # ── MCP server ────────────────────────────────────────────────────────────────
 
-mcp = FastMCP("mcp-cn-weixin-store")
+mcp = MCPServer("mcp-cn-weixin-store")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

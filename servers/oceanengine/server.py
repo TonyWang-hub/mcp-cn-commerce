@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from shared.cn_commerce_base import (
     CommerceMCPBase,
@@ -44,7 +44,7 @@ def _get_client() -> OceanEngine:
 # ── MCP Server ───────────────────────────────────────────
 
 
-server = FastMCP("mcp-cn-oceanengine")
+server = MCPServer("mcp-cn-oceanengine")
 
 
 # ── Helpers ──────────────────────────────────────────────

@@ -13,7 +13,7 @@ import os
 import time
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from shared.cn_commerce_base import (
     CommerceAPIError,
@@ -96,7 +96,7 @@ xhs = _create_xiaohongshu_client()
 
 # ── MCP server ─────────────────────────────────────────────────────────────────
 
-mcp = FastMCP("mcp-cn-xiaohongshu")
+mcp = MCPServer("mcp-cn-xiaohongshu")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

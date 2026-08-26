@@ -6986,7 +6986,7 @@ class AlertManager:
 
 
 def register_common_tools(mcp: Any, client: Any) -> None:
-    """Register cross-platform observability/data tools on a FastMCP server.
+    """Register cross-platform observability/data tools on an MCPServer.
 
     Every platform server gets the same operational tools without duplicating
     them. ``client`` may be a :class:`CommerceMCPBase` instance or a zero-arg
@@ -6997,7 +6997,7 @@ def register_common_tools(mcp: Any, client: Any) -> None:
     of any MCP framework import.
 
     Args:
-        mcp: A FastMCP instance exposing a ``tool()`` decorator.
+        mcp: An MCPServer instance exposing a ``tool()`` decorator.
         client: A ``CommerceMCPBase`` instance or a callable returning one.
     """
 

@@ -1193,7 +1193,8 @@ class TestWeixinStoreTokenCache:
         token_response.status_code = 200
 
         mock_http = AsyncMock()
-        mock_http.get.return_value = token_response
+        # POST /cgi-bin/stable_token — see docs/api-contracts/weixin_store.md §2.
+        mock_http.post.return_value = token_response
 
         with patch("httpx.AsyncClient") as mock_ctx:
             mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_http)
@@ -1206,7 +1207,8 @@ class TestWeixinStoreTokenCache:
         token2 = await client._ensure_token()
         assert token2 == "fetched_token_abc"
         # Only one HTTP call total (the first fetch)
-        assert mock_http.get.call_count == 1
+        assert mock_http.post.call_count == 1
+        assert mock_http.get.call_count == 0, "the legacy GET /cgi-bin/token path is retired"
 
     @pytest.mark.asyncio
     async def test_static_token_bypasses_fetch(self, wx_env):

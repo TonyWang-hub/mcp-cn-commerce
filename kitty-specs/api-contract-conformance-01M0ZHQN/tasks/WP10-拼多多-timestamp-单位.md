@@ -35,6 +35,29 @@ tags: []
 
 实现 FR-011。`servers/pinduoduo/server.py` 有自己的 `_call`。**拼多多只有一处不符。**
 
+## endpoint 修正（审计新增，先做这一步）
+
+13 个里 **8 个存在**，5 个不存在（均为**从未存在**而非下线 —— 名字在 344 条 / 8 年公告正文中 0 命中且不在 493 个现行接口清单中）。
+
+**可改名的 3 个**：
+
+| 我们调用的 | 官方正确的 |
+|---|---|
+| `pdd.logistics.trace.query` | **`pdd.logistics.ordertrace.get`** |
+| `pdd.refund.list.get` | **`pdd.refund.list.increment.get`**（此名 2018-04-09 即已存在） |
+| `pdd.promotion.list.get` | 无裸 `list.get`；按语义选 `pdd.promotion.goods.coupon.list.get` / `merchant.coupon.list.get` / `limited.discount.list.get` —— **需先定"promotion list"指优惠券批次还是限时限量购** |
+
+**需删除的 2 个工具**：`pdd.goods.search`（**商家侧没有"搜全站商品"能力**，`goods.list.get` 只能列自己店铺的）、`pdd.goods.comments.get`（493 个现行接口 `comment`/`review`/`评价`/`评论` 零命中，8 年公告零命中，拼多多从未开放评价接口）。
+
+**需移出的 1 个**：`pdd.ddk.goods.search` 属**多多客（多多进宝）联盟体系**，归分类 12 而非商品 API。需要完全独立的开发者身份（角色=多多进宝推手、应用类型=多多客联盟类应用、额外做 client_id ↔ 多多进宝账号绑定），**走商家 ISV 授权的 access_token 拿不到该权限**；业务语义是"选品赚佣金"而非"管理我的店"。应独立成 connector 或移除。
+
+代码位置：`servers/pinduoduo/server.py` 行 203（goods.search）、233（refund.list.get）、262（logistics.trace.query）、296（goods.comments.get）、332（promotion.list.get）；`servers/pinduoduo/tests/test_pinduoduo.py` 同样引用了这些假 type。
+
+### 两条平台侧约束需记入契约声明
+
+1. **云外解密限额**：`pdd.open.decrypt.batch` 自 **2026-05-12** 起云外调用限 **1次/10秒 + 单应用单日 100 次**，官方明文"请勿将云外解密作为正式业务场景使用"。云外连接器每日仅能解密 100 条订单收件人信息。**只读经营分析不需要明文**，本 WP 不实现解密。
+2. **字段变更**：2025-11-07 起联系人手机号只在 `contact_mobile` 返回，`receiver_phone`/`contact_phone` 不再包含，且该类订单 `receiver_name`/`receiver_address` 返回空值属正常 —— 解析逻辑要能接受空值。
+
 ## 官方契约 vs 现状
 
 | 项 | 官方 | 现状 |

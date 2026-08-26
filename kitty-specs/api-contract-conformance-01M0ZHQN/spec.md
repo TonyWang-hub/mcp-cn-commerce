@@ -2,11 +2,16 @@
 
 ## 1. 目的（TL;DR）
 
-本仓库对外声明支持 8 个中国电商平台、147 个只读工具、358 个测试全绿。实际情况是：**8 个平台中 7 个的调用契约与平台官方文档不符，其中多数在鉴权层就无法发出一个合法请求。**
+本仓库对外声明支持 8 个平台、147 个只读工具、358 个测试全绿。实际情况是：**115 个 endpoint 里只有 45 个真实存在（39%）**，且存在的那些在契约层仍普遍不符；另有约 22 个工具对应的能力**平台根本不对三方开放**。
 
-本 mission 的目标是把 8 个平台的 wire 契约修正到符合官方文档，并建立能持续守住这一点的契约测试。
+本 mission 经审计后**收窄**为两件事：
 
-**验收标准是"符合官方文档"，不需要真实商家凭证。** 这一点是可达的，因为四个平台提供了官方签名算例，六个平台提供了公开无鉴权的文档接口（见 §5）。
+1. **把底子好的四个平台修到真能调通** —— 淘宝（11/13）、小红书（9/13）、快手（9/12）、拼多多（8/13），共 37 个真实 endpoint。修正范围含 endpoint 名称、契约（网关/参数/签名/时间戳/信封）、以及分页范式。
+2. **把对外口径改到与事实一致** —— 移除全部 8 个平台中不存在的 endpoint 所对应的工具，修正 README / FAQ / `docs/platforms.md` 的能力声明。
+
+**暂缓（另立 mission）**：抖店（0/20）、京东（0/15）、巨量引擎（2/18）、微信小店（6/11）—— 这四个的性质是「按真实接口重建」，研究成果已保留在 `deferred/`。
+
+**验收标准是「符合官方文档」，不需要真实商家凭证。** 依据是四个平台提供官方签名算例、八个平台提供公开无鉴权的文档清单接口（见 §5、§2.3.1）。
 
 ## 2. 背景与证据
 
@@ -120,19 +125,16 @@
 
 | ID | 需求 | 验收依据 |
 |---|---|---|
-| FR-001 | 建立契约测试框架：每平台一份契约声明 fixture（网关、系统参数表、timestamp 格式、签名规则、错误信封，逐项标注官方出处 URL），并提供签名向量断言与 wire 层参数断言能力 | 四个平台的官方签名向量为硬断言且通过 |
+| FR-001 | 建立契约测试框架：每平台一份契约声明 fixture（网关、系统参数表、timestamp 格式、签名规则、错误信封、**endpoint 清单**，逐项标注官方出处 URL），并提供签名向量断言与 wire 层参数断言能力 | 四个平台的官方签名向量为硬断言且通过 |
 | FR-002 | 提供通用断言：签名参与集合恒等于实际发送集合减去 `sign` | 对每个签名类平台生效 |
-| FR-003 | 重写 `tests/test_integration.py:128-132`，使其断言巨量官方契约（token 走 `Access-Token` header、不发 `sign`/`sign_method`/`app_key`） | 该测试不再要求错误参数 |
-| FR-004 | 巨量引擎契约修正：token 移至 HTTP header、移除签名、host 统一 `api.oceanengine.com`、错误判定改用 body 的 `code` 与 `message` | wire 断言 + 契约声明 |
-| FR-005 | 巨量引擎报表迁移：5 个已下线 endpoint 迁至 `v3.0/report/custom/get/`，参数结构改为 `data_topic`/`dimensions`/`metrics` | 不再引用已下线 path |
-| FR-006 | 淘宝契约修正：token 参数名改 `session`、timestamp 改 `yyyy-MM-dd HH:mm:ss`（GMT+8）、网关默认改 `gw.api.taobao.com` 并保留 `eco` 兼容 | 官方算例 + wire 断言 |
-| FR-007 | 抖店契约修正：补发必填 `method`（点分）与 `param_json`（递归 key 排序、compact、`1.0`→`1`、不转义中文与 `&<>`、置于 POST body）、签名串改为 `secret + app_key{}method{}param_json{}timestamp{}v{} + secret`、显式传 `sign_method=hmac-sha256` | 官方签名工具比对 + wire 断言 |
-| FR-008 | 小红书契约修正：改为单一网关 `ark.xiaohongshu.com/ark/open_api/v3/common_controller`、全部参数移入 POST body、参数名改 `appId`/`method`/`version`/`timestamp`（秒）/`accessToken`、签名仅覆盖 4 个系统参数且输出小写、错误判定改 `error_code==0 && success==true` 并解包 `data` | wire 断言 + 契约声明 |
-| FR-009 | 京东契约修正：timestamp 改 `yyyy-MM-dd HH:mm:ss.SSSZ`、签名改纯 MD5（secret 首尾包裹）、业务参数改由 `360buy_param_json` 承载且参与签名、移除 `format` 与 `sign_method`、错误解析改 `code`/`zh_desc`/`en_desc` | 官方签名向量 + wire 断言 |
-| FR-010 | 快手契约修正：path 改为 `method` 点换斜杠的官方形式、参数名改 `appkey`/`signMethod`、补 `method` 与 `version`、业务参数打包进单个 `param` JSON 字符串、签名改 `k=v&…&signSecret=X` 且输出小写、成功判定改 `result==1` 并解包 `data` | wire 断言 + 契约声明 |
-| FR-011 | 拼多多契约修正：timestamp 改 UNIX 秒 | 官方签名向量 + wire 断言 |
-| FR-012 | 微信小店升级：改用 `POST /cgi-bin/stable_token`、缓存 TTL 读取返回的 `expires_in`、错误处理覆盖 HTTP 403（IP 白名单不走 errcode） | 契约声明 |
-| FR-013 | 文档口径修正：README 能力声明与实际状态一致、`docs/platforms.md` 记载与代码及官方文档一致、FAQ 中巨量资质要求更正为企业认证 + 企业打款认证 | 人工复核 |
+| FR-003 | 移除编码了错误契约的既有测试，交接给对应平台 WP（不在本 WP 内补正确断言，避免与 CI 全绿冲突） | 现有 CI 保持全绿 |
+| FR-014 | **endpoint 存在性巡检**：按 §2.3.1 记录的各平台公开文档清单接口，实现可离线运行（默认跳过联网）的巡检脚本，用于发现 endpoint 下线与官方公告中的下线关键词 | 能对当前代码中的全部 endpoint 输出存在性判定 |
+| FR-006 | 淘宝：endpoint 修正（`taobao.item.get`→`item.seller.get`、`taobao.shop.get`→`shop.seller.get`）+ 契约修正（token 参数名改 `session`、timestamp 改 `yyyy-MM-dd HH:mm:ss` GMT+8、网关默认改 `gw.api.taobao.com`、`sign_method` 必须参与签名）+ 补 `use_has_next` | 官方算例 + wire 断言 |
+| FR-008 | 小红书：改为单一网关 `ark.xiaohongshu.com/ark/open_api/v3/common_controller` + POST body + 官方 method 名（9 个）+ 参数名 `appId`/`method`/`version`/`timestamp`(秒)/`accessToken` + 签名仅覆盖 4 个系统参数且小写 + 判错 `error_code==0 && success==true` 并解包 `data`；**删除 4 个平台不提供的工具**（评价列表、营销活动列表、优惠券列表、店铺信息） | wire 断言 + 契约声明 |
+| FR-010 | 快手：改为官方 method 点换斜杠的真实 path（9 个，注意 `open.order.cursor.list` 而非已退役的 `pcursor.list`）+ 参数名 `appkey`/`signMethod` + 补 `method`/`version` + 业务参数打包进单个 `param` JSON（camelCase）+ 签名 `k=v&…&signSecret=X` 小写 + `result==1` 判错 + **按接口实现各自的分页范式**（订单游标 / 退款混合 / 商品页码 / 评价 offset）；**删除 3 个平台不提供的工具** | wire 断言 + 契约声明 |
+| FR-011 | 拼多多：timestamp 改 UNIX 秒 + endpoint 修正（`logistics.trace.query`→`logistics.ordertrace.get`、`refund.list.get`→`refund.list.increment.get`、`promotion.list.get`→按语义选定具体接口）；**删除 2 个平台不提供的工具**（全站商品搜索、商品评价）；**移出 `pdd.ddk.goods.search`**（属多多进宝联盟体系，需独立开发者身份与应用类型） | 官方签名向量 + wire 断言 |
+| FR-013 | 文档与对外声明一致性：README / `README_en.md` 的能力声明与实际状态一致、`docs/platforms.md` 记载与官方文档一致、`docs/FAQ.md` 更正巨量资质要求（企业认证 + 企业打款认证）与各平台阶段口径 | 人工复核 |
+| FR-015 | **移除不存在 endpoint 对应的工具**（覆盖全部 8 个平台，含暂缓的四个）：删除或明确标记为不可用，并在 `docs/platforms.md` 记录每个被移除工具的原因（不存在 / 已下线 / 平台不对三方开放） | 工具注册数与真实可用 endpoint 一致 |
 
 ### NFR
 
@@ -146,20 +148,26 @@
 
 ### 4.1 In scope
 
-1. 建立契约测试框架（先行，后续所有 WP 用它验收）
-2. 修正 8 个平台的 wire 契约至符合官方文档：网关地址、系统参数名与位置、timestamp 格式与单位、签名算法（参与范围/拼接/摘要/大小写）、业务参数传递方式、错误信封解析
-3. 重写 `tests/test_integration.py:128-132`，使其断言官方契约而非现有假设
-4. 巨量报表 endpoint 迁移至 `v3.0/report/custom/get/`（参数结构由 fields/group_by 改为 data_topic/dimensions/metrics，属重写而非改 URL）
-5. 修正 README / docs 中与事实不符的能力声明（`8/8 全部完成`、147 tools 等口径）
-6. 修正 `docs/platforms.md` 中与代码及官方文档不一致的记载（如淘宝签名方式）
+1. 契约测试框架 + endpoint 存在性巡检（FR-001、FR-002、FR-003、FR-014）
+2. 四个平台修到可调通：淘宝、小红书、快手、拼多多（FR-006、FR-008、FR-010、FR-011）
+3. 移除全部 8 个平台中不存在 endpoint 对应的工具（FR-015）
+4. 对外声明与文档口径修正（FR-013）
 
-### 4.2 Out of scope（另立）
+### 4.2 Out of scope
 
-1. **京东 SP-API 迁移** —— 官方将 `routerjson` 标注为"历史接口，逐步迁移"，新网关 `api-cn.jd.com/rest` 走 header 签名，是整套换代，需独立评估
-2. **真实凭证联调** —— 本 mission 以官方文档符合性为验收标准；真机验证需商家授权，另行安排
-3. **拼多多多多云部署** —— 订单接口云外可调（返回密文），仅解密接口强制云内。只读分析场景应走脱敏接口 `pdd.open.decrypt.mask.batch`（无云内限制），不在本次实现范围
-4. **抖店 md5 → hmac-sha256 的下线时间表跟踪** —— 官方只有"后续会下线"措辞，无时间表
-5. 修复 `tests/test_integration.py::test_build_pythonpath_includes_shared_and_repo` 中硬编码仓库目录名的脆弱断言
+**暂缓至后续 mission（研究成果已在 `deferred/`，不要重新调研）**：
+
+1. **抖店重建**（0/20）—— 20 个 endpoint 全需重写路径，其中 8 个能力平台不对三方开放
+2. **京东重建**（0/15）—— `jd.pop.*` 命名空间不存在；且 SP-API（`api-cn.jd.com`，header 签名且 header 名参与签名）为现役网关，routerjson 官方标注为历史接口，整套调用约定需重估
+3. **巨量引擎重建**（2/18）—— 需按 v3.0 `project/list` + `promotion/list` + `report/custom/get` 重建，其中原版"广告计划"无 1:1 替代需 join 两个接口
+4. **微信小店修正**（6/11）—— 四者中最轻（5 个不存在 + 4 个请求体编造），可优先纳入后续 mission
+
+**其他不做**：
+
+5. 真实凭证联调 —— 本 mission 以官方文档符合性为验收标准
+6. 拼多多多多云部署 —— 云外解密自 2026-05-12 起限 1次/10秒 + 单应用单日 100 次；只读分析不需要收件人明文
+7. 淘宝「订单信息查询」权限包的获取 —— 仅开放给 20 种特定应用类型，通用连接器不在其中，属使用者侧前提而非代码问题
+8. 修复 `tests/test_integration.py::test_build_pythonpath_includes_shared_and_repo` 中硬编码仓库目录名的脆弱断言
 
 ## 5. 契约测试框架（WP01，其余 WP 的前置）
 
@@ -193,23 +201,19 @@
 
 ## 6. WP 划分与顺序
 
-WP 的权威定义在 `tasks/` 目录下（每个 WP 一个 prompt 文件，含官方契约对照表与 `requirement_refs`）。概览：
+WP 的权威定义在 `tasks/`。暂缓平台的 WP 已移至 `deferred/`（不参与本 mission 校验与实施）。
 
 | WP | 内容 | 依赖 | FR |
 |---|---|---|---|
-| WP01 | 契约测试框架与契约声明（含重写 `test_integration.py:128-132`） | — | FR-001, FR-003 |
-| WP02 | base class 契约策略层（把统一假设换成 per-platform 策略） | WP01 | FR-002 |
-| WP03 | 巨量引擎：鉴权与信封 + endpoint 重建（**范围待定** —— 见 §2.3，16/18 endpoint 需重建；待 8 平台审计完成后定稿） | WP02 | FR-004, FR-005 |
-| WP05 | 淘宝：`session`、timestamp 格式、网关默认值 | WP02 | FR-006 |
-| WP06 | 抖店：补 `method`/`param_json`、签名串、`sign_method=hmac-sha256` | WP02 | FR-007 |
-| WP07 | 小红书：单一网关重写（现有实现无一处吻合） | WP02 | FR-008 |
-| WP08 | 京东：timestamp、纯 MD5、`360buy_param_json` 入签、错误字段 | WP02 | FR-009 |
-| WP09 | 快手：path、命名、`param` 打包、签名格式、`result==1` | WP02 | FR-010 |
-| WP10 | 拼多多：timestamp 单位 | WP02 | FR-011 |
-| WP11 | 微信小店：`stable_token`、TTL、HTTP 403 | WP02 | FR-012 |
-| WP12 | 文档与对外声明一致性 | WP03、WP05–WP11 | FR-013 |
+| WP01 | 契约测试框架 + endpoint 存在性巡检 + 移除错误契约测试 | — | FR-001, FR-002, FR-003, FR-014 |
+| WP02 | base class 契约策略层 | WP01 | FR-002 |
+| WP05 | 淘宝：2 个 endpoint 改名 + 契约修正 | WP02 | FR-006 |
+| WP07 | 小红书：单一网关重写 + 9 个 method + 删 4 个工具 | WP02 | FR-008 |
+| WP09 | 快手：真实 path + 协议四层重写 + 删 3 个工具 | WP02 | FR-010 |
+| WP10 | 拼多多：timestamp + 3 个改名 + 删 2 个工具 + 移出 ddk | WP02 | FR-011 |
+| WP12 | 工具清理（全 8 平台）+ 文档与对外声明一致性 | WP05, WP07, WP09, WP10 | FR-013, FR-015 |
 
-WP01 与 WP02 是其余全部 WP 的前置：WP01 提供验收手段，WP02 提供能表达平台差异的机制。WP03、WP05–WP11 之间无相互依赖，可并行（原计划拆分的 WP04 因与 WP03 改动同一文件而并入 WP03，故 WP 编号不连续）。
+WP01/WP02 为前置；WP05、WP07、WP09、WP10 之间无相互依赖可并行；WP12 收尾。WP 编号保留原值以便与 `deferred/` 对应，故不连续。
 
 ## 7. 验收标准
 

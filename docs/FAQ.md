@@ -17,14 +17,29 @@ Basic familiarity with terminal/command line is helpful. You need to configure e
 ## Platforms & Compatibility
 
 ### Which platforms are supported?
-- **Phase 1 (done)**: 巨量引擎 (Ocean Engine), 巨量千川 (Qianchuan), 抖店 (Douyin Shop), 京东 (JD.com)
-- **Phase 2 (planned)**: 淘宝 (Taobao), 拼多多 (Pinduoduo)
-- **Phase 3 (planned)**: 快手 (Kuaishou), 小红书 (Xiaohongshu), 微信小店 (WeChat Store)
+
+Status is stated per platform against that platform's **official documentation**, following a full
+endpoint-existence audit. Per-tool detail is in `docs/platforms.md`; each platform's contract with
+its official sources is in `docs/api-contracts/<platform>.md`.
+
+| Platform | Status |
+|---|---|
+| 淘宝 (Taobao) | Contract verified against official docs |
+| 小红书 (Xiaohongshu) | Contract verified against official docs |
+| 快手 (Kuaishou) | Contract verified against official docs |
+| 拼多多 (Pinduoduo) | Contract verified against official docs |
+| 微信小店 (WeChat Store) | Contract verified against official docs |
+| 巨量引擎 (Ocean Engine) | **Rebuild pending** — 16 of 18 endpoints are retired or absent from the official catalog; only account-info and account-balance survive |
+| 抖店 (Douyin Shop) | **Rebuild pending** — none of the 20 endpoints are currently callable |
+| 京东 (JD.com) | **Rebuild pending** — the `jd.pop.*` namespace does not exist on any JD gateway; also needs a gateway decision (routerjson is officially legacy, SP-API is the recommended successor) |
+
+Tools whose underlying endpoint does not exist have been removed from registration rather than left
+advertised. The appendix of `docs/api-reference.md` lists every removed tool with its reason.
 
 ### Do I need a business license?
 - **抖店**: Enterprise or individual business license required
 - **京东**: Enterprise license required
-- **巨量引擎**: Developer account with approved app
+- **巨量引擎**: Enterprise developer account — official registration requires **enterprise verification plus an enterprise bank-transfer verification**, and a signed contract. Individual developers cannot complete it (source: official 快速入门)
 - **拼多多**: Individual sellers can access (Phase 2)
 - **淘宝**: Enterprise license effectively required for order APIs — see below
 
@@ -33,13 +48,25 @@ Basic familiarity with terminal/command line is helpful. You need to configure e
 2. Create an app — merchants connecting their own shop should pick 自用型应用 (self-use app)
 3. Apply for the API permissions this server uses:
    - Orders: `taobao.trades.sold.get`, `taobao.trade.fullinfo.get`, `taobao.trades.sold.increment.get`
-   - Products: `taobao.items.onsale.get`, `taobao.item.get`
+   - Products: `taobao.items.onsale.get`, `taobao.item.seller.get`
    - Refunds: `taobao.refunds.receive.get`, `taobao.refund.get`
-   - Logistics / reviews / shop: `taobao.logistics.trace.search`, `taobao.traderates.get`, `taobao.shop.get`
+   - Logistics / reviews / shop: `taobao.logistics.trace.search`, `taobao.traderates.get`, `taobao.shop.seller.get`
 4. Complete the OAuth authorization to obtain an `access_token` (it expires — refresh per the platform's docs for your app type)
 5. Set `TAOBAO_APP_KEY`, `TAOBAO_APP_SECRET`, `TAOBAO_ACCESS_TOKEN`
 
-Platform rules change often — the 开发者入驻 page and each API's permission package on open.taobao.com are the source of truth.
+**Two prerequisites that stop people earlier than the application flow does:**
+
+- **Permission package.** `taobao.trades.sold.get` and `taobao.trade.fullinfo.get` share the
+  「订单信息查询」package, and the app types eligible to apply for it are a fixed list of 20
+  (进销存软件 / 商家后台系统 / 商家应用-ERP软件 / 企业ERP, and so on). **A general-purpose MCP
+  connector is not among them** — you need your own ISV app of one of those types, with the
+  package approved.
+- **Address desensitisation.** To comply with the PIPL, `receiver_address` on the order APIs is
+  **fully masked from 2026-08-31** (province / city / district are unaffected). Re-check any use
+  that depends on the detailed address.
+
+Platform rules change often — the 开发者入驻 page and each API's permission package on
+open.taobao.com are the source of truth.
 
 ### Can an individual shop (个人店) use the Taobao server?
 Partly, and probably not for the part you want. Taobao's open platform does let individuals register as developers, but the order APIs (`taobao.trades.sold.get`, `taobao.trade.fullinfo.get`, and friends) expose consumer personal data, so they sit behind a separate high-sensitivity permission review that in practice requires an enterprise entity (business license) plus a signed data-security agreement. An individual C-shop generally can't clear that review.

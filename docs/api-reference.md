@@ -628,7 +628,8 @@ No parameters.
 ## 4. Taobao (淘宝)
 
 **Server name:** `mcp-cn-taobao`
-**Base URL:** `https://eco.taobao.com/router/rest`
+**Base URL:** `https://gw.api.taobao.com/router/rest`
+（主接入文档《API调用》给出的正式环境地址；per-API 详情页另列 `https://eco.taobao.com/router/rest`，两者均有官方出处、关系无官方说明，代码保留 `eco` 为兼容常量。）
 **Sign method:** MD5
 
 ### Environment Variables
@@ -815,16 +816,6 @@ Get full details of a single product.
 |-----------|------|----------|-------------|
 | `goods_id` | str | Yes | PDD goods ID |
 
-#### `search_products`
-
-Search products by keyword.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `keyword` | str | Yes | - | Search keyword |
-| `page` | int | No | 1 | Page number |
-| `page_size` | int | No | 20 | Items per page (max 100) |
-
 #### `get_refund_list`
 
 Query refund (after-sale) list by time range.
@@ -858,16 +849,6 @@ List all available logistics companies on PDD.
 
 No parameters.
 
-#### `get_review_list`
-
-Query product review list by goods ID.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `goods_id` | str | Yes | - | PDD goods ID |
-| `page` | int | No | 1 | Page number |
-| `page_size` | int | No | 20 | Items per page (max 100) |
-
 #### `get_shop_info`
 
 Get mall/shop basic information for the authenticated merchant.
@@ -882,18 +863,6 @@ List promotion activities.
 |-----------|------|----------|---------|-------------|
 | `page` | int | No | 1 | Page number |
 | `page_size` | int | No | 20 | Items per page (max 100) |
-
-#### `search_affiliate_goods`
-
-Search affiliate (多多客) goods by keyword.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `keyword` | str | Yes | - | Search keyword |
-| `page` | int | No | 1 | Page number |
-| `page_size` | int | No | 20 | Items per page (max 100) |
-
----
 
 ## 6. Kuaishou (快手)
 
@@ -969,20 +938,6 @@ Get full details of a single refund record.
 |-----------|------|----------|-------------|
 | `refund_id` | str | Yes | Refund record ID |
 
-#### `get_logistics_tracking`
-
-Get logistics tracking for an order.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `order_id` | str | Yes | Kuaishou order ID |
-
-#### `list_logistics_companies`
-
-List all available logistics companies.
-
-No parameters.
-
 #### `get_review_list`
 
 Query product review list by item ID.
@@ -998,15 +953,6 @@ Query product review list by item ID.
 Get shop basic information for the authenticated merchant.
 
 No parameters.
-
-#### `list_promotions`
-
-List promotion activities.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `page` | int | No | 1 | Page number |
-| `page_size` | int | No | 20 | Items per page (max 100) |
 
 #### `list_coupons`
 
@@ -1101,41 +1047,6 @@ Get logistics tracking for an order.
 |-----------|------|----------|-------------|
 | `order_id` | str | Yes | XHS order ID |
 
-#### `get_review_list`
-
-Query product review list by product ID.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `product_id` | str | Yes | - | XHS product ID |
-| `page` | int | No | 1 | Page number |
-| `page_size` | int | No | 20 | Items per page (max 100) |
-
-#### `get_shop_info`
-
-Get shop basic information.
-
-No parameters.
-
-#### `list_promotions`
-
-List promotion activities.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `page` | int | No | 1 | Page number |
-| `page_size` | int | No | 20 | Items per page (max 100) |
-
-#### `list_coupons`
-
-List coupon templates.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `status` | str | No | `""` | `1`(进行中), `2`(已结束), `3`(未开始) |
-| `page` | int | No | 1 | Page number |
-| `page_size` | int | No | 20 | Items per page (max 100) |
-
 #### `get_inventory`
 
 Query inventory information for products.
@@ -1146,20 +1057,6 @@ Query inventory information for products.
 | `sku_id` | str | No | `""` | SKU ID filter |
 | `page` | int | No | 1 | Page number |
 | `page_size` | int | No | 20 | Items per page (max 100) |
-
-#### `get_bill_list`
-
-Query bill list by time range.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `start_time` | str | Yes | - | e.g. `"2024-01-01 00:00:00"` |
-| `end_time` | str | Yes | - | e.g. `"2024-01-31 23:59:59"` |
-| `bill_type` | str | No | `""` | `1`(订单结算), `2`(退款), `3`(佣金), `4`(保证金) |
-| `page` | int | No | 1 | Page number |
-| `page_size` | int | No | 20 | Items per page (max 100) |
-
----
 
 ## 8. WeChat Store (微信小店)
 
@@ -1364,3 +1261,24 @@ if "errcode" in result and result["errcode"] != 0:
 | Xiaohongshu | mcp-cn-xiaohongshu | 13 |
 | WeChat Store | mcp-cn-weixin-store | 10 |
 | **Total** | | **114** |
+
+
+## 附录：已移除的工具及原因
+
+以下工具曾出现在本手册中，现已从工具注册中移除 —— 它们对应的能力**平台不对三方开放**，或该 endpoint 从未存在。改名无法修复，故不保留。
+
+| 平台 | 工具 | 移除原因 |
+|---|---|---|
+| pinduoduo | `get_review_list` | 拼多多从未开放商品评价接口（493 个现行接口 + 8 年 344 条公告零命中） |
+| pinduoduo | `search_products` | 商家侧无「搜全站商品」能力；pdd.goods.list.get 只能列本店商品 |
+| pinduoduo | `search_affiliate_goods` | 属多多客（多多进宝）联盟体系，需独立开发者身份与应用类型，商家 ISV 授权拿不到 |
+| kuaishou | `get_logistics_tracking` | 快手不对商家开放轨迹查询（仅有物流商向快手推送轨迹的写接口，方向相反） |
+| kuaishou | `list_logistics_companies` | 不是 API 而是《物流公司编号》静态文档表 |
+| kuaishou | `list_promotions` | 营销 API 全部 14 个只有 coupon 与人群包，无通用营销活动列表 |
+| xiaohongshu | `get_review_list` | 106 个 method 全量 grep review|comment|rate|evaluat 零命中；商品评价不在电商开放平台范围 |
+| xiaohongshu | `get_shop_info` | 无任何店铺名称/类目/评分接口 |
+| xiaohongshu | `list_coupons` | order.couponList 是虚拟卡券商品的履约券码查询（需 orderId、返回卡号/卡密），语义不同 |
+| xiaohongshu | `list_promotions` | 无 promotion/marketing/activity 域 |
+| xiaohongshu | `get_bill_list` | 账单不是单一列表，已拆为 finance.pageQueryTransaction / querySellerAccountRecords / pageQueryExpense / bill.downloadStatement 四个工具 |
+
+各平台完整的契约结论与官方出处见 `docs/api-contracts/<platform>.md`。

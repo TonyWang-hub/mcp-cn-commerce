@@ -139,20 +139,23 @@
 
 ## 6. WP 划分与顺序
 
-按「影响 × 证据强度」排序，WP01 为其余全部 WP 的前置：
+WP 的权威定义在 `tasks/` 目录下（每个 WP 一个 prompt 文件，含官方契约对照表与 `requirement_refs`）。概览：
 
-| WP | 内容 | 依赖 |
-|---|---|---|
-| WP01 | 契约测试框架 + 重写 `test_integration.py:128-132` | — |
-| WP02 | 巨量引擎：去签名、token 移至 header、host 统一 `api.oceanengine.com`、错误字段 `message`、报表迁移 v3.0 | WP01 |
-| WP03 | 淘宝：token 参数改 `session`、timestamp 改 `yyyy-MM-dd HH:mm:ss` GMT+8、网关默认改 `gw.api.taobao.com` | WP01 |
-| WP04 | 抖店：补 `method` 与 `param_json` 必填参数、签名串修正、显式传 `sign_method=hmac-sha256` | WP01 |
-| WP05 | 小红书：改单一网关 + POST body + 全部参数名 + 签名范围 + 错误信封（等于重写该 server） | WP01 |
-| WP06 | 京东：timestamp 格式、纯 MD5、`360buy_param_json` 入签、去掉 `format`/`sign_method`、错误字段 `zh_desc`/`en_desc` | WP01 |
-| WP07 | 快手：path 修正、`appkey`/`signMethod` 命名、补 `method`/`version`、业务参数打包进 `param`、签名格式与小写、`result==1` 判错 | WP01 |
-| WP08 | 拼多多：timestamp 改 UNIX 秒 | WP01 |
-| WP09 | 微信小店：改用 `stable_token`、TTL 读 `expires_in`、错误处理覆盖 HTTP 403 | WP01 |
-| WP10 | 文档口径修正：README 能力声明、`docs/platforms.md` 记载、FAQ 中巨量资质要求（官方要求企业认证 + 企业打款认证） | WP02–WP09 |
+| WP | 内容 | 依赖 | FR |
+|---|---|---|---|
+| WP01 | 契约测试框架与契约声明（含重写 `test_integration.py:128-132`） | — | FR-001, FR-003 |
+| WP02 | base class 契约策略层（把统一假设换成 per-platform 策略） | WP01 | FR-002 |
+| WP03 | 巨量引擎：鉴权与信封（header token、去签名、host、`message` 字段）+ 报表迁移 v3.0 | WP02 | FR-004, FR-005 |
+| WP05 | 淘宝：`session`、timestamp 格式、网关默认值 | WP02 | FR-006 |
+| WP06 | 抖店：补 `method`/`param_json`、签名串、`sign_method=hmac-sha256` | WP02 | FR-007 |
+| WP07 | 小红书：单一网关重写（现有实现无一处吻合） | WP02 | FR-008 |
+| WP08 | 京东：timestamp、纯 MD5、`360buy_param_json` 入签、错误字段 | WP02 | FR-009 |
+| WP09 | 快手：path、命名、`param` 打包、签名格式、`result==1` | WP02 | FR-010 |
+| WP10 | 拼多多：timestamp 单位 | WP02 | FR-011 |
+| WP11 | 微信小店：`stable_token`、TTL、HTTP 403 | WP02 | FR-012 |
+| WP12 | 文档与对外声明一致性 | WP03、WP05–WP11 | FR-013 |
+
+WP01 与 WP02 是其余全部 WP 的前置：WP01 提供验收手段，WP02 提供能表达平台差异的机制。WP03、WP05–WP11 之间无相互依赖，可并行（原计划拆分的 WP04 因与 WP03 改动同一文件而并入 WP03，故 WP 编号不连续）。
 
 ## 7. 验收标准
 

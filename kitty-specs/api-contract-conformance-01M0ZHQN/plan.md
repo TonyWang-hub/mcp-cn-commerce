@@ -1,7 +1,7 @@
 # Implementation Plan: API 契约符合性修复
 
 **Branch**: `sdd/api-contract-conformance` | **Date**: 2026-08-26 | **Spec**: [spec.md](./spec.md)
-**Input**: Feature specification from `kitty-specs/api-contract-conformance-01M0ZHQN/spec.md`
+**Input**: Feature specification from mission spec
 
 ## Summary
 
@@ -38,20 +38,13 @@
 ### Documentation (this mission)
 
 ```
-kitty-specs/api-contract-conformance-01M0ZHQN/
+kitty-specs/<mission>/
 ├── spec.md              # 已完成
 ├── plan.md              # 本文件
-├── contracts/           # Phase 1：每平台一份契约声明（官方出处 + 明文/推断标注）
-│   ├── oceanengine.md
-│   ├── taobao.md
-│   ├── doudian.md
-│   ├── xiaohongshu.md
-│   ├── jd.md
-│   ├── kuaishou.md
-│   ├── pinduoduo.md
-│   └── weixin_store.md
-└── tasks/               # Phase 2：WP 定义
+└── tasks/               # Phase 2：WP 定义（WP01–WP12）
 ```
+
+每平台的契约声明**不放在 mission 目录**，而是作为仓库文档交付到 `docs/api-contracts/<platform>.md` —— 它对使用者本身有价值（说明本连接器依据哪版官方契约实现），且 WP 不得拥有 `kitty-specs/` 下的路径。
 
 ### Source Code (repository root)
 
@@ -77,7 +70,7 @@ tests/
 └── ...                        # 其余现有测试不变
 ```
 
-**Structure Decision**: 沿用现有 single-package 布局（`shared/` + `servers/`），不新增顶层目录。契约测试作为 `tests/contract/` 子目录加入，由现有 `pyproject.toml` 的 `testpaths = ["tests", "servers"]` 自动纳入。契约声明文档放在 mission 目录下而非 `docs/`，因其为验收依据而非用户文档；WP10 再把结论沉淀进 `docs/platforms.md`。
+**Structure Decision**: 沿用现有 single-package 布局（`shared/` + `servers/`），不新增顶层目录。契约测试作为 `tests/contract/` 子目录加入，由现有 `pyproject.toml` 的 `testpaths = ["tests", "servers"]` 自动纳入。契约声明文档交付到 `docs/api-contracts/`（既是验收依据，也是对使用者有价值的文档）；WP12 再把结论沉淀进 `docs/platforms.md`。
 
 ## Complexity Tracking
 
@@ -97,7 +90,7 @@ tests/
 
 - **Purpose**: 建立不依赖真实凭证的验收手段，使后续所有关注点都有客观通过标准。
 - **Relevant requirements**: FR-001, FR-002, FR-003
-- **Affected surfaces**: `tests/contract/`（新增）、`kitty-specs/.../contracts/`（新增）、`tests/test_integration.py`
+- **Affected surfaces**: `tests/contract/`（新增）、`docs/api-contracts/`（新增）、`tests/test_integration.py`
 - **Sequencing/depends-on**: none —— 其余全部关注点的前置
 - **Risks**: 若框架的断言粒度过粗，后续平台修复会"通过但仍不符"；粒度过细则每次平台文档微调都要改测试。取舍点在于只断言**契约层**（参数名集合、位置、格式、签名字节），不断言业务字段。
 

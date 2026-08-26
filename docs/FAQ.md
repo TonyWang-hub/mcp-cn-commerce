@@ -26,6 +26,25 @@ Basic familiarity with terminal/command line is helpful. You need to configure e
 - **京东**: Enterprise license required
 - **巨量引擎**: Developer account with approved app
 - **拼多多**: Individual sellers can access (Phase 2)
+- **淘宝**: Enterprise license effectively required for order APIs — see below
+
+### How do I get 淘宝 (Taobao) API credentials?
+1. Register a developer account at [open.taobao.com](https://open.taobao.com)
+2. Create an app — merchants connecting their own shop should pick 自用型应用 (self-use app)
+3. Apply for the API permissions this server uses:
+   - Orders: `taobao.trades.sold.get`, `taobao.trade.fullinfo.get`, `taobao.trades.sold.increment.get`
+   - Products: `taobao.items.onsale.get`, `taobao.item.get`
+   - Refunds: `taobao.refunds.receive.get`, `taobao.refund.get`
+   - Logistics / reviews / shop: `taobao.logistics.trace.search`, `taobao.traderates.get`, `taobao.shop.get`
+4. Complete the OAuth authorization to obtain an `access_token` (it expires — refresh per the platform's docs for your app type)
+5. Set `TAOBAO_APP_KEY`, `TAOBAO_APP_SECRET`, `TAOBAO_ACCESS_TOKEN`
+
+Platform rules change often — the 开发者入驻 page and each API's permission package on open.taobao.com are the source of truth.
+
+### Can an individual shop (个人店) use the Taobao server?
+Partly, and probably not for the part you want. Taobao's open platform does let individuals register as developers, but the order APIs (`taobao.trades.sold.get`, `taobao.trade.fullinfo.get`, and friends) expose consumer personal data, so they sit behind a separate high-sensitivity permission review that in practice requires an enterprise entity (business license) plus a signed data-security agreement. An individual C-shop generally can't clear that review.
+
+Net effect for an individual shop: **product and shop data is usually reachable, order data usually isn't.** For full order access, register the app under an enterprise entity.
 
 ### Which AI clients are compatible?
 Any MCP-compatible client: Claude Desktop, Cherry Studio, Kimi Work, Cline, Continue, and others.

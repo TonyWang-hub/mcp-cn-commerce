@@ -25,22 +25,32 @@
 
 两个平台使用同一个虚构模板 `/api/<名词>/<动作>`，在任何官方文档、镜像或 SDK 中均不存在。
 
-### 2.3 巨量引擎的 endpoint 已被官方删除
+### 2.3 巨量引擎：18 个 endpoint 里只有 2 个是真的
 
-官方公告（预通知 2024-04-15 `changelog/1796386957503732`、正式 2024-05-07 `changelog/1798385305745562`）确认一批接口于 **2024-05-06 下线**。本仓库调用的 18 个巨量 endpoint 中，**5 个确认已下线**：
+已完成对 oceanengine server 全部 18 个 endpoint 的存在性审计（依据：官方文档导航树 866 条 path 全量比对 + 246 篇更新日志全文检索 + 网关活体探测三重交叉）。
 
-| endpoint | 状态 |
-|---|---|
-| `2/ad/get/` | 已下线 |
-| `2/campaign/get/` | 已下线 |
-| `2/report/ad/get/` | 已下线 |
-| `2/report/audience/` | 已下线（整组） |
-| `2/report/creative/get/` | 已下线 |
-| `2/report/advertiser/get/` | `platform_version` V1 枚举下线 |
+| 判定 | 数量 | endpoint |
+|---|---|---|
+| 2024-05-06 官方下线 | 5 | `2/ad/get/`、`2/campaign/get/`、`2/report/ad/get/`、`2/report/audience/`、`2/report/creative/get/` |
+| **2025-08-31 官方下线** | 1 | `2/report/advertiser/get/`（早前以为只是 `platform_version` V1 枚举下线，实为整接口下线，已迁至自定义报表 `BASIC_DATA` 主题） |
+| **官方文档查无此接口 / 网关 404** | **10** | `2/ad/read/`、`2/campaign/read/`、`2/dmp/audience/list/`、`2/material/list/`、`2/qianchuan/campaign/list/get/`、`2/qianchuan/report/ad/get/`、`2/star/report/`、`2/star/task/list/`、`2/tools/bid_suggest/`、`2/tools/diagnosis/` |
+| ✅ 存在且在维护 | **2** | `2/advertiser/info/`、`2/advertiser/fund/get/` |
 
-这些页面在当前 1053 篇官方文档中已完全不存在（是删除，非标灰）。官方现存的 `2/report/*` 仅剩 `site/page/`、`rta_exp/get/`、`rta_cus_exp/get/`，本仓库一个都没用。
+那 10 个不是"过时"而是**从未存在**（在 866 条官方 path 与 246 篇日志中零命中）。已知的真实对应物举例：`2/dmp/audience/list/` → `2/dmp/custom_audience/select/`；`2/star/report/` 与 `2/tools/diagnosis/` 是**前缀不是接口**；`2/qianchuan/*` 用的是 **`v1.0`** 且文档 host 为 `ad.oceanengine.com`。
 
-即 oceanengine server 是双重失效：鉴权方式错，且即使鉴权正确，报表接口本身也不存在了。
+**一条关键方法论**（对其余平台的审计同样适用）：**已下线的路由仍返回 `40105 access_token无效` 而不是 404**，因此活体探测不能作为存在性证据 —— 只有「官方文档清单里有 **且** 探测能通」才算存在。
+
+**已下线实体接口的官方替代**（依据官方迁移文档《升级版与原版差异说明》 `labels/7/docs/1758611573659724`：原版五层结构变为四层，「计划组」对标「项目」、「营销创意」对标「营销」、「营销计划」拆分至两者）：
+
+- `2/campaign/get/` → `v3.0/project/list/`
+- `2/ad/get/`（实为**广告计划**列表，非创意列表 —— 我们代码的 docstring 也标错了）→ 需 **join** `v3.0/project/list/` + `v3.0/promotion/list/`，原版"计划"无 1:1 替代
+- 报表族 → `v3.0/report/custom/get/`
+
+注意官方**下线公告本身并未指定替代接口**（41 条 path 的替代栏均为"-"），上述对应来自另一篇迁移文档的实体映射；「该模块内哪个接口是列表接口」属无歧义推定，需在契约声明中如实标注。
+
+另有三条官方已公告、需在实现时规避的变更：`2/advertiser/fund/get/` 自 2026 年 6 月中上旬起不再接受旧工作台的 `bp_id` 参数；`v3.0/report/custom/*` 的 `clue_connected_*`/`clue_count_all`/`clue_dialed_count` 指标已于 2026-06-08 移除（带这些字段的请求会**报错**）；`in_app_order_net_refund_pay_amount_fen` 于 2026-08-27 改名为 `stat_in_app_order_net_refund_pay_amount`。
+
+**这使 oceanengine 的问题性质从「鉴权错」升级为「需按真实接口重建」** —— 16 个工具指向不存在或已死的路径，鉴权修对了也拿不到数据。其余 7 个平台的同类审计正在进行，审计结果出来后再定 WP03 的最终范围（见 §6 备注）。
 
 ### 2.4 测试为何没有拦住
 
@@ -147,7 +157,7 @@ WP 的权威定义在 `tasks/` 目录下（每个 WP 一个 prompt 文件，含�
 |---|---|---|---|
 | WP01 | 契约测试框架与契约声明（含重写 `test_integration.py:128-132`） | — | FR-001, FR-003 |
 | WP02 | base class 契约策略层（把统一假设换成 per-platform 策略） | WP01 | FR-002 |
-| WP03 | 巨量引擎：鉴权与信封（header token、去签名、host、`message` 字段）+ 报表迁移 v3.0 | WP02 | FR-004, FR-005 |
+| WP03 | 巨量引擎：鉴权与信封 + endpoint 重建（**范围待定** —— 见 §2.3，16/18 endpoint 需重建；待 8 平台审计完成后定稿） | WP02 | FR-004, FR-005 |
 | WP05 | 淘宝：`session`、timestamp 格式、网关默认值 | WP02 | FR-006 |
 | WP06 | 抖店：补 `method`/`param_json`、签名串、`sign_method=hmac-sha256` | WP02 | FR-007 |
 | WP07 | 小红书：单一网关重写（现有实现无一处吻合） | WP02 | FR-008 |

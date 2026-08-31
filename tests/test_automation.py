@@ -281,18 +281,53 @@ class TestToolDiscovery:
                         "int",
                     ), f"{module_name}.{name} param '{param_name}' has unsupported annotation: {annotation}"
 
-    @pytest.mark.parametrize("platform", _ALL_PLATFORMS)
-    def test_platform_tool_count_reasonable(self, platform):
-        """Each platform should expose a reasonable number of tool functions."""
-        module = _safe_import_module(platform)
-        module_name = _PLATFORM_MODULE_MAP[platform]
+    #: 每个 server **实际注册**的工具数。改动工具注册时必须同步此表 ——
+    #: 这是除 scripts/smoke_install.py 之外唯一能拦住注册漂移的地方。
+    #:
+    #: 数字低于 4 是不可能的：register_common_tools() 会给每个 server 装上
+    #: get_metrics / get_traces / get_alerts / export_data 四个通用运维工具。
+    #: 因此 4 == 该平台当前没有可用的平台工具（见 docs/platforms.md 的下架清单）。
+    REGISTERED_TOOL_COUNTS = {
+        "taobao": 17,
+        "xiaohongshu": 16,
+        "weixin_store": 15,
+        "pinduoduo": 14,
+        "kuaishou": 13,
+        "oceanengine": 6,
+        "doudian": 4,
+        "jd": 4,
+    }
 
-        async_funcs = [
-            name
-            for name, obj in inspect.getmembers(module, inspect.isfunction)
-            if inspect.iscoroutinefunction(obj) and not name.startswith("_")
-        ]
-        assert len(async_funcs) >= 1, f"{module_name} has fewer than 1 tool function"
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("platform", _ALL_PLATFORMS)
+    async def test_registered_tool_count_matches_the_declared_inventory(self, platform):
+        """注册的工具数必须与 REGISTERED_TOOL_COUNTS 一致。
+
+        此前这条测试数的是「模块里的 async 函数」而不是「注册的工具」。两者会分叉 ——
+        FR-015 下架 51 个工具用的正是「移除 @tool 装饰器、保留函数体」的方式，函数
+        全都还在，所以旧断言对下架完全无感、也就完全拦不住反方向的注册漂移。
+        """
+        module = _safe_import_module(platform)
+        server = getattr(module, "mcp", None) or getattr(module, "server")
+        registered = {t.name for t in await server.list_tools()}
+        expected = self.REGISTERED_TOOL_COUNTS[platform]
+
+        assert len(registered) == expected, (
+            f"{platform} 注册了 {len(registered)} 个工具，声明是 {expected} 个。"
+            f"若这是有意改动，请同步本表与 scripts/smoke_install.py 的 EXPECTED_TOOLS。"
+            f"实际：{sorted(registered)}"
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("platform", _ALL_PLATFORMS)
+    async def test_common_operational_tools_are_always_registered(self, platform):
+        """四个通用运维工具与平台 endpoint 无关，任何平台都不该丢。"""
+        module = _safe_import_module(platform)
+        server = getattr(module, "mcp", None) or getattr(module, "server")
+        registered = {t.name for t in await server.list_tools()}
+
+        missing = {"get_metrics", "get_traces", "get_alerts", "export_data"} - registered
+        assert not missing, f"{platform} 丢了通用运维工具：{sorted(missing)}"
 
 
 # ====================================================================

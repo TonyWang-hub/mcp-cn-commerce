@@ -1041,6 +1041,8 @@ class Normalizer:
             amount_shipping=r.amount(pay, ("post_fee",), "amount_shipping"),
             amount_paid=r.amount(pay, ("real_payment",), "amount_paid"),
         )
+        # `real_payment` is platform whole-order paid value, including stored-value
+        # and gift-card orders. It is not bank cash or merchant settlement.
         # `payment` means different things in list and detail. Never substitute it.
         if result.amount_paid is None:
             _warn(r.warnings, "amount_paid", "buyer_payment_unknown")
@@ -1149,7 +1151,77 @@ class Normalizer:
                 _warn(r.warnings, "amount", "refund_funds_incomplete")
                 return
             mode = item.get("refund_mode")
-            if not isinstance(mode, int) or isinstance(mode, bool) or mode != 0:
+            channel = item.get("pay_way")
+            # Platform-recorded refunds include gift/stored-value credits. Keep
+            # every documented nonzero pay_way, without calling it bank cash.
+            # Omit the whole amount if any channel is missing or unconfirmed.
+            valid_channel = (
+                isinstance(channel, int)
+                and not isinstance(channel, bool)
+                and channel
+                in {
+                    1,
+                    2,
+                    3,
+                    5,
+                    7,
+                    8,
+                    9,
+                    10,
+                    11,
+                    12,
+                    13,
+                    14,
+                    15,
+                    16,
+                    17,
+                    18,
+                    19,
+                    20,
+                    21,
+                    22,
+                    24,
+                    25,
+                    27,
+                    28,
+                    29,
+                    30,
+                    33,
+                    35,
+                    36,
+                    37,
+                    40,
+                    72,
+                    80,
+                    90,
+                    100,
+                    101,
+                    102,
+                    103,
+                    104,
+                    105,
+                    106,
+                    107,
+                    110,
+                    111,
+                    112,
+                    113,
+                    114,
+                    115,
+                    116,
+                    117,
+                    118,
+                    119,
+                    200,
+                    201,
+                    202,
+                    203,
+                    204,
+                    300,
+                    400,
+                }
+            )
+            if not isinstance(mode, int) or isinstance(mode, bool) or mode != 0 or not valid_channel:
                 _warn(r.warnings, "amount", "refund_channel_unknown")
                 return
             seen.add(identifier)

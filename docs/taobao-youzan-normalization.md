@@ -17,9 +17,19 @@
 - 有赞订单识别full_order_info（亦可位于data内），order_info的tid、created、update_time、pay_time
   与node_kdt_id保留。pay_info.real_payment（元）才映射实付；payment在列表/详情语义不同，不映射
   为历史实付或订单总价。total_fee为商品总价、post_fee为运费，orders中item_id/sku_id/price/num。
+  real_payment只表示平台的整单实付，支付类型还包括储值卡、E卡、礼品卡、余额、抵扣、组合支付；
+  不能据此推导银行现金流、商家结算额或资金渠道净额。报表只能沿用“平台买家实付”口径。
 - 有赞退款列表refund_fee为申请元金额，不能映射实际退款。详情refund_fee（元）只用于和资金明细
   核对；refund_fund_list非空、流水refund_no不重复、全部status=2、全部refund_mode=0，且分值合计
-  与顶层元金额相等时才发布amount。现金/标记/未知模式不冒充原路资金退款。换货SUCCESS不计金额。
+  与顶层元金额相等时才发布amount。此外每条pay_way必须属于官方列明的非零渠道枚举。
+  原路退回储值/E卡/礼品/会员余额，或明细混合多个已确认渠道，仍属于平台记录的已完成退款，
+  保留分值；不能因非现金渠道把该金额丢弃。缺失、0默认未支付、非法或未确认渠道统一
+  amount=None与refund_channel_unknown，不只加总混合明细的已知部分。本轮refund_mode=1现金退、
+  2标记退仍明确不支持，不把人工记录推导为已确认原路退款。因此整体渠道覆盖仍未验证。
+  报表口径是“平台记录的买家实付与已完成退款”，不声称银行入账或商家最终结算。
+  卡本金/赠送金的会计分拆另需资金账单。换货SUCCESS不计金额。
+  渠道/模式/状态取自[官方退款详情](https://doc.youzanyun.com/detail/API/0/4069.md)的
+  refund_fund_list；实付和支付类型取自[官方订单详情](https://doc.youzanyun.com/v2/doc/cloud/token/N1PewEBlii4MlBk4mw5cwezYnke.md)。
   completed_at仅取refund_account_time，不用refund_success_time补齐。列表申请额由采集器另存
   amount_requested，详情自身不假定具有申请口径。缺失或矛盾资金信息保留None与固定warning。
 - 通用Normalizer不默认为naive日期补时区。TOP采集器按公共协议GMT+8显式解释。YouzanSource
@@ -62,3 +72,12 @@ Pro Source首次27失败，再经真实CommerceService→GrantService→SDK→HT
 未配置时区、禁止原始错误与自由文本warning入库；Black/Ruff/mypy通过。
 
 所有HTTP均由MockTransport截获。未拿Mock成功声称真实商家token、店铺权限或资金到账已验。
+
+同日独立审查补充：原路退款并不等于银行现金退款。统一平台实付/完成退款口径后，
+59个官方非零支付渠道分别验证单一/混合明细，储值、礼品、余额等保留确认金额；
+缺失/0/未知/非法渠道、失败资金和人工退款模式保持未知。新阳性先96项失败，修复后
+TOP/有赞归一化186项、加DD共208项通过；Pro source/privacy/warehouse/commerce 179项通过，
+包括真实CommerceService→SDK→HTTPX→隐私投影→Warehouse的直付、礼品、未知和混合渠道。
+Black/Ruff/mypy通过，normalizer Pylint 10.00。两名独立审查者核对官方渠道与源范围后通过。
+中途全Core运行1869 passed、20 subtests、30项JD旧契约失败，已交JD并行修复者处理；
+这次不把该全仓快照记为全绿。最终发行仍须另跑当前提交的完整流水线。

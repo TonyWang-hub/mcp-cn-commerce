@@ -63,8 +63,8 @@ def yz_refund():
             "refund_account_time": DATE,
             "refund_success_time": "2026-09-09 08:00:00",
             "refund_fund_list": [
-                {"refund_no": "1", "refund_id": "51", "refund_fee": 600, "status": 2, "refund_mode": 0},
-                {"refund_no": "2", "refund_id": "51", "refund_fee": 500, "status": 2, "refund_mode": 0},
+                {"refund_no": "1", "refund_id": "51", "refund_fee": 600, "status": 2, "refund_mode": 0, "pay_way": 1},
+                {"refund_no": "2", "refund_id": "51", "refund_fee": 500, "status": 2, "refund_mode": 0, "pay_way": 1},
             ],
         }
     }
@@ -176,6 +176,106 @@ def test_youzan_refund_fund_fen_not_yuan_and_account_time_not_success_time():
     assert result.refund_id == "51" and result.order_id == "E123" and result.shop_id == "123"
     assert result.amount == 1100 and result.amount_requested is None and result.type == "refund_only"
     assert result.completed_at == result.updated_at == ISO
+
+
+@pytest.mark.parametrize(
+    "channel",
+    [None, 0, -1, 999, True, "1", {}, [], 1.0],
+)
+@pytest.mark.parametrize("mixed", [False, True])
+def test_youzan_original_route_unknown_or_mixed_unknown_channels_do_not_become_actual_money(channel, mixed):
+    raw = yz_refund()
+    funds = raw["data"]["refund_fund_list"]
+    for item in funds[1:] if mixed else funds:
+        if channel is None:
+            item.pop("pay_way")
+        else:
+            item["pay_way"] = channel
+    result = Normalizer(source_timezone="Asia/Shanghai").normalize_refund(raw, "youzan")
+    assert result.amount is None
+    assert warning(result, "refund_channel_unknown")
+
+
+@pytest.mark.parametrize(
+    "channel",
+    [
+        1,
+        2,
+        3,
+        5,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        24,
+        25,
+        27,
+        28,
+        29,
+        30,
+        33,
+        35,
+        36,
+        37,
+        40,
+        72,
+        80,
+        90,
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        110,
+        111,
+        112,
+        113,
+        114,
+        115,
+        116,
+        117,
+        118,
+        119,
+        200,
+        201,
+        202,
+        203,
+        204,
+        300,
+        400,
+    ],
+)
+@pytest.mark.parametrize("mixed", [False, True])
+def test_youzan_reviewed_channels_include_non_cash_and_mixed_platform_refunds(channel, mixed):
+    raw = yz_refund()
+    funds = raw["data"]["refund_fund_list"]
+    for item in funds[1:] if mixed else funds:
+        item["pay_way"] = channel
+    result = Normalizer(source_timezone="Asia/Shanghai").normalize_refund(raw, "youzan")
+    assert result.amount == 1100 and not warning(result, "refund_channel_unknown")
+
+
+@pytest.mark.parametrize("pay_type", [25, 28, 33, 35, 90, 116, 202])
+def test_youzan_real_payment_keeps_platform_definition_for_non_cash_orders(pay_type):
+    raw = yz_order()
+    raw["full_order_info"]["order_info"]["pay_type"] = pay_type
+    result = Normalizer(source_timezone="Asia/Shanghai").normalize_order(raw, "youzan")
+    assert result.amount_paid == 1100  # Platform whole-order paid value, not bank cash settlement.
 
 
 @pytest.mark.parametrize(

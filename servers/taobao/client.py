@@ -6,6 +6,7 @@ import hashlib
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from servers.taobao.schema import validate_params, validate_response
 from shared.cn_commerce_base import (
     DEFAULT_RETRY,
     CommerceAPIError,
@@ -46,6 +47,7 @@ class TaobaoMCP(CommerceMCPBase):
         ]
         if missing:
             raise ConfigValidationError("TAOBAO", missing)
+        validate_params(api_method, biz_params or {})
         params = {"method": api_method, "format": "json", "v": "2.0", **(biz_params or {})}
         return await self._request("POST", "", params=params, retry_config=DEFAULT_RETRY)
 
@@ -85,6 +87,7 @@ class TaobaoMCP(CommerceMCPBase):
             if "error_response" in payload:
                 error = payload["error_response"]
                 raise CommerceAPIError(error.get("code", -1), error.get("msg", "unknown"))
+            validate_response(business.get("method", ""), business, payload)
             return payload
 
         return await self._send_request(

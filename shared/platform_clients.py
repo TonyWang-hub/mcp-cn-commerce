@@ -30,6 +30,13 @@ class Operation:
 
 
 _OPERATIONS = {
+    "youzan": {
+        "get_order_list": Operation("youzan.trades.sold.get/4.0.4", "documented"),
+        "get_order_detail": Operation("youzan.trade.get/4.0.2", "documented"),
+        "get_refund_list": Operation("youzan.trade.refund.search/3.0.1", "documented"),
+        "get_refund_detail": Operation("youzan.trade.refund.get/3.0.1", "documented"),
+        "get_shop_info": Operation("youzan.shop.get/3.0.0", "documented"),
+    },
     "doudian": {
         "get_order_list": Operation("order/searchList", "documented"),
         "get_order_detail": Operation("order/orderDetail", "documented"),
@@ -39,10 +46,10 @@ _OPERATIONS = {
     },
     "taobao": {
         "get_order_list": Operation("taobao.trades.sold.get", "documented"),
-        "get_increment_orders": Operation("taobao.trades.sold.increment.get", "transport_only"),
-        "get_order_detail": Operation("taobao.trade.fullinfo.get", "transport_only"),
-        "get_refund_list": Operation("taobao.refunds.receive.get", "transport_only"),
-        "get_refund_detail": Operation("taobao.refund.get", "transport_only"),
+        "get_increment_orders": Operation("taobao.trades.sold.increment.get", "documented"),
+        "get_order_detail": Operation("taobao.trade.fullinfo.get", "documented"),
+        "get_refund_list": Operation("taobao.refunds.receive.get", "documented"),
+        "get_refund_detail": Operation("taobao.refund.get", "documented"),
         "get_shop_info": Operation("taobao.shop.get", "transport_only"),
     },
     "jd": {
@@ -94,6 +101,7 @@ _OPERATIONS = {
 }
 
 _CLASSES = {
+    "youzan": "YouzanClient",
     "doudian": "DouDianClient",
     "taobao": "TaobaoMCP",
     "jd": "JDMCP",
@@ -104,6 +112,7 @@ _CLASSES = {
     "oceanengine": "OceanEngine",
 }
 _REQUIRED = {
+    "youzan": {"access_token"},
     "doudian": {"app_key", "app_secret", "access_token", "shop_id"},
     "taobao": {"app_key", "app_secret", "access_token"},
     "jd": {"app_key", "app_secret", "access_token"},
@@ -184,7 +193,10 @@ class PlatformClient:
         if not isinstance(params, dict) or any(not isinstance(key, str) for key in params):
             raise ValueError("Business parameters must be a dictionary with string keys")
         for key in params:
-            if key.replace("_", "").replace("-", "").lower() in _PROTOCOL_FIELDS:
+            normalized = key.replace("_", "").replace("-", "").lower()
+            if normalized == "type" and self.platform in {"taobao", "youzan"}:
+                continue  # These platforms define type as a business filter, not a route.
+            if normalized in _PROTOCOL_FIELDS:
                 raise ValueError(f"Business parameter {key!r} cannot override platform protocol fields")
         business = deepcopy(params)
         endpoint = self._operations[operation].endpoint
@@ -235,7 +247,7 @@ def create_platform_client(
         raise ValueError("Credentials must be an explicit mapping")
     snapshot = dict(credentials)
     required = _REQUIRED[platform]
-    allowed = required | ({"app_key", "app_secret"} if platform in {"weixin_store", "oceanengine"} else set())
+    allowed = required | ({"app_key", "app_secret"} if platform in {"weixin_store", "oceanengine", "youzan"} else set())
     if set(snapshot) - allowed:
         raise ValueError(f"Unsupported credential fields for {platform}")
     if any(not isinstance(snapshot.get(key), str) or not snapshot[key].strip() for key in required):

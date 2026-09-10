@@ -84,6 +84,7 @@ attempt, including retries. The default is an independent configurable limiter.
 |---|---|---|
 | `doudian` | `app_key`, `app_secret`, `access_token`, `shop_id` | Native business JSON; response is the `data` dictionary unwrapped by the existing adapter |
 | `taobao` | `app_key`, `app_secret`, `access_token` | TOP business fields, including caller-selected `fields`; response retains the TOP method envelope |
+| `youzan` | `access_token`; optional `app_key`, `app_secret` | Native business JSON; returns the `success`/`code`/`data` envelope. SDK only; no environment-backed MCP CLI |
 | `jd` | `app_key`, `app_secret`, `access_token` | Existing JOS business payload and envelope; current protocol unresolved |
 | `pinduoduo` | `app_key`, `app_secret`, `access_token` | App fields hold PDD client ID/secret; existing native business fields and envelope |
 | `kuaishou` | `app_key`, `app_secret`, `access_token`, `sign_secret` | Existing REST business query fields and response |
@@ -117,7 +118,8 @@ refreshing authorization:
 | Platform | Callable operations | Evidence and omissions |
 |---|---|---|
 | 抖店 | Orders list/detail, refunds list/detail | Four business contracts documented on 2026-09-10; general shop info explicitly unsupported. Native fields and live gates: [Doudian contract](doudian-contract.md) |
-| 淘宝 | Orders list/detail/increment, refunds list/detail, shop info | Order-list contract documented; other mappings marked transport-only |
+| 淘宝 | Orders list/detail/increment, refunds list/detail, shop info | Five order/refund contracts documented; shop info transport-only. [TOP contract](taobao-contract.md) records required fields, windows and application permission limits |
+| 有赞 | Orders list/detail, refunds list/detail, shop info | Five documented SDK-only contracts; [Youzan contract](youzan-contract.md) records current API versions and pagination/amount differences |
 | 京东 | Orders list/detail, refunds list/detail, shop info | All unverified: old official MD5/envelope evidence conflicts with current adapter; not promoted by this SDK |
 | 拼多多 | Orders list/detail, refunds list/detail, shop info | All unverified: current signing/time-unit/business contracts pending |
 | 快手 | Orders list/detail, refunds list/detail, shop info | All unverified: current protocol and permissions pending |

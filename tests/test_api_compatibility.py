@@ -200,7 +200,7 @@ class TestBackwardCompatibilityOldResponseFormats:
                 legacy_error,
                 "_call",
                 "taobao.trades.sold.get",
-                {},
+                {"fields": "tid"},
             )
         assert caught.value.code == 7
         assert caught.value.msg == "Invalid app key"
@@ -552,10 +552,10 @@ class TestVersionNegotiationCompatibility:
         client = TaobaoMCP(app_key="k", app_secret="s", access_token="t")
         _, request = await _parse_http_response(
             client,
-            {"trades_sold_get_response": {"total_results": 0}},
+            {"trades_sold_get_response": {"total_results": 0, "trades": {"trade": []}}},
             "_call",
             "taobao.trades.sold.get",
-            {},
+            {"fields": "tid"},
         )
         assert str(request.url).split("?")[0] == "https://eco.taobao.com/router/rest"
         assert request.url.params["v"] == "2.0"

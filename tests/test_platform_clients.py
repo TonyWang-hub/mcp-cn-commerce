@@ -247,6 +247,10 @@ async def test_every_platform_keeps_two_authorizations_isolated_on_the_wire(plat
         if len(tokens) == 2:
             entered.set()
         await asyncio.wait_for(entered.wait(), 1)
+        if platform == "taobao":
+            return httpx.Response(
+                200, json={"trade_fullinfo_get_response": {"trade": {"tid": 123, "token_used": token}}}
+            )
         return httpx.Response(
             200,
             json={
@@ -266,15 +270,20 @@ async def test_every_platform_keeps_two_authorizations_isolated_on_the_wire(plat
         if platform == "xiaohongshu"
         else ({"shop_order_id": "order"} if platform == "doudian" else {})
     )
+    if platform == "taobao":
+        params = {"fields": "tid", "tid": "123"}
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         async with sdk().create_platform_client(platform, first_credentials, http_client=http) as first:
             async with sdk().create_platform_client(platform, second_credentials, http_client=http) as second:
                 first_credentials["access_token"] = "mutated"
                 results = await asyncio.gather(first.call(operation, params), second.call(operation, params))
                 assert set(tokens) == {"shop-token", "second-shop-token"}
-                key_results = (
-                    [r["shop_order_detail"] for r in results] if platform == "doudian" else [r["data"] for r in results]
-                )
+                if platform == "doudian":
+                    key_results = [r["shop_order_detail"] for r in results]
+                elif platform == "taobao":
+                    key_results = [r["trade_fullinfo_get_response"]["trade"] for r in results]
+                else:
+                    key_results = [r["data"] for r in results]
                 assert [r["token_used"] for r in key_results] == ["shop-token", "second-shop-token"]
 
 
@@ -384,15 +393,29 @@ async def test_doudian_and_top_read_mappings_use_existing_signed_methods(platfor
             params, response = {"after_sale_id": "refund"}, {
                 "process_info": {"after_sale_info": {"after_sale_id": "refund"}}
             }
+    else:
+        refund = operation in {"get_refund_list", "get_refund_detail"}
+        params = {"fields": "refund_id" if refund else "tid"}
+        if operation == "get_order_detail":
+            params["tid"] = "123"
+            body = {"trade": {"tid": 123}}
+        elif operation == "get_refund_detail":
+            params["refund_id"] = "123"
+            body = {"refund": {"refund_id": "123"}}
+        else:
+            body = {"total_results": 0, "refunds" if refund else "trades": {"refund" if refund else "trade": []}}
+            if operation == "get_increment_orders":
+                params.update(start_modified="2026-09-10 00:00:00", end_modified="2026-09-10 01:00:00")
+        response = {expected.removeprefix("taobao.").replace(".", "_") + "_response": body}
 
     def handle(request):
         calls.append(request)
-        return httpx.Response(200, json={"data": response})
+        return httpx.Response(200, json={"data": response} if platform == "doudian" else response)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         async with sdk().create_platform_client(platform, platform_credentials(platform), http_client=http) as client:
             result = await client.call(operation, params)
-            assert result == (response if platform == "doudian" else {"data": response})
+            assert result == response
             assert calls[0].url.params["method"] == expected
             assert calls[0].url.params["sign"]
 

@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from mcp.server.mcpserver import MCPServer
 
 from servers.taobao.client import TaobaoMCP
+from servers.taobao.schema import ORDER_DETAIL_FIELDS, ORDER_FIELDS, REFUND_DETAIL_FIELDS, REFUND_FIELDS
 from shared.cn_commerce_base import (
     ConfigValidationError,
     register_common_tools,
@@ -70,7 +71,7 @@ async def get_order_list(
     page: int = 1,
     page_size: int = 20,
 ) -> str:
-    """Query order list by time range and optional status.
+    """Query orders created within the last three months; one page is not a complete report.
 
     Args:
         start_time: Order start time, e.g. "2024-01-01 00:00:00"
@@ -87,6 +88,7 @@ async def get_order_list(
     """
     biz_params: dict[str, str] = {
         "start_created": start_time,
+        "fields": ORDER_FIELDS,
         "end_created": end_time,
         "page_no": str(page),
         "page_size": str(page_size),
@@ -105,7 +107,7 @@ async def get_order_detail(tid: str) -> str:
     Args:
         tid: The Taobao trade ID (e.g. "123456789012345678").
     """
-    biz_params = {"tid": tid}
+    biz_params = {"tid": tid, "fields": ORDER_DETAIL_FIELDS}
     result = await taobao._call("taobao.trade.fullinfo.get", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -119,16 +121,19 @@ async def get_increment_orders(
 ) -> str:
     """Query incrementally modified orders by time range.
 
-    Useful for syncing order changes (status updates, modifications).
+    Only trades within three months are visible. Each window must be at most one
+    day; the platform recommends 30 minutes. Results are modified-time descending;
+    collect from the last page backwards to reduce missed changes.
 
     Args:
         start_time: Modification start time, e.g. "2024-01-01 00:00:00"
-        end_time: Modification end time, e.g. "2024-01-31 23:59:59"
+        end_time: Modification end time, e.g. "2024-01-01 23:59:59"
         page: Page number, starting from 1.
         page_size: Number of orders per page (max 100).
     """
     biz_params: dict[str, str] = {
         "start_modified": start_time,
+        "fields": ORDER_FIELDS,
         "end_modified": end_time,
         "page_no": str(page),
         "page_size": str(page_size),
@@ -217,6 +222,7 @@ async def get_refund_list(
     if status:
         biz_params["status"] = status
 
+    biz_params["fields"] = REFUND_FIELDS
     result = await taobao._call("taobao.refunds.receive.get", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -226,9 +232,9 @@ async def get_refund_detail(refund_id: str) -> str:
     """Get full details of a single refund/return record.
 
     Args:
-        refund_id: The refund record ID (e.g. "RF12345678901").
+        refund_id: The refund record ID (e.g. "12345678901").
     """
-    biz_params = {"refund_id": refund_id}
+    biz_params = {"refund_id": refund_id, "fields": REFUND_DETAIL_FIELDS}
     result = await taobao._call("taobao.refund.get", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
 

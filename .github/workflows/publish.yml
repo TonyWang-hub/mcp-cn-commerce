@@ -2,14 +2,22 @@ name: Build & Release
 
 on:
   push:
-    tags:
-      - "v*"
+    tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing version tag to test and publish (for example v0.1.6)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
-  # Run the full quality suite first; release is gated on it passing.
   quality:
     uses: ./.github/workflows/test.yml
+    with:
+      ref: ${{ inputs.release_tag || github.ref }}
 
   release:
     runs-on: ubuntu-latest
@@ -18,27 +26,48 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
-
-      - name: Build package
+          ref: ${{ inputs.release_tag || github.ref }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Require matching package, manifest and tag versions
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
-          pip install build
+          python - <<'PY'
+          import json, os
+          from shared import __version__
+          manifest = json.load(open("server.json"))
+          assert os.environ["RELEASE_TAG"] == "v" + __version__, "Release tag must match shared.__version__"
+          assert manifest["version"] == __version__
+          assert all(p["version"] == __version__ for p in manifest["packages"])
+          PY
+      - name: Build and check distributions
+        run: |
+          python -m pip install build twine
           python -m build
-
-      - name: Create GitHub Release & Upload
+          python -m twine check dist/*
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: python -m twine upload --non-interactive dist/*
+      - name: Create GitHub Release and upload artifacts
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
           files: dist/*
           generate_release_notes: true
           make_latest: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish to PyPI
-        run: |
-          pip install twine
-          twine upload dist/* -u __token__ -p ${{ secrets.PYPI_TOKEN }}
+  # Explicit dependency, because releases created by GITHUB_TOKEN do not
+  # trigger a separate release:published workflow.
+  registry:
+    needs: [release]
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/mcp-registry.yml
+    with:
+      ref: ${{ inputs.release_tag || github.ref }}

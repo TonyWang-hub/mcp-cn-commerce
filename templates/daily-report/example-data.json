@@ -1,78 +1,281 @@
 {
-  "date": "2026-06-09",
+  "schema_version": "1.0",
+  "date": "2026-09-10",
+  "timezone": "Asia/Shanghai",
+  "currency": "CNY",
+  "money_unit": "fen",
   "shops": [
     {
-      "shop_name": "XX品牌旗舰店",
       "platform": "doudian",
+      "shop_id": "demo-douyin",
+      "shop_name": "demo-douyin",
       "summary": {
-        "order_count": 156,
-        "gmv": 2895000,
-        "avg_order_value": 18558,
-        "refund_count": 8,
-        "refund_rate": 0.051,
-        "new_customer_count": 42,
-        "repeat_customer_count": 114
+        "order_count": 1,
+        "gmv": 1999,
+        "avg_order_value": 1999,
+        "refund_count": 0,
+        "refund_order_count": 0,
+        "refund_amount": 0,
+        "refund_rate": 0.0,
+        "same_day_refunded_order_count": 0,
+        "new_customer_count": null,
+        "repeat_customer_count": null,
+        "known_paid_amount_count": 1,
+        "known_refund_amount_count": 0
       },
-      "top_products": [
-        {"name": "夏季新款男士短袖T恤", "sales": 38, "gmv": 756200},
-        {"name": "女士碎花连衣裙", "sales": 25, "gmv": 622500},
-        {"name": "运动休闲鞋", "sales": 18, "gmv": 538200}
-      ],
       "yesterday": {
-        "order_count": 142,
-        "gmv": 2650000,
-        "refund_rate": 0.045
+        "order_count": 1,
+        "gmv": 1500,
+        "avg_order_value": 1500,
+        "refund_count": 0,
+        "refund_order_count": 0,
+        "refund_amount": 0,
+        "refund_rate": 0.0,
+        "same_day_refunded_order_count": 0,
+        "new_customer_count": null,
+        "repeat_customer_count": null,
+        "known_paid_amount_count": 1,
+        "known_refund_amount_count": 0
+      },
+      "observed_summary": {
+        "order_count": 1,
+        "gmv": 1999,
+        "avg_order_value": 1999,
+        "refund_count": 0,
+        "refund_order_count": 0,
+        "refund_amount": 0,
+        "refund_rate": 0.0,
+        "same_day_refunded_order_count": 0,
+        "new_customer_count": null,
+        "repeat_customer_count": null,
+        "known_paid_amount_count": 1,
+        "known_refund_amount_count": 0
+      },
+      "observed_yesterday": {
+        "order_count": 1,
+        "gmv": 1500,
+        "avg_order_value": 1500,
+        "refund_count": 0,
+        "refund_order_count": 0,
+        "refund_amount": 0,
+        "refund_rate": 0.0,
+        "same_day_refunded_order_count": 0,
+        "new_customer_count": null,
+        "repeat_customer_count": null,
+        "known_paid_amount_count": 1,
+        "known_refund_amount_count": 0
+      },
+      "completeness": {
+        "2026-09-10": {
+          "complete": true,
+          "orders": true,
+          "refunds": true,
+          "metrics": {
+            "order_count": true,
+            "gmv": true,
+            "avg_order_value": true,
+            "refund_count": true,
+            "refund_order_count": true,
+            "refund_amount": true,
+            "refund_rate": true,
+            "same_day_refunded_order_count": true
+          }
+        },
+        "2026-09-09": {
+          "complete": true,
+          "orders": true,
+          "refunds": true,
+          "metrics": {
+            "order_count": true,
+            "gmv": true,
+            "avg_order_value": true,
+            "refund_count": true,
+            "refund_order_count": true,
+            "refund_amount": true,
+            "refund_rate": true,
+            "same_day_refunded_order_count": true
+          }
+        }
+      },
+      "errors": [],
+      "warnings": [],
+      "top_products": [
+        {
+          "product_id": "demo-product",
+          "name": "示例商品",
+          "sales": 1,
+          "gross_item_amount": 1999,
+          "gmv": null
+        }
+      ],
+      "observed_top_products": [
+        {
+          "product_id": "demo-product",
+          "name": "示例商品",
+          "sales": 1,
+          "gross_item_amount": 1999,
+          "gmv": null
+        }
+      ],
+      "top_products_complete": true,
+      "duplicates_removed": {
+        "orders": 0,
+        "refunds": 0
       }
     },
     {
-      "shop_name": "XX数码专营店",
-      "platform": "jd",
+      "platform": "pdd",
+      "shop_id": "demo-pdd",
+      "shop_name": "demo-pdd",
       "summary": {
-        "order_count": 89,
-        "gmv": 4567000,
-        "avg_order_value": 51315,
-        "refund_count": 3,
-        "refund_rate": 0.034,
-        "new_customer_count": 15,
-        "repeat_customer_count": 74
+        "order_count": 1,
+        "gmv": 2900,
+        "avg_order_value": 2900,
+        "refund_count": 1,
+        "refund_order_count": 1,
+        "refund_amount": 100,
+        "refund_rate": 1.0,
+        "same_day_refunded_order_count": 1,
+        "new_customer_count": null,
+        "repeat_customer_count": null,
+        "known_paid_amount_count": 1,
+        "known_refund_amount_count": 1
       },
-      "top_products": [
-        {"name": "无线蓝牙耳机 Pro", "sales": 32, "gmv": 2556800},
-        {"name": "手机壳 透明防摔款", "sales": 28, "gmv": 557200},
-        {"name": "充电宝 20000mAh", "sales": 15, "gmv": 1198500}
-      ],
       "yesterday": {
-        "order_count": 95,
-        "gmv": 4890000,
-        "refund_rate": 0.032
-      }
-    },
-    {
-      "shop_name": "XX女装小红书店",
-      "platform": "xiaohongshu",
-      "summary": {
-        "order_count": 67,
-        "gmv": 1234500,
-        "avg_order_value": 18425,
-        "refund_count": 5,
-        "refund_rate": 0.075,
-        "new_customer_count": 28,
-        "repeat_customer_count": 39
+        "order_count": 1,
+        "gmv": 3000,
+        "avg_order_value": 3000,
+        "refund_count": 0,
+        "refund_order_count": 0,
+        "refund_amount": 0,
+        "refund_rate": 0.0,
+        "same_day_refunded_order_count": 0,
+        "new_customer_count": null,
+        "repeat_customer_count": null,
+        "known_paid_amount_count": 1,
+        "known_refund_amount_count": 0
       },
+      "observed_summary": {
+        "order_count": 1,
+        "gmv": 2900,
+        "avg_order_value": 2900,
+        "refund_count": 1,
+        "refund_order_count": 1,
+        "refund_amount": 100,
+        "refund_rate": 1.0,
+        "same_day_refunded_order_count": 1,
+        "new_customer_count": null,
+        "repeat_customer_count": null,
+        "known_paid_amount_count": 1,
+        "known_refund_amount_count": 1
+      },
+      "observed_yesterday": {
+        "order_count": 1,
+        "gmv": 3000,
+        "avg_order_value": 3000,
+        "refund_count": 0,
+        "refund_order_count": 0,
+        "refund_amount": 0,
+        "refund_rate": 0.0,
+        "same_day_refunded_order_count": 0,
+        "new_customer_count": null,
+        "repeat_customer_count": null,
+        "known_paid_amount_count": 1,
+        "known_refund_amount_count": 0
+      },
+      "completeness": {
+        "2026-09-10": {
+          "complete": true,
+          "orders": true,
+          "refunds": true,
+          "metrics": {
+            "order_count": true,
+            "gmv": true,
+            "avg_order_value": true,
+            "refund_count": true,
+            "refund_order_count": true,
+            "refund_amount": true,
+            "refund_rate": true,
+            "same_day_refunded_order_count": true
+          }
+        },
+        "2026-09-09": {
+          "complete": true,
+          "orders": true,
+          "refunds": true,
+          "metrics": {
+            "order_count": true,
+            "gmv": true,
+            "avg_order_value": true,
+            "refund_count": true,
+            "refund_order_count": true,
+            "refund_amount": true,
+            "refund_rate": true,
+            "same_day_refunded_order_count": true
+          }
+        }
+      },
+      "errors": [],
+      "warnings": [],
       "top_products": [
-        {"name": "法式复古碎花茶歇裙", "sales": 22, "gmv": 525800},
-        {"name": "冰丝防晒衣 女薄款", "sales": 18, "gmv": 268200},
-        {"name": "大码阔腿裤 高腰显瘦", "sales": 12, "gmv": 142800}
+        {
+          "product_id": "demo-product",
+          "name": "示例商品",
+          "sales": 1,
+          "gross_item_amount": 2900,
+          "gmv": null
+        }
       ],
-      "yesterday": {
-        "order_count": 72,
-        "gmv": 1350000,
-        "refund_rate": 0.065
+      "observed_top_products": [
+        {
+          "product_id": "demo-product",
+          "name": "示例商品",
+          "sales": 1,
+          "gross_item_amount": 2900,
+          "gmv": null
+        }
+      ],
+      "top_products_complete": true,
+      "duplicates_removed": {
+        "orders": 0,
+        "refunds": 0
       }
     }
   ],
-  "low_stock_alerts": [
-    {"product": "夏季新款男士短袖T恤", "platform": "doudian", "stock": 32, "sku": "白色 XL"},
-    {"product": "无线蓝牙耳机 Pro", "platform": "jd", "stock": 15, "sku": "黑色"}
-  ]
+  "total_summary": {
+    "order_count": 2,
+    "gmv": 4899,
+    "avg_order_value": 2450,
+    "refund_count": 1,
+    "refund_order_count": 1,
+    "refund_amount": 100,
+    "refund_rate": 0.5,
+    "same_day_refunded_order_count": 1
+  },
+  "yesterday_summary": {
+    "order_count": 2,
+    "gmv": 4500,
+    "avg_order_value": 2250,
+    "refund_count": 0,
+    "refund_order_count": 0,
+    "refund_amount": 0,
+    "refund_rate": 0.0,
+    "same_day_refunded_order_count": 0
+  },
+  "complete": true,
+  "yesterday_complete": true,
+  "low_stock_alerts": null,
+  "metric_definitions": {
+    "order_count": "Unique orders with paid_at in the report timezone day; never inferred from created_at or current status.",
+    "gmv": "Sum of amount_paid, integer fen, before subtracting refunds; settlement revenue is not available.",
+    "avg_order_value": "GMV / paid order count rounded half up to integer fen; null for no paid orders.",
+    "refund_count": "Unique completed refund IDs with completed_at in the report day, including refunds of older orders.",
+    "refund_rate": "Share of this day's paid order IDs with a completed refund on the same day; not a lifecycle refund rate.",
+    "gross_item_amount": "Unit price times quantity before order-level allocations; product paid GMV is null.",
+    "coverage": "Caller attestation of all pages fetched for each event-date/source; not inferred from list length.",
+    "observed_summary": "Known records only, may omit unknown amounts; must not be presented as complete totals.",
+    "null": "Unknown, incomplete or undefined; never replace with zero.",
+    "new_customer_count": "Unavailable without customer history; remains null.",
+    "low_stock_alerts": "Unavailable without stock data; remains null."
+  }
 }

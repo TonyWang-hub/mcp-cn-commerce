@@ -1,5 +1,5 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.TonyWang-hub/mcp-cn-commerce",
   "description": "Read-only merchant data from 8 Chinese e-commerce platforms: orders, products, after-sales, ads",
   "repository": {
@@ -18,64 +18,182 @@
       },
       "environmentVariables": [
         {
-          "name": "OCEANENGINE_APP_KEY",
-          "description": "Ocean Engine open platform App Key (only needed for the oceanengine server)",
-          "isRequired": false,
-          "isSecret": true
-        },
-        {
-          "name": "OCEANENGINE_APP_SECRET",
-          "description": "Ocean Engine open platform App Secret",
-          "isRequired": false,
-          "isSecret": true
-        },
-        {
           "name": "OCEANENGINE_ACCESS_TOKEN",
-          "description": "Ocean Engine OAuth access token",
+          "description": "Required when platform=oceanengine.",
           "isRequired": false,
           "isSecret": true
         },
         {
           "name": "DOUDIAN_APP_KEY",
-          "description": "Douyin Shop App Key (only needed for the doudian server)",
+          "description": "Required when platform=doudian.",
           "isRequired": false,
           "isSecret": true
         },
         {
           "name": "DOUDIAN_APP_SECRET",
-          "description": "Douyin Shop App Secret",
+          "description": "Required when platform=doudian.",
           "isRequired": false,
           "isSecret": true
         },
         {
           "name": "DOUDIAN_SHOP_ID",
-          "description": "Douyin Shop ID",
+          "description": "Required when platform=doudian.",
           "isRequired": false,
           "isSecret": false
         },
         {
           "name": "DOUDIAN_ACCESS_TOKEN",
-          "description": "Douyin Shop OAuth access token",
+          "description": "Required when platform=doudian.",
           "isRequired": false,
           "isSecret": true
         },
         {
           "name": "JD_APP_KEY",
-          "description": "JD open platform App Key (only needed for the jd server)",
+          "description": "Required when platform=jd.",
           "isRequired": false,
           "isSecret": true
         },
         {
           "name": "JD_APP_SECRET",
-          "description": "JD open platform App Secret",
+          "description": "Required when platform=jd.",
           "isRequired": false,
           "isSecret": true
         },
         {
           "name": "JD_ACCESS_TOKEN",
-          "description": "JD OAuth access token",
+          "description": "Required when platform=jd.",
           "isRequired": false,
           "isSecret": true
+        },
+        {
+          "name": "TAOBAO_APP_KEY",
+          "description": "Required when platform=taobao.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "TAOBAO_APP_SECRET",
+          "description": "Required when platform=taobao.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "TAOBAO_ACCESS_TOKEN",
+          "description": "Required when platform=taobao.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "PINDUODUO_CLIENT_ID",
+          "description": "Required when platform=pinduoduo.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "PINDUODUO_CLIENT_SECRET",
+          "description": "Required when platform=pinduoduo.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "PINDUODUO_ACCESS_TOKEN",
+          "description": "Required when platform=pinduoduo.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "KUAISHOU_APP_KEY",
+          "description": "Required when platform=kuaishou.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "KUAISHOU_APP_SECRET",
+          "description": "Required when platform=kuaishou.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "KUAISHOU_SIGN_SECRET",
+          "description": "Required when platform=kuaishou.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "KUAISHOU_ACCESS_TOKEN",
+          "description": "Required when platform=kuaishou.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "XHS_CLIENT_ID",
+          "description": "Required when platform=xiaohongshu.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "XHS_CLIENT_SECRET",
+          "description": "Required when platform=xiaohongshu.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "XHS_ACCESS_TOKEN",
+          "description": "Required when platform=xiaohongshu.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "WX_APP_ID",
+          "description": "Required with WX_APP_SECRET in managed token mode.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "WX_APP_SECRET",
+          "description": "Required with WX_APP_ID in managed token mode.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "WX_ACCESS_TOKEN",
+          "description": "Required in static token mode. Used by default when provided.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "WX_TOKEN_MODE",
+          "description": "static uses WX_ACCESS_TOKEN; managed obtains tokens with WX_APP_ID and WX_APP_SECRET.",
+          "isRequired": false,
+          "isSecret": false,
+          "choices": [
+            "static",
+            "managed"
+          ]
+        }
+      ],
+      "runtimeHint": "uvx",
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "start"
+        },
+        {
+          "type": "positional",
+          "valueHint": "platform",
+          "description": "One platform per stdio connection; configure each additional platform as a separate connection.",
+          "default": "oceanengine",
+          "choices": [
+            "oceanengine",
+            "doudian",
+            "jd",
+            "taobao",
+            "pinduoduo",
+            "kuaishou",
+            "xiaohongshu",
+            "weixin_store"
+          ],
+          "isRequired": true
         }
       ]
     }

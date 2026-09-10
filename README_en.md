@@ -41,41 +41,23 @@ A **monorepo of independent MCP (Model Context Protocol) servers** that give AI 
 - **巨量引擎 (Ocean Engine)** — advertising campaign, report, and account data
 - **抖店 (Douyin Shop)** — orders, products, refunds, shop management
 - **京东 (JD.com)** — orders, products, shop information
-- More coming: **淘宝**, **拼多多**, **快手**, **小红书**, **微信小店**
+- Additional included adapters: **淘宝**, **拼多多**, **快手**, **小红书**, **微信小店**
 
 All tools are **read-only** by default — AI agents can analyze your business data but cannot modify anything.
 
 ## Why This Project
 
-Existing Chinese-platform MCP servers all focus on **content publishing** (posting videos, searching trends). Zero cover **merchant business operations** — pulling ad reports, checking orders, managing refunds.
+This project focuses on authorized merchant operations data, shared request reliability and deterministic reporting.
 
-| | Content MCPs (HuiMei, Astron, etc.) | mcp-cn-commerce |
-|---|---|---|
-| **Purpose** | Post videos, search hot topics | Pull ad reports, query orders |
-| **Target User** | Creators / influencers | E-commerce business owners / operators |
-| **Data Type** | Content data (views, likes, trends) | **Business data** (revenue, orders, refunds, ROAS) |
-| **Platform Scope** | Content platforms | E-commerce + advertising platforms |
-| **Operations** | Publish / write | Read-only analytics & monitoring |
+- Separate stdio services configured with each merchant's granted permissions.
+- Shared connection pools, rate limits, retries, metrics and redaction.
+- Explicit money and time contracts; reports flag missing data and incomplete pagination.
 
-This is the **first open-source MCP server suite for Chinese e-commerce business operations**.
+Official APIs, official MCP services and this third-party adapter are distinct. See [official access evidence](docs/official-access-status.md).
 
 ## Platforms
 
-| Platform | Category | Phase | Status | Tests | Open API |
-|---|---|---|---|---|---|
-| 巨量引擎 (Ocean Engine) | Advertising (广告投放) | 1 | ✅ | 24 | [open.oceanengine.com](https://open.oceanengine.com) |
-| 巨量千川 (Qianchuan) | E-commerce Ads (电商广告) | 1 | ✅ | (shared) | [qianchuan.jinritemai.com](https://qianchuan.jinritemai.com) |
-| 抖店 (Douyin Shop) | E-commerce (电商店铺) | 1 | ✅ | 31 | [op.jinritemai.com](https://op.jinritemai.com) |
-| 京东 (JD.com) | E-commerce (电商店铺) | 1 | ✅ | 19 | [jos.jd.com](https://jos.jd.com) |
-| 淘宝 (Taobao) | E-commerce (电商店铺) | 2 | ✅ | 36 | [open.taobao.com](https://open.taobao.com) |
-| 拼多多 (Pinduoduo) | E-commerce (电商店铺) | 2 | ✅ | 30 | [open.pinduoduo.com](https://open.pinduoduo.com) |
-| 快手 (Kuaishou) | E-commerce (电商店铺) | 3 | ✅ | 33 | [open.kuaixiaodian.com](https://open.kuaixiaodian.com) |
-| 小红书 (Xiaohongshu) | E-commerce (电商店铺) | 3 | ✅ | 33 | [open.xiaohongshu.com](https://open.xiaohongshu.com) |
-| 微信小店 (WeChat Store) | E-commerce (电商店铺) | 3 | ✅ | 25 | [developers.weixin.qq.com](https://developers.weixin.qq.com) |
-
-> **Phase 4** (exploratory): 闲鱼 (Xianyu), 美团 (Meituan), 饿了么 (Ele.me) — restricted APIs, awaiting policy clarity.
->
-> **358 tests** across all 8 servers. CI runs on Python 3.11, 3.12, 3.13.
+Eight platform adapters are included. Xiaohongshu has nine business tool mappings based on current official schemas; the four retained review, shop, promotion and coupon entry points return an explicit unsupported error without sending a request. Registered tool counts include these retained entry points. Tool registration is not proof of successful merchant API access. App eligibility, authorization, endpoint versions and account permissions require platform-specific verification. See [platform contracts](docs/platforms.md) and [official access evidence](docs/official-access-status.md). CI covers Python 3.11/3.12/3.13; use the workflow result for the exact commit as verification evidence.
 
 ## Quick Start
 
@@ -85,8 +67,9 @@ This is the **first open-source MCP server suite for Chinese e-commerce business
 # Build the image
 docker build -t mcp-cn-commerce .
 
-# Run tests
-docker run --rm mcp-cn-commerce make test
+# Build the development target to run tests
+docker build --target development -t mcp-cn-commerce-dev .
+docker run --rm mcp-cn-commerce-dev make test
 
 # Run a platform server (Ocean Engine example)
 docker run --rm -i --env-file .env mcp-cn-commerce mcp-cn-oceanengine
@@ -111,8 +94,8 @@ All platform servers are bundled. Choose which to use via your MCP client config
 # Visit the latest Release and download the .whl file
 # https://github.com/TonyWang-hub/mcp-cn-commerce/releases/latest
 
-# Or install directly from the Release URL:
-pip install https://github.com/TonyWang-hub/mcp-cn-commerce/releases/latest/download/mcp_cn_commerce-0.1.0-py3-none-any.whl
+# Download the wheel shown on the latest Release page, then install that local file.
+python -m pip install /path/to/downloaded.whl
 ```
 
 #### From Git (always latest)
@@ -139,7 +122,7 @@ export OCEANENGINE_APP_KEY="your_app_key"
 export OCEANENGINE_APP_SECRET="your_app_secret"
 export OCEANENGINE_ACCESS_TOKEN="your_access_token"
 
-# 抖店 (Douyin Shop) — TikTok Shop China
+# 抖店 (Douyin Shop) — Douyin merchant platform
 export DOUDIAN_APP_KEY="your_app_key"
 export DOUDIAN_APP_SECRET="your_app_secret"
 export DOUDIAN_SHOP_ID="your_shop_id"
@@ -266,20 +249,20 @@ See all templates: [`templates/`](templates/)
 
 | Server | Tools | Categories |
 |---|---|---|
-| oceanengine | 22 | Ads, Qianchuan, Star, Creative, Audience, Optimization |
-| doudian | 24 | Orders, Products, Refunds, Logistics, Reviews, Live, Traffic, Marketing, Billing, Shop |
-| jd | 19 | Orders, Products, After-Sale, Logistics, Reviews, Pricing, Inventory, Marketing, Shop |
-| taobao | 17 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Categories |
-| pinduoduo | 17 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Affiliate |
-| kuaishou | 16 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing |
-| xiaohongshu | 17 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Inventory, Finance |
-| weixin_store | 15 | Orders, Products, Refunds, Logistics, Shop, Marketing, Supply Chain, Categories |
-| **Total** | **147** | Platform tools + 4 shared operational tools each |
+| oceanengine | 23 | Ads, Qianchuan, Star, Creative, Audience, Optimization |
+| doudian | 25 | Orders, Products, Refunds, Logistics, Reviews, Live, Traffic, Marketing, Billing, Shop |
+| jd | 20 | Orders, Products, After-Sale, Logistics, Reviews, Pricing, Inventory, Marketing, Shop |
+| taobao | 18 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Categories |
+| pinduoduo | 18 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Affiliate |
+| kuaishou | 17 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing |
+| xiaohongshu | 18 | Orders, Products, Refunds, Logistics, Reviews, Shop, Marketing, Inventory, Finance |
+| weixin_store | 16 | Orders, Products, Refunds, Logistics, Shop, Marketing, Supply Chain, Categories |
+| **Total** | **155** | Platform tools + 5 shared tools each |
 
-Every server also exposes **4 cross-platform operational tools** (counted above): `get_metrics`
+Every server also exposes **5 cross-platform shared tools** (counted above): `get_metrics`
 (per-endpoint latency / success / error stats), `get_traces` (recent request traces),
-`get_alerts` (alert-rule evaluation against live metrics), and `export_data` (export records
-to CSV/JSON). Request tracing and metrics are collected automatically on every call.
+`get_alerts` (alert-rule evaluation against live metrics), `export_data` (export records to CSV/JSON), and `build_daily_report`
+(deterministic reports with explicit timezone and completeness). Request tracing and metrics are collected automatically on every call.
 
 For full tool details, see the source code in each `servers/<platform>/server.py` file.
 | `get_product_list` | Product catalog with pricing and stock | `/product/list` |
@@ -289,10 +272,10 @@ For full tool details, see the source code in each `servers/<platform>/server.py
 
 This project handles sensitive e-commerce API credentials. Our security guarantees:
 
-- 🔒 **Runs locally** — API keys and secrets never leave your machine
+- 🔒 **Runs locally** — credentials are loaded locally; required authentication is sent to the relevant platform API
 - 📖 **Open source** — every line of code is auditable
 - 👁️ **Read-only by default** — all platform tools only read data; zero write/modify/delete operations
-- 📡 **No telemetry** — no usage data is collected, tracked, or transmitted
+- 📡 **No telemetry** — this project does not report usage to a project-owned service; tool results are returned to your configured MCP/AI client
 - 🖥️ **Direct API calls** — connects directly to platform APIs; no intermediate server or proxy
 - 🔑 **Env-var config** — credentials are loaded from environment variables, never hardcoded
 

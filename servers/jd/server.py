@@ -11,10 +11,12 @@ import hashlib
 import hmac
 import json
 import os
+from contextlib import asynccontextmanager
 
 from mcp.server.mcpserver import MCPServer
 
 from shared.cn_commerce_base import (
+    DEFAULT_RETRY,
     CommerceMCPBase,
     ConfigValidationError,
     SignMethod,
@@ -28,6 +30,7 @@ from shared.cn_commerce_base import (
 class JDMCP(CommerceMCPBase):
     """JD-specific client that overrides signing for HMAC-MD5."""
 
+    PLATFORM = "JD"
     BASE_URL = "https://api.jd.com/routerjson"
     sign_method = SignMethod.HMAC_MD5
 
@@ -52,12 +55,17 @@ class JDMCP(CommerceMCPBase):
         system params (method, format, v, plus auth) go in query string;
         business params go in JSON body.
         """
+        missing = [name for name, value in (
+            ("JD_APP_KEY", self.app_key), ("JD_APP_SECRET", self.app_secret),
+            ("JD_ACCESS_TOKEN", self.access_token)) if not value]
+        if missing:
+            raise ConfigValidationError("JD", missing)
         params = {
             "method": api_method,
             "format": "json",
             "v": "2.0",
         }
-        return await self._request("POST", "", params=params, data=biz_params or {})
+        return await self._request("POST", "", params=params, data=biz_params or {}, retry_config=DEFAULT_RETRY)
 
 
 # ── Instantiate client from env ────────────────────────────────────────────
@@ -81,7 +89,18 @@ jd = _create_jd_client()
 
 # ── MCP server ─────────────────────────────────────────────────────────────
 
-mcp = MCPServer("mcp-cn-jd")
+
+@asynccontextmanager
+async def _lifespan(_server):
+    try:
+        yield {}
+    finally:
+        client = jd
+        if client is not None:
+            await client.close()
+
+
+mcp = MCPServer("mcp-cn-jd", lifespan=_lifespan)
 
 
 @mcp.tool()

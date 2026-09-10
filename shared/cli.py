@@ -7,6 +7,7 @@ Supports configuration via files and environment variables.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import logging
 import os
@@ -53,23 +54,31 @@ SERVER_REGISTRY: dict[str, dict[str, str]] = {
     },
     "xiaohongshu": {
         "module": "servers.xiaohongshu.server",
-        "env_prefix": "XIAOHONGSHU",
+        "env_prefix": "XHS",
         "description": "Xiaohongshu (小红书) e-commerce platform",
     },
     "weixin_store": {
         "module": "servers.weixin_store.server",
-        "env_prefix": "WEIXIN_STORE",
+        "env_prefix": "WX",
         "description": "Weixin Store (微信小店) e-commerce platform",
     },
 }
 
-# ── Path Setup ─────────────────────────────────────────────
+# Fields follow each platform's real authentication contract. Ocean Engine
+# needs only the already-issued token; Weixin has alternative auth modes.
+PLATFORM_ENV_FIELDS: dict[str, tuple[str, ...]] = {
+    "oceanengine": ("OCEANENGINE_ACCESS_TOKEN",),
+    "doudian": ("DOUDIAN_APP_KEY", "DOUDIAN_APP_SECRET", "DOUDIAN_SHOP_ID", "DOUDIAN_ACCESS_TOKEN"),
+    "jd": ("JD_APP_KEY", "JD_APP_SECRET", "JD_ACCESS_TOKEN"),
+    "taobao": ("TAOBAO_APP_KEY", "TAOBAO_APP_SECRET", "TAOBAO_ACCESS_TOKEN"),
+    "pinduoduo": ("PINDUODUO_CLIENT_ID", "PINDUODUO_CLIENT_SECRET", "PINDUODUO_ACCESS_TOKEN"),
+    "kuaishou": ("KUAISHOU_APP_KEY", "KUAISHOU_APP_SECRET", "KUAISHOU_SIGN_SECRET", "KUAISHOU_ACCESS_TOKEN"),
+    "xiaohongshu": ("XHS_CLIENT_ID", "XHS_CLIENT_SECRET", "XHS_ACCESS_TOKEN"),
+    "weixin_store": ("WX_APP_ID", "WX_APP_SECRET", "WX_ACCESS_TOKEN", "WX_TOKEN_MODE"),
+}
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_SHARED_DIR = _REPO_ROOT / "shared"
 _SERVERS_DIR = _REPO_ROOT / "servers"
-
-# ── Config File Support ────────────────────────────────────
 
 DEFAULT_CONFIG_PATHS = [
     Path.cwd() / "mcp-cn-commerce.json",
@@ -78,245 +87,166 @@ DEFAULT_CONFIG_PATHS = [
 
 
 def load_config(config_path: str | None = None) -> dict[str, Any]:
-    """Load configuration from a JSON file.
+    """Load the explicit file, or the first existing default file.
 
-    Args:
-        config_path: Optional explicit path to config file.
-
-    Returns:
-        Configuration dict, empty if no file found.
+    Invalid or explicitly missing files fail visibly instead of silently
+    launching with a different account/configuration.
     """
-    paths_to_try = []
-    if config_path:
-        paths_to_try.append(Path(config_path))
-    else:
-        paths_to_try.extend(DEFAULT_CONFIG_PATHS)
-
-    for p in paths_to_try:
-        if p.is_file():
-            try:
-                with open(p) as f:
-                    config = json.load(f)
-                logging.debug(f"Loaded config from {p}")
-                return config
-            except (json.JSONDecodeError, OSError) as e:
-                logging.warning(f"Failed to load config from {p}: {e}")
+    paths = [Path(config_path)] if config_path else DEFAULT_CONFIG_PATHS
+    for path in paths:
+        if not path.is_file():
+            if config_path:
+                raise ValueError(f"Configuration file not found: {path}")
+            continue
+        try:
+            config = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            raise ValueError(f"Cannot read configuration file: {path}") from exc
+        if not isinstance(config, dict):
+            raise ValueError("Configuration must be a JSON object")
+        unknown = set(config) - {"servers", "env", "verbose", "log_level"}
+        if unknown:
+            raise ValueError(f"Unknown configuration fields: {', '.join(sorted(unknown))}")
+        if "servers" in config and (
+            not isinstance(config["servers"], list)
+            or any(not isinstance(name, str) or name not in SERVER_REGISTRY for name in config["servers"])
+        ):
+            raise ValueError("Configuration servers must be a list of registered platform names")
+        if "verbose" in config and not isinstance(config["verbose"], bool):
+            raise ValueError("Configuration verbose must be a boolean")
+        if "log_level" in config and str(config["log_level"]).upper() not in {
+            "DEBUG",
+            "INFO",
+            "WARNING",
+            "ERROR",
+            "CRITICAL",
+        }:
+            raise ValueError("Invalid configuration log_level")
+        env = config.get("env", {})
+        if not isinstance(env, dict) or any(
+            not isinstance(k, str)
+            or not k
+            or "=" in k
+            or "\0" in k
+            or not isinstance(v, str)
+            or "\0" in v
+            for k, v in env.items()
+        ):
+            raise ValueError("Configuration env must map variable names to string values")
+        return config
     return {}
 
 
+def config_environment(config: dict[str, Any]) -> dict[str, str]:
+    """Environment overrides file defaults, including explicitly empty values."""
+    return {**config.get("env", {}), **os.environ}
+
+
 def get_src_path(platform: str) -> Path:
-    """Get the src directory for a platform server.
-
-    Args:
-        platform: Platform name (e.g. 'oceanengine').
-
-    Returns:
-        Path to the platform's src directory.
-    """
-    return _SERVERS_DIR / platform / "src"
+    """Return the platform package directory (legacy helper name)."""
+    return _SERVERS_DIR / platform
 
 
 def build_pythonpath(platforms: list[str]) -> str:
-    """Build PYTHONPATH string including shared dir and repo root.
-
-    Args:
-        platforms: List of platform names.
-
-    Returns:
-        Colon-separated PYTHONPATH value.
-    """
-    paths = [str(_SHARED_DIR), str(_REPO_ROOT)]
-    return os.pathsep.join(paths)
+    """Return the package parent for source and installed-wheel launches."""
+    return str(_REPO_ROOT)
 
 
 # ── Health Check ───────────────────────────────────────────
 
 
-def check_server_health(platform: str) -> dict[str, Any]:
-    """Check health of a single platform server.
-
-    Verifies that the module can be imported and environment variables are set.
-
-    Args:
-        platform: Platform name.
-
-    Returns:
-        Health status dict.
-    """
+def check_server_health(platform: str, env: dict[str, str] | None = None) -> dict[str, Any]:
+    """Inspect local configuration/imports; never claim live authorization."""
     info = SERVER_REGISTRY.get(platform)
     if not info:
         return {"platform": platform, "status": "error", "error": f"Unknown platform: {platform}"}
-
+    effective_env = os.environ if env is None else env
+    fields = PLATFORM_ENV_FIELDS[platform]
+    required = fields
+    config_error = None
+    if platform == "weixin_store":
+        mode = effective_env.get("WX_TOKEN_MODE") or ("static" if effective_env.get("WX_ACCESS_TOKEN") else "managed")
+        if mode == "static":
+            required = ("WX_ACCESS_TOKEN",)
+        elif mode == "managed":
+            required = ("WX_APP_ID", "WX_APP_SECRET")
+        else:
+            required = ()
+            config_error = "WX_TOKEN_MODE must be static or managed"
+    missing = [name for name in required if not effective_env.get(name)]
     result: dict[str, Any] = {
         "platform": platform,
         "description": info["description"],
         "module": info["module"],
-        "status": "unknown",
-        "env_configured": False,
+        "env_configured": not missing and config_error is None,
+        "env_vars": {name: "set" if effective_env.get(name) else "missing" for name in fields},
+        "required_env_vars": list(required),
+        "missing_env_vars": missing,
         "importable": False,
+        "check_scope": "local_configuration",
+        "protocol_status": "not_checked",
+        "authorization_status": "not_checked",
     }
-
-    # Check if env vars are set
-    env_prefix = info["env_prefix"]
-    key_var = f"{env_prefix}_APP_KEY"
-    secret_var = f"{env_prefix}_APP_SECRET"
-    token_var = f"{env_prefix}_ACCESS_TOKEN"
-
-    has_key = bool(os.environ.get(key_var))
-    has_secret = bool(os.environ.get(secret_var))
-    has_token = bool(os.environ.get(token_var))
-
-    result["env_vars"] = {
-        key_var: "set" if has_key else "missing",
-        secret_var: "set" if has_secret else "missing",
-        token_var: "set" if has_token else "missing",
-    }
-    result["env_configured"] = has_key and has_secret
-
-    # Check if module is importable
-    server_path = _REPO_ROOT / "servers" / platform / "server.py"
-    if server_path.is_file():
-        result["server_path"] = str(server_path)
-        # Try importing by adding paths
-        old_path = sys.path.copy()
-        try:
-            sys.path.insert(0, str(_SHARED_DIR))
-            sys.path.insert(0, str(_REPO_ROOT))
-            __import__(info["module"])
-            result["importable"] = True
-        except Exception as e:
-            result["import_error"] = f"{type(e).__name__}: {e}"
-        finally:
-            sys.path = old_path
-    else:
-        result["error"] = f"Server file not found: {server_path}"
-
-    # Determine overall status
+    if config_error:
+        result["error"] = config_error
+    try:
+        module = importlib.import_module(info["module"])
+        result["importable"] = True
+        result["server_path"] = str(module.__file__)
+    except Exception as exc:
+        # Import-time configuration errors may contain secrets. Report the
+        # exception class only; credentials never belong in health output.
+        result["import_error"] = type(exc).__name__
     if result["importable"] and result["env_configured"]:
         result["status"] = "ready"
     elif result["importable"]:
         result["status"] = "importable_no_creds"
     else:
         result["status"] = "not_ready"
-
     return result
 
 
-def check_all_health() -> list[dict[str, Any]]:
-    """Check health of all registered platform servers.
-
-    Returns:
-        List of health status dicts.
-    """
-    return [check_server_health(p) for p in SERVER_REGISTRY]
+def check_all_health(env: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    """Check local configuration of all registered platforms."""
+    return [check_server_health(platform, env) for platform in SERVER_REGISTRY]
 
 
 # ── Server Launch ──────────────────────────────────────────
 
 
-def start_server(platform: str) -> None:
-    """Start a single MCP server as a subprocess.
-
-    Args:
-        platform: Platform name to start.
-
-    Raises:
-        SystemExit: If platform is unknown or server fails to start.
-    """
+def start_server(platform: str, env: dict[str, str] | None = None) -> None:
+    """Run one installed platform module on this stdio connection."""
     if platform not in SERVER_REGISTRY:
         print(f"Error: Unknown platform '{platform}'", file=sys.stderr)
-        print(f"Available platforms: {', '.join(SERVER_REGISTRY)}", file=sys.stderr)
         sys.exit(1)
-
-    info = SERVER_REGISTRY[platform]
-    src_path = get_src_path(platform)
-    module_name = info["module"]
-
-    if not src_path.is_dir():
-        print(f"Error: Source directory not found: {src_path}", file=sys.stderr)
-        sys.exit(1)
-
-    # Build environment with correct PYTHONPATH
-    env = os.environ.copy()
+    child_env = (os.environ if env is None else env).copy()
     pythonpath = build_pythonpath([platform])
-    existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = f"{pythonpath}{os.pathsep}{existing}" if existing else pythonpath
-
-    # Run the server module
-    cmd = [sys.executable, "-m", module_name]
-    logging.info(f"Starting {platform} server: {' '.join(cmd)}")
-    logging.debug(f"PYPATH={env['PYTHONPATH']}")
-
+    existing = child_env.get("PYTHONPATH", "")
+    child_env["PYTHONPATH"] = f"{pythonpath}{os.pathsep}{existing}" if existing else pythonpath
+    cmd = [sys.executable, "-m", SERVER_REGISTRY[platform]["module"]]
+    logging.info("Starting %s server", platform)
     try:
-        result = subprocess.run(cmd, env=env, cwd=str(_REPO_ROOT))
+        # Inherit cwd for user-provided relative paths. The module is located
+        # through the installed package, without relying on a source/src tree.
+        result = subprocess.run(cmd, env=child_env, check=False)
         sys.exit(result.returncode)
     except KeyboardInterrupt:
-        logging.info(f"Server {platform} stopped by user")
         sys.exit(0)
-    except Exception as e:
-        print(f"Error starting {platform} server: {e}", file=sys.stderr)
+    except OSError as exc:
+        print(f"Error starting {platform}: {type(exc).__name__}", file=sys.stderr)
         sys.exit(1)
 
 
-def start_servers(platforms: list[str]) -> None:
-    """Start multiple MCP servers (sequential, first platform runs in foreground).
-
-    For multiple platforms, subsequent platforms are started as background
-    subprocesses. The first platform runs in the foreground so the CLI
-    stays alive.
-
-    Args:
-        platforms: List of platform names to start.
-    """
-    if not platforms:
-        print("Error: No platforms specified", file=sys.stderr)
+def start_servers(platforms: list[str], env: dict[str, str] | None = None) -> None:
+    """Require one platform per MCP stdio connection."""
+    if len(platforms) != 1:
+        print(
+            "Error: Start exactly one platform per stdio connection. "
+            "Configure a separate MCP client connection for each platform.",
+            file=sys.stderr,
+        )
         sys.exit(1)
-
-    # Validate all platforms first
-    for p in platforms:
-        if p not in SERVER_REGISTRY:
-            print(f"Error: Unknown platform '{p}'", file=sys.stderr)
-            print(f"Available platforms: {', '.join(SERVER_REGISTRY)}", file=sys.stderr)
-            sys.exit(1)
-
-    if len(platforms) == 1:
-        start_server(platforms[0])
-        return
-
-    # Multiple servers: start all but last in background, last in foreground
-    env = os.environ.copy()
-    pythonpath = build_pythonpath(platforms)
-    existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = f"{pythonpath}{os.pathsep}{existing}" if existing else pythonpath
-
-    bg_processes: list[subprocess.Popen[bytes]] = []
-    try:
-        for platform in platforms[:-1]:
-            info = SERVER_REGISTRY[platform]
-            cmd = [sys.executable, "-m", info["module"]]
-            logging.info(f"Starting {platform} server in background: {' '.join(cmd)}")
-            proc = subprocess.Popen(cmd, env=env, cwd=str(_REPO_ROOT))
-            bg_processes.append(proc)
-
-        # Run the last server in foreground
-        last = platforms[-1]
-        info = SERVER_REGISTRY[last]
-        cmd = [sys.executable, "-m", info["module"]]
-        logging.info(f"Starting {last} server in foreground: {' '.join(cmd)}")
-        result = subprocess.run(cmd, env=env, cwd=str(_REPO_ROOT))
-        sys.exit(result.returncode)
-    except KeyboardInterrupt:
-        logging.info("Stopping all servers...")
-        for proc in bg_processes:
-            proc.terminate()
-        for proc in bg_processes:
-            proc.wait(timeout=5)
-        sys.exit(0)
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        for proc in bg_processes:
-            proc.terminate()
-        sys.exit(1)
+    start_server(platforms[0], env)
 
 
 # ── Version ────────────────────────────────────────────────
@@ -388,13 +318,13 @@ def build_parser() -> argparse.ArgumentParser:
     # start command
     start_parser = subparsers.add_parser(
         "start",
-        help="Start one or more MCP servers",
+        help="Start one MCP server per stdio connection",
     )
     start_parser.add_argument(
         "platforms",
-        nargs="+",
+        nargs="*",
         metavar="PLATFORM",
-        help=f"Platform(s) to start. Available: {', '.join(SERVER_REGISTRY)}",
+        help=f"Platform to start (or config servers). Available: {', '.join(SERVER_REGISTRY)}",
     )
 
     # health command
@@ -461,6 +391,8 @@ def format_health_output(results: list[dict[str, Any]], as_json: bool = False) -
     for r in results:
         icon = status_icons.get(r["status"], "[?]")
         lines.append(f"{icon} {r['platform']}: {r.get('description', '')}")
+        if r.get("check_scope") == "local_configuration":
+            lines.append("       Local checks only; MCP handshake and platform authorization not checked")
         if r.get("env_vars"):
             for var, val in r["env_vars"].items():
                 lines.append(f"       {var}: {val}")
@@ -484,33 +416,36 @@ def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    # Setup logging
-    log_level = logging.DEBUG if args.verbose else logging.INFO
+    try:
+        config = load_config(args.config)
+    except ValueError as exc:
+        parser.error(str(exc))
+    env = config_environment(config)
+    # CLI verbose takes precedence, then config verbose, then config log_level.
+    log_level = (
+        logging.DEBUG
+        if args.verbose or config.get("verbose", False)
+        else getattr(logging, str(config.get("log_level", "INFO")).upper())
+    )
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    # Load config if specified
-    if args.config:
-        config = load_config(args.config)
-        if config:
-            logging.debug(f"Config loaded: {list(config.keys())}")
-
     if args.command is None:
         parser.print_help()
         sys.exit(0)
 
     if args.command == "start":
-        start_servers(args.platforms)
+        start_servers(args.platforms or config.get("servers", []), env)
 
     elif args.command == "health":
-        platforms = args.platforms if args.platforms else None
+        platforms = args.platforms or config.get("servers", [])
         if platforms:
-            results = [check_server_health(p) for p in platforms]
+            results = [check_server_health(p, env) for p in platforms]
         else:
-            results = check_all_health()
+            results = check_all_health(env)
         print(format_health_output(results, as_json=args.output_json))
 
     elif args.command == "info":

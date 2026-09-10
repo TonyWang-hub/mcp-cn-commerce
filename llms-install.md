@@ -49,7 +49,7 @@ The install provides one launch command per platform:
 
 | Platform | Command | Required env vars |
 |---|---|---|
-| 巨量引擎/千川 Ocean Engine | `mcp-cn-oceanengine` | `OCEANENGINE_APP_KEY`, `OCEANENGINE_APP_SECRET`, `OCEANENGINE_ACCESS_TOKEN` |
+| 巨量引擎/千川 Ocean Engine | `mcp-cn-oceanengine` | `OCEANENGINE_ACCESS_TOKEN` |
 | 抖店 Douyin Shop | `mcp-cn-doudian` | `DOUDIAN_APP_KEY`, `DOUDIAN_APP_SECRET`, `DOUDIAN_SHOP_ID`, `DOUDIAN_ACCESS_TOKEN` |
 | 京东 JD.com | `mcp-cn-jd` | `JD_APP_KEY`, `JD_APP_SECRET`, `JD_ACCESS_TOKEN` |
 | 淘宝 Taobao | `mcp-cn-taobao` | (see project docs/platforms.md) |
@@ -63,13 +63,11 @@ The install provides one launch command per platform:
 Do **not** configure all 8. Ask the user which platform(s) they want (most users
 need 1–3). Only configure those servers.
 
-## Step 3 — Ask the user for credentials
+## Step 3 — Configure credentials locally
 
-The agent must **not** invent or guess credentials. For each chosen platform, ask
-the user to paste the required values listed in the table above. Each platform's
-credentials come from that platform's open-platform console (links in the project
-README "平台覆盖" table). If the user does not have them yet, stop and tell them to
-obtain the App Key / App Secret / Access Token first.
+The agent must **not** invent or guess credentials. Ask the user to configure required values locally in the shell, their MCP client's environment settings, or an explicitly selected local configuration file. Do not ask them to paste secrets into chat. Use platform links and eligibility information in docs/official-access-status.md; the required app type and API permissions depend on the merchant scenario. Never assume that a token provides every listed tool permission.
+
+Discovery and offline report generation can be validated without merchant credentials. Actual business requests need authorized credentials. Do not treat a listed tool as proof of API access.
 
 ## Step 4 — Write the MCP client config
 
@@ -109,7 +107,6 @@ call cannot modify any data.
 
 ## Notes
 
-- Everything runs **locally**; credentials never leave the user's machine.
-- Ocean Engine access tokens expire in ~24h — if calls start failing with auth
-  errors, the user must refresh `OCEANENGINE_ACCESS_TOKEN`.
+- Everything runs **locally**; credentials are loaded locally and required authentication is sent to the relevant official platform API. Results are returned to the configured MCP/AI client.
+- Follow the token expiry/revocation returned by the platform. Do not assume a permanent token or a universal refresh window. Set WX_TOKEN_MODE explicitly when choosing managed WeChat token renewal.
 - Full per-platform auth details: `docs/platforms.md` in the repo.

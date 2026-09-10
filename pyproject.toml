@@ -54,7 +54,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "pytest-asyncio", "pytest-cov", "black", "ruff"]
+dev = ["pytest>=7.0", "pytest-asyncio", "pytest-cov", "black", "ruff", "mypy", "types-requests", "pylint", "bandit[toml]", "build", "twine"]
 
 [project.scripts]
 mcp-cn-commerce = "shared.cli:main"

@@ -630,16 +630,18 @@ class TestConfigErrorHandling:
     """Tests for missing environment-variable handling."""
 
     @pytest.mark.asyncio
-    async def test_get_client_raises_when_all_vars_missing(self):
-        """_get_client raises ConfigError listing every missing variable."""
+    async def test_request_raises_when_all_vars_missing(self):
+        """MCP discovery works without credentials; business requests validate them."""
         with patch.dict(os.environ, {}, clear=True):
             # Reset singleton cache
             import servers.doudian.server as srv
 
             srv._client = None
 
+            client = srv._get_client()
+            assert client is srv._get_client()
             with pytest.raises(ConfigError) as exc_info:
-                srv._get_client()
+                await client.request("order/list", {})
 
             msg = str(exc_info.value)
             assert "DOUDIAN_APP_KEY" in msg
@@ -648,7 +650,7 @@ class TestConfigErrorHandling:
             assert "DOUDIAN_ACCESS_TOKEN" in msg
 
     @pytest.mark.asyncio
-    async def test_get_client_raises_when_single_var_missing(self):
+    async def test_request_raises_when_single_var_missing(self):
         """Missing a single variable raises ConfigError naming it."""
         partial = {
             "DOUDIAN_APP_KEY": "k",
@@ -661,8 +663,10 @@ class TestConfigErrorHandling:
 
             srv._client = None
 
+            client = srv._get_client()
+            assert client is srv._get_client()
             with pytest.raises(ConfigError) as exc_info:
-                srv._get_client()
+                await client.request("order/list", {})
 
             msg = str(exc_info.value)
             assert "DOUDIAN_ACCESS_TOKEN" in msg

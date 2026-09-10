@@ -50,11 +50,11 @@ class TestNormalizePrice:
     def test_weixin_fen_int(self):
         assert normalize_price(9900, "weixin") == 9900
 
-    def test_none_returns_zero(self):
-        assert normalize_price(None, "doudian") == 0
+    def test_none_returns_unknown(self):
+        assert normalize_price(None, "doudian") is None
 
-    def test_invalid_string_returns_zero(self):
-        assert normalize_price("abc", "jd") == 0
+    def test_invalid_string_returns_unknown(self):
+        assert normalize_price("abc", "jd") is None
 
 
 # ── Unit Tests: normalize_time ──────────────────────────────
@@ -173,11 +173,13 @@ class TestNormalizeOrderJD:
             "itemInfoList": [{"skuId": "987654321", "skuName": "蓝牙耳机", "salePrice": "189.00", "num": 1}],
             "consigneeInfo": {"fullname": "李四", "mobile": "13900139000", "fullAddress": "上海市浦东新区"},
         }
+        # This endpoint schema explicitly declares these fields in yuan.
+        normalizer = Normalizer(amount_units={"orderTotalPrice": "yuan", "payment": "yuan", "freightPrice": "yuan", "salePrice": "yuan"})
         order = normalizer.normalize_order(raw, "jd")
         assert order.order_id == "123456789012345678"
         assert order.status == "paid"
         assert order.buyer_name == "李四"
-        assert order.amount_paid == 289
+        assert order.amount_paid == 28900
 
 
 class TestNormalizeOrderWeixin:

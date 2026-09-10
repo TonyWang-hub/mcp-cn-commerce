@@ -26,6 +26,7 @@ from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -34,10 +35,18 @@ import httpx
 
 # ── Security: Sensitive Data Masking ─────────────────────
 
-# Patterns for sensitive fields that should be masked in logs
-_SENSITIVE_FIELD_PATTERNS = re.compile(
-    r"(app_key|app_secret|access_token|client_id|client_secret|"
-    r"refresh_token|api_key|secret_key|password|token|sign)",
+# Share the key vocabulary across structured data and exception/URL strings.
+# Optional separators cover snake_case, kebab-case, and camelCase spellings.
+_SENSITIVE_KEY_PATTERN = (
+    r"app[_-]?key|app[_-]?secret|access[_-]?token|client[_-]?id|client[_-]?secret|"
+    r"refresh[_-]?token|api[_-]?key|secret[_-]?key|secret|password|passwd|passphrase|token|sign|"
+    r"authorization|cookie|session|phone|mobile|email|address|"
+    r"(?:recipient|receiver|buyer|consignee)[_-]?(?:name|tel(?:ephone)?|phone|mobile|address)"
+)
+_SENSITIVE_FIELD_PATTERNS = re.compile(_SENSITIVE_KEY_PATTERN, re.IGNORECASE)
+_SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
+    r"(?P<key>[\"']?(?:" + _SENSITIVE_KEY_PATTERN + r")[\"']?\s*[:=]\s*)"
+    r"(?P<value>\"[^\"]*\"|'[^']*'|[^\s&,;}]+)",
     re.IGNORECASE,
 )
 
@@ -76,30 +85,24 @@ def mask_sensitive_value(value: str, visible_prefix: int = 4, visible_suffix: in
     return f"{value[:visible_prefix]}****{value[-visible_suffix:]}"
 
 
+def _mask_nested(value: Any) -> Any:
+    if isinstance(value, dict):
+        return mask_dict_sensitive_keys(value)
+    if isinstance(value, list | tuple):
+        return [_mask_nested(item) for item in value]
+    if isinstance(value, str):
+        return mask_log_message(value)
+    return value
+
+
 def mask_dict_sensitive_keys(data: dict[str, Any]) -> dict[str, Any]:
-    """Create a copy of a dict with sensitive keys masked.
-
-    Recursively processes nested dicts and lists.
-
-    Args:
-        data: Dictionary that may contain sensitive keys.
-
-    Returns:
-        A new dictionary with sensitive values masked.
-    """
+    """Recursively sanitize structured logs, headers, and nested collections."""
     masked: dict[str, Any] = {}
     for key, value in data.items():
-        if _SENSITIVE_FIELD_PATTERNS.search(key):
-            if isinstance(value, str):
-                masked[key] = mask_sensitive_value(value)
-            else:
-                masked[key] = "***MASKED***"
-        elif isinstance(value, dict):
-            masked[key] = mask_dict_sensitive_keys(value)
-        elif isinstance(value, list):
-            masked[key] = [mask_dict_sensitive_keys(item) if isinstance(item, dict) else item for item in value]
+        if _SENSITIVE_FIELD_PATTERNS.search(str(key)):
+            masked[key] = mask_sensitive_value(value) if isinstance(value, str) else "***MASKED***"
         else:
-            masked[key] = value
+            masked[key] = _mask_nested(value)
     return masked
 
 
@@ -125,7 +128,7 @@ def mask_log_message(message: str) -> str:
         ),
         message,
     )
-    return message
+    return _SENSITIVE_ASSIGNMENT_PATTERN.sub(lambda m: m.group("key") + "****", message)
 
 
 class SensitiveDataFilter(logging.Filter):
@@ -136,24 +139,26 @@ class SensitiveDataFilter(logging.Filter):
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        """Filter log record, masking any sensitive data."""
-        if isinstance(record.msg, str):
-            record.msg = mask_log_message(record.msg)
+        """Sanitize after interpolation, including dict arguments and errors."""
         if record.args:
             if isinstance(record.args, dict):
                 record.args = mask_dict_sensitive_keys(record.args)
             elif isinstance(record.args, tuple | list):
-                record.args = tuple(mask_log_message(str(a)) if isinstance(a, str) else a for a in record.args)
+                record.args = tuple(_mask_nested(arg) for arg in record.args)
+        record.msg = mask_log_message(record.getMessage())
+        record.args = ()
+        if record.exc_info:
+            # Formatter normally renders exception text after filters run.
+            record.exc_text = mask_log_message(logging.Formatter().formatException(record.exc_info))
         return True
 
 
 # ── Security: Input Validation ────────────────────────────
 
 _SQL_INJECTION_PATTERNS = re.compile(
-    r"(\b(UNION|SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|EXEC|EXECUTE)\b"
-    r"|--|/\*|\*/|;.*\b(DROP|DELETE|UPDATE|INSERT)\b"
-    r"|'\s*(OR|AND)\s*'?\d*"
-    r"|'\s*;\s*)",
+    r"(\bUNION\s+(?:ALL\s+)?SELECT\b"
+    r"|;\s*(?:DROP\s+TABLE|DELETE\s+FROM|UPDATE\s+\w+\s+SET|INSERT\s+INTO)\b"
+    r"|['\"]\s*(?:OR|AND)\s+['\"]?\d+['\"]?\s*=)",
     re.IGNORECASE,
 )
 _PATH_TRAVERSAL_PATTERN = re.compile(r"(\.\./|\.\.\\|%2e%2e[/\\]|%252e%252e)", re.IGNORECASE)
@@ -338,6 +343,8 @@ def setup_logging(
     logger.setLevel(level)
     # Avoid duplicate handlers on repeated calls
     if logger.handlers:
+        for handler in logger.handlers:
+            handler.close()
         logger.handlers.clear()
 
     fmt = logging.Formatter(
@@ -382,8 +389,14 @@ def setup_logging(
         logger.addHandler(timed_handler)
 
     # -- Sensitive data filter --
+    for existing in list(logger.filters):
+        if isinstance(existing, SensitiveDataFilter):
+            logger.removeFilter(existing)
     if sensitive_filter:
         logger.addFilter(SensitiveDataFilter())
+        # Handler filters also run for records from descendant loggers.
+        for handler in logger.handlers:
+            handler.addFilter(SensitiveDataFilter())
 
     return logger
 
@@ -407,22 +420,22 @@ class ConfigValidationError(Exception):
 
 
 class RateLimiter:
-    """Simple rate limiter to prevent API throttling."""
+    """Serialize admissions with monotonic timing, including concurrent calls."""
 
     def __init__(self, requests_per_second: float = 10.0) -> None:
+        if requests_per_second <= 0:
+            raise ValueError("requests_per_second must be positive")
         self.requests_per_second = requests_per_second
         self.min_interval = 1.0 / requests_per_second
         self.last_request_time: float = 0.0
+        self._async_lock = asyncio.Lock()
 
     async def acquire(self) -> None:
-        """Wait if necessary to respect rate limit."""
-        now = time.time()
-        time_since_last = now - self.last_request_time
-        if time_since_last < self.min_interval:
-            wait_time = self.min_interval - time_since_last
-            logger.debug(f"Rate limit: waiting {wait_time:.2f}s")
-            await asyncio.sleep(wait_time)
-        self.last_request_time = time.time()
+        async with self._async_lock:
+            wait = self.min_interval - (time.monotonic() - self.last_request_time)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self.last_request_time = time.monotonic()
 
 
 @dataclass
@@ -680,6 +693,9 @@ class ConfigurableRateLimiter:
         self.stats = RateLimitStats()
         self._lock = threading.Lock()
         self._endpoint_timestamps: dict[str, float] = {}
+        self._platform_timestamps: dict[str, float] = {}
+        self._async_locks: dict[str, asyncio.Lock] = {}
+        self._config_changed = asyncio.Event()
 
     async def acquire(self, platform: str, endpoint: str) -> None:
         """Wait if necessary to respect the rate limit for a platform/endpoint.
@@ -688,33 +704,47 @@ class ConfigurableRateLimiter:
             platform: Platform identifier.
             endpoint: API endpoint path.
         """
-        if not self.config.enabled:
-            self.stats.record_request(platform, endpoint)
-            return
-
-        p_cfg = self.config.get_platform_config(platform)
-        if not p_cfg.enabled:
-            self.stats.record_request(platform, endpoint)
-            return
-
-        ep_limit = p_cfg.get_endpoint_limit(endpoint)
-        min_interval = 1.0 / ep_limit.requests_per_second if ep_limit.requests_per_second > 0 else 0.0
-
         key = f"{platform}:{endpoint}"
-        now = time.time()
-        with self._lock:
-            last = self._endpoint_timestamps.get(key, 0.0)
-            elapsed = now - last
-            wait = max(0.0, min_interval - elapsed)
-            if wait > 0:
-                self._endpoint_timestamps[key] = now + wait
-                self.stats.record_throttle(platform, endpoint, wait * 1000)
-            else:
-                self._endpoint_timestamps[key] = now
-                self.stats.record_request(platform, endpoint)
-
-        if wait > 0:
-            await asyncio.sleep(wait)
+        # Queued requests read the configuration only after obtaining their
+        # admission lock. Live changes also wake a request already waiting.
+        lock = self._async_locks.setdefault(platform, asyncio.Lock())
+        async with lock:
+            started = time.monotonic()
+            throttled = False
+            while True:
+                p_cfg = self.config.get_platform_config(platform)
+                if not self.config.enabled or not p_cfg.enabled:
+                    break
+                ep_limit = p_cfg.get_endpoint_limit(endpoint)
+                endpoint_interval = 1.0 / ep_limit.requests_per_second if ep_limit.requests_per_second > 0 else 0.0
+                platform_interval = (
+                    1.0 / p_cfg.default_requests_per_second if p_cfg.default_requests_per_second > 0 else 0.0
+                )
+                now = time.monotonic()
+                with self._lock:
+                    wait = max(
+                        0.0,
+                        endpoint_interval - (now - self._endpoint_timestamps.get(key, 0.0)),
+                        platform_interval - (now - self._platform_timestamps.get(platform, 0.0)),
+                    )
+                if wait <= 0:
+                    break
+                throttled = True
+                self._config_changed.clear()
+                try:
+                    await asyncio.wait_for(self._config_changed.wait(), timeout=wait)
+                except TimeoutError:
+                    pass
+                # Recompute from current configuration after every wakeup,
+                # including the expiry of an old, faster admission interval.
+            admitted = time.monotonic()
+            with self._lock:
+                self._endpoint_timestamps[key] = admitted
+                self._platform_timestamps[platform] = admitted
+                if throttled:
+                    self.stats.record_throttle(platform, endpoint, (admitted - started) * 1000)
+                else:
+                    self.stats.record_request(platform, endpoint)
 
     def update_platform_config(self, platform: str, config: PlatformRateLimitConfig) -> None:
         """Replace the configuration for a platform.
@@ -724,6 +754,7 @@ class ConfigurableRateLimiter:
             config: New platform configuration.
         """
         self.config.platforms[platform] = config
+        self._config_changed.set()
 
     def update_endpoint_limit(
         self,
@@ -749,6 +780,7 @@ class ConfigurableRateLimiter:
             requests_per_second=requests_per_second,
             burst_size=burst_size,
         )
+        self._config_changed.set()
 
     def get_stats_summary(self) -> dict[str, Any]:
         """Get combined config and stats summary."""
@@ -773,6 +805,7 @@ class ConfigurableRateLimiter:
         if platform not in self.config.platforms:
             self.config.platforms[platform] = PlatformRateLimitConfig(platform=platform)
         self.config.platforms[platform].default_requests_per_second = requests_per_second
+        self._config_changed.set()
         logger.debug(f"Rate limit: {platform} RPS set to {requests_per_second}")
 
     def set_endpoint_rps(self, platform: str, endpoint: str, requests_per_second: float) -> None:
@@ -790,11 +823,13 @@ class ConfigurableRateLimiter:
         """Enable rate limiting for a platform."""
         if platform in self.config.platforms:
             self.config.platforms[platform].enabled = True
+            self._config_changed.set()
 
     def disable_platform(self, platform: str) -> None:
         """Disable rate limiting for a platform (requests pass through without delay)."""
         if platform in self.config.platforms:
             self.config.platforms[platform].enabled = False
+            self._config_changed.set()
 
     def auto_adjust_from_stats(
         self,
@@ -1156,7 +1191,7 @@ class MetricsCollector:
             if not success:
                 ep.error_count += 1
                 ep.last_error_code = error_code
-                ep.last_error_msg = error_msg
+                ep.last_error_msg = mask_log_message(error_msg)
 
             # Global aggregation
             self._global.request_count += 1
@@ -1285,6 +1320,8 @@ class RetryConfig:
 
     def should_retry_exception(self, exc: Exception) -> bool:
         """Check if an exception should trigger a retry."""
+        if isinstance(exc, httpx.HTTPStatusError):
+            return self.should_retry_http_status(exc.response.status_code)
         if isinstance(exc, CommerceAPIError):
             return self.should_retry_api_code(exc.code)
         return isinstance(exc, self.retryable_exceptions)
@@ -1692,7 +1729,7 @@ class RetryRequestQueue:
         ready = await self.dequeue_ready()
         results: list[dict[str, Any]] = []
 
-        for item in ready:
+        for index, item in enumerate(ready):
             try:
                 data = await request_fn(
                     method=item.method,
@@ -1708,6 +1745,15 @@ class RetryRequestQueue:
                         "data": data,
                     }
                 )
+            except asyncio.CancelledError:
+                with self._lock:
+                    for pending in ready[index:]:
+                        if self._in_flight.pop(pending.request_id, None) is not None:
+                            pending.status = "pending"
+                            self._queue.append(pending)
+                    self.stats.current_pending = len(self._queue)
+                    self.stats.current_in_flight = len(self._in_flight)
+                raise
             except Exception as exc:
                 completed = self.complete(
                     item.request_id,
@@ -2709,13 +2755,14 @@ class CommerceMCPBase:
         self.access_token = access_token
         self.validate_input = validate_input
         self.rate_limiter = RateLimiter()
+        self._default_rate_limiter = self.rate_limiter
         self.metrics = MetricsCollector()
         self._reconnect_config = reconnect_config or ReconnectConfig()
         self._health_cache = HealthCheckCache(ttl_seconds=30.0)
         self.cache_warmer = CacheWarmer()
         self._compressor = RequestCompressor(compression_config)
         self._configurable_limiter = ConfigurableRateLimiter(rate_limit_config)
-        self._priority_scheduler = PriorityScheduler(rate_limiter=self._configurable_limiter)
+        self._priority_scheduler = PriorityScheduler()  # Transport applies limits once.
         self._alert_manager = AlertManager()
         # Live request observability: every _request is traced and metered.
         self._tracer = RequestTracer(self.__class__.__name__)
@@ -2843,6 +2890,138 @@ class CommerceMCPBase:
 
     # ── HTTP ──────────────────────────────────────────────
 
+    @property
+    def platform_name(self) -> str:
+        """Stable platform identifier used by limits and observability."""
+        if getattr(self, "PLATFORM", ""):
+            return self.PLATFORM
+        name = self.__class__.__name__
+        for suffix in ("Client", "MCPBase"):
+            if name.endswith(suffix):
+                name = name[: -len(suffix)]
+                break
+        return name.upper()
+
+    async def _send_request(
+        self,
+        method: str,
+        url: str,
+        *,
+        endpoint: str | None = None,
+        params: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+        json_body: Any = None,
+        headers: dict[str, str] | None = None,
+        content: bytes | None = None,
+        retry_config: RetryConfig | None = None,
+        prepare_request: Callable[[], dict[str, Any]] | None = None,
+        parse_response: Callable[[Any], Any] | None = None,
+    ) -> Any:
+        """Send a platform request through the common reliability pipeline.
+
+        ``data`` is form data; ``json_body`` is JSON. ``prepare_request``
+        returns fresh httpx keyword arguments for each attempt, allowing a
+        platform to regenerate signatures. ``parse_response`` validates and
+        unwraps the platform business envelope before success is recorded.
+        Retries are opt-in: callers must establish read/idempotent semantics
+        before passing a retry configuration (including POST read APIs).
+        HTTP status is checked before decoding JSON; malformed payloads and
+        platform business errors remain distinct from transport errors.
+        """
+        method = method.upper()
+        endpoint = endpoint or str(httpx.URL(url).path)
+        if retry_config and retry_config.max_retries < 0:
+            raise ValueError("max_retries cannot be negative")
+        attempts = retry_config.max_retries + 1 if retry_config else 1
+        span = self._tracer.start_span(
+            f"{method} {endpoint}", attributes={"method": method, "path": endpoint}
+        )
+        final_status = "error"
+        try:
+            for attempt in range(attempts):
+                started = time.monotonic()
+                try:
+                    # The configurable limiter is authoritative. A caller's
+                    # explicit legacy limiter override is still respected.
+                    if self.rate_limiter is not None and (
+                        self.rate_limiter is not self._default_rate_limiter
+                        or self.rate_limiter.requests_per_second != 10.0
+                    ):
+                        await self.rate_limiter.acquire()
+                    await self._configurable_limiter.acquire(self.platform_name, endpoint)
+                    kwargs: dict[str, Any] = {}
+                    for key, value in (
+                        ("params", params),
+                        ("data", data),
+                        ("json", json_body),
+                        ("headers", headers),
+                        ("content", content),
+                    ):
+                        if value is not None:
+                            kwargs[key] = value
+                    if prepare_request is not None:
+                        kwargs.update(prepare_request())
+                    client = await self._ensure_client()
+                    send = getattr(client, method.lower(), None)
+                    response = await send(url, **kwargs) if send else await client.request(method, url, **kwargs)
+                    if response.status_code >= 300:
+                        response.raise_for_status()
+                    payload = response.json()
+                    result = parse_response(payload) if parse_response else payload
+                    self.metrics.record_request(endpoint, (time.monotonic() - started) * 1000, success=True)
+                    final_status = "ok"
+                    return result
+                except asyncio.CancelledError:
+                    final_status = "cancelled"
+                    raise
+                except Exception as exc:
+                    if isinstance(exc, CommerceAPIError):
+                        code = exc.code
+                    elif isinstance(exc, httpx.HTTPStatusError):
+                        code = exc.response.status_code
+                    else:
+                        code = 0
+                    self.metrics.record_request(
+                        endpoint, (time.monotonic() - started) * 1000,
+                        success=False, error_code=code, error_msg=mask_log_message(str(exc)),
+                    )
+                    if not retry_config or not retry_config.should_retry_exception(exc) or attempt + 1 == attempts:
+                        raise
+                    delay = retry_config.compute_delay(attempt)
+                    if isinstance(exc, httpx.HTTPStatusError):
+                        retry_after = exc.response.headers.get("Retry-After", "")
+                        required_wait = 0.0
+                        try:
+                            required_wait = max(0.0, float(retry_after))
+                        except ValueError:
+                            try:
+                                retry_at = parsedate_to_datetime(retry_after)
+                                if retry_at.tzinfo is None:
+                                    retry_at = retry_at.replace(tzinfo=UTC)
+                                required_wait = max(0.0, retry_at.timestamp() - time.time())
+                            except (TypeError, ValueError, OverflowError):
+                                pass
+                        if required_wait > retry_config.max_delay:
+                            # The configured wait budget cannot satisfy the
+                            # server cooldown; preserve the original error.
+                            raise
+                        delay = max(delay, required_wait)
+                    logger.warning(
+                        "Retry %s/%s for %s after %.2fs: %s",
+                        attempt + 1, retry_config.max_retries, endpoint, delay, mask_log_message(str(exc)),
+                    )
+                    await asyncio.sleep(delay)
+        except asyncio.CancelledError:
+            final_status = "cancelled"
+            raise
+        except Exception as exc:
+            sanitized = _sanitize_exception(exc)
+            if sanitized is exc:
+                raise
+            raise sanitized from None
+        finally:
+            self._tracer.finish_span(span, status=final_status)
+
     async def _request(
         self,
         method: str,
@@ -2851,118 +3030,47 @@ class CommerceMCPBase:
         data: dict | None = None,
         retry_config: RetryConfig | None = None,
     ) -> dict[str, Any]:
-        """Make a signed API request with optional retry support.
-
-        Args:
-            method: HTTP method ("GET" or "POST").
-            path: API endpoint path (appended to BASE_URL).
-            params: Query parameters.
-            data: Request body (JSON).
-            retry_config: If provided, retry failed requests according to this config.
-
-        Returns:
-            Parsed JSON response as a dict.
-
-        Raises:
-            CommerceAPIError: If the API returns an error response.
-            httpx.HTTPError: For non-retryable network errors.
-        """
+        """Make a signed request using the common transport and business parser."""
         params = params or {}
         data = data or {}
-
-        # Reject injection-style payloads before they reach the upstream API.
         if self.validate_input:
             self._validate_params(params)
             self._validate_params(data)
 
-        # Snapshot auth params for retry (timestamp must be regenerated each attempt)
-        auth_params: dict[str, str] = {}
-        auth_params["app_key"] = self.app_key
-        if self.access_token:
-            auth_params["access_token"] = self.access_token
+        def prepare() -> dict[str, Any]:
+            signed = {**params, **(data if method.upper() == "GET" else {}), "app_key": self.app_key}
+            if self.access_token:
+                signed["access_token"] = self.access_token
+            signed["timestamp"] = str(int(time.time() * 1000))
+            # Sign exactly the string values that httpx transmits, including
+            # GET data and deterministic JSON for nested query parameters.
+            signed = {key: canonicalize_sign_value(value) for key, value in signed.items()}
+            signed["sign"] = self._sign(signed)
+            signed["sign_method"] = self.sign_method
+            if method.upper() == "GET":
+                return {"params": signed}
+            if self._compressor.config.method != CompressionMethod.NONE and data:
+                body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+                compressed, compression_headers = self._compressor.compress(body)
+                if compression_headers:
+                    return {
+                        "params": signed, "content": compressed,
+                        "headers": {**compression_headers, "Content-Type": "application/json"},
+                    }
+            return {"params": signed, "json": data}
 
-        last_exc: Exception | None = None
-        max_attempts = (retry_config.max_retries + 1) if retry_config else 1
+        def parse(payload: Any) -> dict[str, Any]:
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object from the platform API")
+            if "error_response" in payload:
+                error = payload["error_response"]
+                raise CommerceAPIError(code=error.get("code", -1), msg=error.get("msg", "unknown"))
+            return payload
 
-        # One trace span per logical request (covers all retry attempts).
-        span = self._tracer.start_span(f"{method} {path}", attributes={"method": method, "path": path})
-
-        for attempt in range(max_attempts):
-            attempt_start = time.time()
-            try:
-                # Rate limiting
-                if self.rate_limiter:
-                    await self.rate_limiter.acquire()
-
-                # Build fresh params each attempt (timestamp changes)
-                attempt_params = {**params, **auth_params}
-                attempt_params["timestamp"] = str(int(time.time() * 1000))
-                attempt_params["sign"] = self._sign(attempt_params)
-                attempt_params["sign_method"] = self.sign_method
-
-                url = f"{self.BASE_URL}{path}"
-                logger.debug(f"Request: {method} {url} (attempt {attempt + 1}/{max_attempts})")
-
-                client = await self._ensure_client()
-                if method == "GET":
-                    resp = await client.get(url, params={**attempt_params, **data})
-                else:
-                    # Compress POST body if configured
-                    extra_headers: dict[str, str] = {}
-                    if self._compressor.config.method != CompressionMethod.NONE and data:
-                        body_bytes = json.dumps(data, ensure_ascii=False).encode("utf-8")
-                        compressed_body, extra_headers = self._compressor.compress(body_bytes)
-                        if extra_headers:
-                            resp = await client.post(
-                                url,
-                                params=attempt_params,
-                                content=compressed_body,
-                                headers={**extra_headers, "Content-Type": "application/json"},
-                            )
-                        else:
-                            resp = await client.post(url, params=attempt_params, json=data)
-                    else:
-                        resp = await client.post(url, params=attempt_params, json=data)
-
-                result = resp.json()
-                if "error_response" in result:
-                    error_code = result["error_response"].get("code", -1)
-                    error_msg = result["error_response"].get("msg", "unknown")
-                    logger.warning(f"API error: [{error_code}] {error_msg}")
-                    raise CommerceAPIError(code=error_code, msg=error_msg)
-
-                logger.debug(f"Response: {resp.status_code}")
-                self.metrics.record_request(path, (time.time() - attempt_start) * 1000, success=True)
-                self._tracer.finish_span(span, status="ok")
-                return result
-
-            except Exception as exc:
-                last_exc = exc
-                err_code = exc.code if isinstance(exc, CommerceAPIError) else 0
-                self.metrics.record_request(
-                    path, (time.time() - attempt_start) * 1000, success=False, error_code=err_code, error_msg=str(exc)
-                )
-                # If no retry config or not retryable, re-raise immediately
-                if not retry_config or not retry_config.should_retry_exception(exc):
-                    self._tracer.finish_span(span, status="error")
-                    raise
-
-                # If this was the last attempt, re-raise
-                if attempt == max_attempts - 1:
-                    logger.error(f"Max retries ({retry_config.max_retries}) exhausted for {path}")
-                    self._tracer.finish_span(span, status="error")
-                    raise
-
-                delay = retry_config.compute_delay(attempt)
-                logger.warning(
-                    f"Retry {attempt + 1}/{retry_config.max_retries} for {path} " f"after {delay:.2f}s: {exc}"
-                )
-                await asyncio.sleep(delay)
-
-        # Should not reach here
-        if last_exc:
-            raise last_exc  # type: ignore[misc]
-        return {}  # type: ignore[return-value]
+        return await self._send_request(
+            method, f"{self.BASE_URL}{path}", endpoint=path,
+            retry_config=retry_config, prepare_request=prepare, parse_response=parse,
+        )
 
     # ── Input validation ──────────────────────────────────
 
@@ -2984,9 +3092,9 @@ class CommerceMCPBase:
         """Return a snapshot of per-endpoint request metrics (latency, errors)."""
         return self.metrics.get_summary()
 
-    def get_trace_summary(self) -> dict[str, Any]:
-        """Return a summary of recent request traces (spans, durations, status)."""
-        return self._tracer.get_trace_summary()
+    def get_trace_summary(self, trace_id: str | None = None) -> dict[str, Any]:
+        """Return one retained trace, defaulting to the latest logical request."""
+        return self._tracer.get_trace_summary(trace_id)
 
     def get_alerts(self) -> dict[str, Any]:
         """Evaluate alert rules against current metrics and report firing alerts."""
@@ -3031,14 +3139,18 @@ class CommerceMCPBase:
         max_pages: int = 50,
     ) -> list[dict[str, Any]]:
         """Generic pagination helper."""
+        if page_size < 1 or max_pages < 1:
+            raise ValueError("page_size and max_pages must be positive")
         results: list[dict[str, Any]] = []
         for page in range(1, max_pages + 1):
-            data = await fetch_fn(page=page, page_size=page_size)
+            data = await fetch_fn(**{page_key: page, "page_size": page_size})
             items = data.get("result", data.get("list", []))
             results.extend(items)
             logger.debug(f"Pagination: page {page}, got {len(items)} items")
             if len(items) < page_size:
                 break
+        else:
+            raise RuntimeError(f"Pagination reached max_pages={max_pages}; the result may be incomplete")
         logger.info(f"Pagination complete: {len(results)} total items")
         return results
 
@@ -3239,7 +3351,7 @@ class CommerceMCPBase:
             params=params or {},
             data=data or {},
             request_id=request_id,
-            platform=self.__class__.__name__.upper(),
+            platform=self.platform_name,
         )
         return await self._priority_scheduler.schedule_and_execute(
             request,
@@ -3437,6 +3549,11 @@ class CommerceMCPBase:
                     error=RuntimeError("Cancelled due to fail_fast"),
                 )
             async with semaphore:
+                if fail_fast and cancelled.is_set():
+                    return BatchResultItem(
+                        request_id=item.request_id, success=False,
+                        error=RuntimeError("Skipped because fail_fast stopped pending requests"),
+                    )
                 start = time.time()
                 try:
                     data = await self._request(
@@ -3540,6 +3657,36 @@ class CommerceAPIError(Exception):
         super().__init__(f"[{code}] {msg}")
 
 
+def _sanitize_exception(error: Exception) -> Exception:
+    """Sanitize the final error boundary while retaining HTTP classification.
+
+    Retry decisions happen before this step. HTTP status, safe headers and
+    the method remain available to callers; credential-bearing request URLs
+    and response bodies are not retained on the replacement exception.
+    """
+    message = mask_log_message(str(error))
+    if message == str(error):
+        return error
+    if isinstance(error, CommerceAPIError):
+        return CommerceAPIError(error.code, mask_log_message(error.msg))
+    if isinstance(error, httpx.HTTPStatusError):
+        request = httpx.Request(error.request.method, mask_log_message(str(error.request.url)))
+        response = httpx.Response(
+            error.response.status_code,
+            headers=mask_dict_sensitive_keys(dict(error.response.headers)),
+            request=request,
+        )
+        return httpx.HTTPStatusError(message, request=request, response=response)
+    if isinstance(error, httpx.RequestError):
+        try:
+            original_request = error.request
+        except RuntimeError:
+            return type(error)(message)
+        request = httpx.Request(original_request.method, mask_log_message(str(original_request.url)))
+        return type(error)(message, request=request)
+    return RuntimeError(message)
+
+
 def format_error_response(error: Exception) -> str:
     """Format an error into a standardized JSON response string.
 
@@ -3551,11 +3698,11 @@ def format_error_response(error: Exception) -> str:
     """
     if isinstance(error, CommerceAPIError):
         return json.dumps(
-            {"error": {"code": error.code, "message": error.msg}},
+            {"error": {"code": error.code, "message": mask_log_message(error.msg)}},
             ensure_ascii=False,
         )
     return json.dumps(
-        {"error": {"message": str(error)}},
+        {"error": {"message": mask_log_message(str(error))}},
         ensure_ascii=False,
     )
 
@@ -3574,44 +3721,34 @@ def format_response(result: Any) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-def handle_tool_errors(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[str]]:
-    """Decorator to handle common MCP tool errors and format responses.
+def handle_tool_errors(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+    """Preserve declared structured success results and MCP error semantics.
 
-    This decorator wraps an async tool function to:
-    - Catch CommerceAPIError and format it as a structured error response
-    - Catch any other exceptions and format them as generic error responses
-    - Automatically format successful dict/list results as pretty-printed JSON
-
-    Usage:
-        @handle_tool_errors
-        async def my_tool(param: str) -> str:
-            result = await client._request("GET", "path/", params={...})
-            return result  # Will be auto-formatted as JSON
-
-    Args:
-        func: The async tool function to wrap.
-
-    Returns:
-        Wrapped function with error handling and response formatting.
+    Legacy unannotated/text tools return JSON text. Structured tools retain
+    their return type and let the MCP runtime turn raised failures into an
+    error tool result, rather than violating their success output schema.
     """
+    annotation = func.__annotations__.get("return")
+    structured = annotation is not None and annotation not in (str, "str")
 
     @functools.wraps(func)
-    async def wrapper(*args: Any, **kwargs: Any) -> str:
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
             result = await func(*args, **kwargs)
-            return format_response(result)
-        except CommerceAPIError as e:
-            return format_error_response(e)
-        except json.JSONDecodeError as e:
-            return json.dumps(
-                {"error": {"message": f"Invalid JSON: {e}"}},
-                ensure_ascii=False,
-            )
-        except Exception as e:
-            return json.dumps(
-                {"error": {"message": str(e)}},
-                ensure_ascii=False,
-            )
+            return result if structured else format_response(result)
+        except Exception as exc:
+            if structured:
+                # The MCP runtime exposes exception text for structured tools.
+                # Do not carry a credential-bearing HTTP URL into that result.
+                sanitized = _sanitize_exception(exc)
+                if sanitized is not exc:
+                    raise sanitized from None
+                raise
+            if isinstance(exc, json.JSONDecodeError):
+                return json.dumps(
+                    {"error": {"message": f"Invalid JSON: {mask_log_message(str(exc))}"}}, ensure_ascii=False
+                )
+            return format_error_response(exc)
 
     return wrapper
 
@@ -4840,6 +4977,8 @@ class CircuitBreakerState:
     success_count: int = 0
     last_failure_time: float = 0.0
     opened_at: float = 0.0
+    half_open: bool = False
+    probe_in_flight: bool = False
 
 
 class FailoverManager:
@@ -4886,6 +5025,13 @@ class FailoverManager:
         self._recovery_task: asyncio.Task | None = None
         self._failure_history: list[dict[str, Any]] = []
 
+    def _mark_unhealthy(self, url: str) -> None:
+        """Change state without counting the same failed request again."""
+        with self._lb._lock:
+            node = self._lb._endpoints.get(url)
+            if node:
+                node.is_healthy = False
+
     def report_success(self, url: str, latency_ms: float = 0.0) -> None:
         """Report a successful request to an endpoint.
 
@@ -4904,6 +5050,8 @@ class FailoverManager:
             if cb:
                 cb.failure_count = 0
                 cb.success_count += 1
+                cb.half_open = False
+                cb.probe_in_flight = False
                 if cb.is_open:
                     cb.is_open = False
                     logger.info(f"Failover: circuit breaker closed for {url}")
@@ -4943,7 +5091,15 @@ class FailoverManager:
 
             # Mark unhealthy if max failures exceeded
             if node.failure_count >= self.config.max_failures:
-                self._lb.mark_unhealthy(url)
+                self._mark_unhealthy(url)
+
+            cb = self._circuit_breakers.get(url)
+            if cb and cb.half_open:
+                cb.half_open = False
+                cb.probe_in_flight = False
+                cb.is_open = True
+                cb.opened_at = time.time()
+                self._mark_unhealthy(url)
 
             # Check circuit breaker
             self._check_circuit_breaker(url)
@@ -4974,7 +5130,7 @@ class FailoverManager:
             if failure_rate >= self.config.circuit_breaker_threshold and not cb.is_open:
                 cb.is_open = True
                 cb.opened_at = time.time()
-                self._lb.mark_unhealthy(url)
+                self._mark_unhealthy(url)
                 logger.warning(f"Failover: circuit breaker OPENED for {url} " f"(failure_rate={failure_rate:.2f})")
 
     def is_circuit_open(self, url: str) -> bool:
@@ -4991,25 +5147,25 @@ class FailoverManager:
             if cb is None or not cb.is_open:
                 return False
 
-            # Check if circuit breaker should be reset
             elapsed = time.time() - cb.opened_at
             if elapsed >= self.config.circuit_breaker_reset_seconds:
-                cb.is_open = False
-                cb.failure_count = 0
-                cb.success_count = 0
-                logger.info(f"Failover: circuit breaker reset for {url}")
-                return False
-
+                cb.half_open = True
+                return cb.probe_in_flight
             return True
 
     def get_healthy_endpoint(self) -> EndpointNode | None:
-        """Get a healthy endpoint from the load balancer, respecting circuit breakers.
+        """Select a healthy endpoint, or reserve one half-open recovery trial.
 
-        Returns:
-            A healthy EndpointNode, or None if none available.
+        Reading circuit state never restores all traffic. Only a successful
+        trial closes the circuit; a failed trial restarts the cooldown.
         """
         with self._lock:
-            # Try up to the number of endpoints to find one without an open circuit
+            for url, cb in self._circuit_breakers.items():
+                if cb.is_open and not self.is_circuit_open(url) and not cb.probe_in_flight:
+                    endpoint = self._lb._endpoints.get(url)
+                    if endpoint is not None:
+                        cb.probe_in_flight = True
+                        return endpoint
             for _ in range(self._lb.endpoint_count):
                 endpoint = self._lb.get_endpoint()
                 if endpoint is None:
@@ -5030,14 +5186,8 @@ class FailoverManager:
         try:
             async with httpx.AsyncClient(timeout=self.config.recovery_timeout) as client:
                 resp = await client.head(url)
-                if resp.status_code < 500:
-                    self._lb.mark_healthy(url)
-                    # Reset circuit breaker
-                    with self._lock:
-                        cb = self._circuit_breakers.get(url)
-                        if cb:
-                            cb.is_open = False
-                            cb.failure_count = 0
+                if 200 <= resp.status_code < 400:
+                    self.report_success(url)
                     logger.info(f"Failover: endpoint {url} recovered via probe")
                     return True
         except Exception as exc:
@@ -5161,6 +5311,13 @@ class DataExporter:
     """
 
     @staticmethod
+    def _safe_csv_cell(value: Any) -> Any:
+        """Prevent spreadsheet formula execution; retain real numeric cells."""
+        if isinstance(value, str) and value.lstrip(" \t\r\n").startswith(("=", "+", "-", "@")):
+            return "'" + value
+        return value
+
+    @staticmethod
     def _flatten_dict(d: dict[str, Any], parent_key: str = "", sep: str = ".") -> dict[str, Any]:
         """Flatten a nested dictionary using dot notation.
 
@@ -5269,12 +5426,12 @@ class DataExporter:
 
         # Determine fields used
         if page_data:
-            actual_fields = list(page_data[0].keys())
+            actual_fields = list(dict.fromkeys(key for row in page_data for key in row))
         else:
             actual_fields = config.fields or []
 
         # Build output path
-        ext = config.format.value
+        ext = "xlsx" if config.format == ExportFormat.EXCEL else config.format.value
         output_dir = Path(config.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         file_path = output_dir / f"{config.filename}.{ext}"
@@ -5306,9 +5463,9 @@ class DataExporter:
     ) -> None:
         """Export data to CSV file."""
         with open(file_path, "w", newline="", encoding=encoding) as f:
-            writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
-            writer.writeheader()
-            writer.writerows(data)
+            writer = csv.DictWriter(f, fieldnames=fields)
+            writer.writerow({key: DataExporter._safe_csv_cell(key) for key in writer.fieldnames})
+            writer.writerows({key: DataExporter._safe_csv_cell(value) for key, value in row.items()} for row in data)
 
     @staticmethod
     def _export_json(data: list[dict[str, Any]], file_path: Path) -> None:
@@ -5336,9 +5493,13 @@ class DataExporter:
         # Write header
         ws.append(fields)
 
-        # Write data rows
+        # Force string cells (including headers and IDs) to remain text.
         for row in data:
             ws.append([row.get(f) for f in fields])
+        for cells in ws.iter_rows():
+            for cell in cells:
+                if isinstance(cell.value, str):
+                    cell.data_type = "s"
 
         wb.save(str(file_path))
 
@@ -5369,11 +5530,11 @@ class DataExporter:
         if format == ExportFormat.CSV:
             if not data:
                 return ""
-            actual_fields = list(data[0].keys())
+            actual_fields = list(dict.fromkeys(key for row in data for key in row))
             output = io.StringIO()
-            writer = csv.DictWriter(output, fieldnames=actual_fields, extrasaction="ignore")
-            writer.writeheader()
-            writer.writerows(data)
+            writer = csv.DictWriter(output, fieldnames=actual_fields)
+            writer.writerow({key: DataExporter._safe_csv_cell(key) for key in writer.fieldnames})
+            writer.writerows({key: DataExporter._safe_csv_cell(value) for key, value in row.items()} for row in data)
             return output.getvalue()
         elif format == ExportFormat.JSON:
             return json.dumps(data, ensure_ascii=False, indent=2, default=str)
@@ -5415,6 +5576,10 @@ class RequestRecord:
     tags: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
+        self.path = mask_log_message(self.path)
+        self.params = mask_dict_sensitive_keys(self.params)
+        self.data = mask_dict_sensitive_keys(self.data)
+        self.response = _mask_nested(self.response)
         if not self.record_id:
             self.record_id = str(uuid.uuid4())
         if self.timestamp == 0.0:
@@ -5422,7 +5587,7 @@ class RequestRecord:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary."""
-        return {
+        return mask_dict_sensitive_keys({
             "record_id": self.record_id,
             "method": self.method,
             "path": self.path,
@@ -5434,7 +5599,7 @@ class RequestRecord:
             "timestamp": self.timestamp,
             "platform": self.platform,
             "tags": self.tags,
-        }
+        })
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RequestRecord:
@@ -5834,6 +5999,7 @@ class TraceSpan:
     status: str = "unset"
     attributes: dict[str, Any] = field(default_factory=dict)
     events: list[dict[str, Any]] = field(default_factory=list)
+    _started_monotonic: float = field(default_factory=time.monotonic, repr=False)
 
     def __post_init__(self) -> None:
         if not self.span_id:
@@ -5845,7 +6011,7 @@ class TraceSpan:
 
     def set_attribute(self, key: str, value: Any) -> None:
         """Add or update a span attribute."""
-        self.attributes[key] = value
+        self.attributes.update(mask_dict_sensitive_keys({key: value}))
 
     def add_event(self, name: str, attributes: dict[str, Any] | None = None) -> None:
         """Add a timestamped event to the span."""
@@ -5853,14 +6019,15 @@ class TraceSpan:
             {
                 "name": name,
                 "timestamp": time.time(),
-                "attributes": attributes or {},
+                "attributes": mask_dict_sensitive_keys(attributes or {}),
             }
         )
+        del self.events[:-100]
 
     def finish(self, status: str = "ok") -> None:
         """Mark the span as finished."""
         self.end_time = time.time()
-        self.duration_ms = (self.end_time - self.start_time) * 1000
+        self.duration_ms = (time.monotonic() - self._started_monotonic) * 1000
         self.status = status
 
     @property
@@ -5879,15 +6046,18 @@ class TraceSpan:
             "end_time": self.end_time,
             "duration_ms": round(self.duration_ms, 2),
             "status": self.status,
-            "attributes": self.attributes,
-            "events": self.events,
+            "attributes": mask_dict_sensitive_keys(self.attributes),
+            "events": _mask_nested(self.events),
         }
 
 
 class RequestTracer:
     """Traces requests through the system with parent-child span support."""
 
-    def __init__(self, service_name: str = "") -> None:
+    def __init__(self, service_name: str = "", max_spans: int = 1000) -> None:
+        if max_spans < 1:
+            raise ValueError("max_spans must be positive")
+        self.max_spans = max_spans
         self.service_name = service_name
         self._spans: list[TraceSpan] = []
         self._active_spans: dict[str, TraceSpan] = {}
@@ -5905,11 +6075,12 @@ class RequestTracer:
             name=name,
             parent_id=parent.span_id if parent else None,
             trace_id=parent.trace_id if parent else "",
-            attributes=attributes or {},
+            attributes=mask_dict_sensitive_keys(attributes or {}),
         )
 
         with self._lock:
             self._spans.append(span)
+            del self._spans[:-self.max_spans]
             self._active_spans[span.span_id] = span
             if parent is None:
                 self._current_trace_id = span.trace_id
@@ -5932,11 +6103,12 @@ class RequestTracer:
         with self._lock:
             return list(self._active_spans.values())
 
-    def get_trace_summary(self) -> dict[str, Any]:
-        """Get a summary of the current trace."""
+    def get_trace_summary(self, trace_id: str | None = None) -> dict[str, Any]:
+        """Summarize one trace (the latest root by default), never all history."""
         with self._lock:
-            spans = list(self._spans)
-            active = list(self._active_spans.values())
+            selected = trace_id or self._current_trace_id
+            spans = [span for span in self._spans if span.trace_id == selected]
+            active = [span for span in self._active_spans.values() if span.trace_id == selected]
 
         if not spans:
             return {
@@ -5953,9 +6125,14 @@ class RequestTracer:
         root_spans = [s for s in spans if s.parent_id is None]
         root_name = root_spans[0].name if root_spans else ""
 
-        total_duration = sum(s.duration_ms for s in spans if not s.is_active)
+        total_duration = sum(s.duration_ms for s in root_spans if not s.is_active)
         has_error = any(s.status == "error" for s in spans)
-        status = "error" if has_error else "ok"
+        if has_error:
+            status = "error"
+        elif any(s.status == "cancelled" for s in spans):
+            status = "cancelled"
+        else:
+            status = "unset" if active else "ok"
 
         return {
             "trace_id": trace_id,
@@ -6020,6 +6197,8 @@ class DebugLogEntry:
     span_id: str = ""
 
     def __post_init__(self) -> None:
+        self.message = mask_log_message(self.message)
+        self.context = mask_dict_sensitive_keys(self.context)
         if not self.entry_id:
             self.entry_id = uuid.uuid4().hex[:12]
         if self.timestamp == 0.0:
@@ -6030,9 +6209,9 @@ class DebugLogEntry:
         return {
             "entry_id": self.entry_id,
             "level": self.level,
-            "message": self.message,
+            "message": mask_log_message(self.message),
             "timestamp": self.timestamp,
-            "context": self.context,
+            "context": mask_dict_sensitive_keys(self.context),
             "trace_id": self.trace_id,
             "span_id": self.span_id,
         }
@@ -6284,7 +6463,7 @@ class DebugBreakpointManager:
                 "breakpoint_id": bp.breakpoint_id,
                 "name": bp.name,
                 "timestamp": time.time(),
-                "context": context,
+                "context": mask_dict_sensitive_keys(context),
             }
         )
         if len(self._hit_history) > 1000:
@@ -6843,6 +7022,10 @@ class AlertManager:
             Notification delivery result.
         """
         with self._lock:
+            for existing in self._firing_alerts.values():
+                key = (existing.rule_id, existing.platform, existing.endpoint)
+                if key == (alert.rule_id, alert.platform, alert.endpoint):
+                    return {"status": "already_firing", "alert_id": existing.alert_id}
             self._firing_alerts[alert.alert_id] = alert
             self._alert_history.append(alert)
             # Keep history bounded
@@ -6993,7 +7176,7 @@ def register_common_tools(mcp: Any, client: Any) -> None:
     callable returning one (for servers that build their client lazily).
 
     Registered tools: ``get_metrics``, ``get_traces``, ``get_alerts``,
-    ``export_data``. Uses duck-typed ``mcp.tool()`` so this module stays free
+    ``export_data``, ``build_daily_report``. Uses duck-typed ``mcp.tool()`` so this module stays free
     of any MCP framework import.
 
     Args:
@@ -7024,3 +7207,18 @@ def register_common_tools(mcp: Any, client: Any) -> None:
         """Export a JSON array of records to a CSV or JSON string."""
         records = json.loads(records_json)
         return _resolve().export_data(records, fmt=fmt)
+
+    @mcp.tool()
+    async def build_daily_report(shops_json: str, report_date: str, timezone: str = "Asia/Shanghai") -> str:
+        """Aggregate supplied shop order/refund rows into a reconciliable daily report.
+
+        shops_json is an array of shops with platform, shop_id, orders,
+        refunds, input_format (raw or normalized), and per-date coverage
+        declarations. Fetch every page first; missing coverage produces
+        partial observed totals rather than pretending the day is complete.
+        """
+        from shared.aggregation import build_daily_report as aggregate
+
+        return json.dumps(
+            aggregate(date=report_date, shops=json.loads(shops_json), timezone=timezone), ensure_ascii=False
+        )

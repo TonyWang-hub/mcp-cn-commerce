@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import asynccontextmanager
 
 from mcp.server.mcpserver import MCPServer
 
 from shared.cn_commerce_base import (
     CommerceAPIError,
+    DEFAULT_RETRY,
     CommerceMCPBase,
     ConfigValidationError,
     SignMethod,
@@ -30,6 +32,7 @@ class TaobaoMCP(CommerceMCPBase):
     together as query-string params in a POST to the single router endpoint.
     """
 
+    PLATFORM = "TAOBAO"
     BASE_URL = "https://eco.taobao.com/router/rest"
     sign_method = SignMethod.MD5
 
@@ -41,6 +44,11 @@ class TaobaoMCP(CommerceMCPBase):
 
         Returns the API response dict, or an error_response dict on failure.
         """
+        missing = [name for name, value in (
+            ("TAOBAO_APP_KEY", self.app_key), ("TAOBAO_APP_SECRET", self.app_secret),
+            ("TAOBAO_ACCESS_TOKEN", self.access_token)) if not value]
+        if missing:
+            raise ConfigValidationError("TAOBAO", missing)
         try:
             params: dict[str, str] = {
                 "method": api_method,
@@ -49,7 +57,7 @@ class TaobaoMCP(CommerceMCPBase):
             }
             if biz_params:
                 params.update(biz_params)
-            return await self._request("POST", "", params=params)
+            return await self._request("POST", "", params=params, retry_config=DEFAULT_RETRY)
         except CommerceAPIError as e:
             return {"error_response": {"code": e.code, "msg": e.msg}}
         except Exception as e:
@@ -77,7 +85,18 @@ taobao = _create_taobao_client()
 
 # ── MCP server ─────────────────────────────────────────────────────────────────
 
-mcp = MCPServer("mcp-cn-taobao")
+
+@asynccontextmanager
+async def _lifespan(_server):
+    try:
+        yield {}
+    finally:
+        client = taobao
+        if client is not None:
+            await client.close()
+
+
+mcp = MCPServer("mcp-cn-taobao", lifespan=_lifespan)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════

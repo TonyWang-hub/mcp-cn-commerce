@@ -1,84 +1,59 @@
-# Chinese E-Commerce Platform Comparison
+# 平台协议与验证边界
 
-## Platform Overview
+本项目是第三方 MCP 适配器，连接商家授权的官方接口。平台开放 API、官方 SDK、官方 MCP 服务是不同的交付形式；官网存在不代表当前账号自动拥有订单、账单或广告权限。
 
-| 平台 | 开放平台地址 | API 端点 | 认证方式 | 签名方法 | 主要能力 | Phase |
-|---|---|---|---|---|---|---|
-| 巨量引擎 | [open.oceanengine.com](https://open.oceanengine.com) | `ad.oceanengine.com/open_api/` | OAuth 2.0 | MD5 | 广告报表/计划管理 | 1 |
-| 抖店 | [op.jinritemai.com](https://op.jinritemai.com) | `openapi-fxg.jinritemai.com` | AppID+Secret | MD5 | 订单/商品/售后 | 1 |
-| 京东 | [jos.jd.com](https://jos.jd.com) | `api.jd.com/routerjson` | OAuth 2.0 | HMAC-MD5 | 订单/商品 | 1 |
-| 淘宝 | [open.taobao.com](https://open.taobao.com) | `eco.taobao.com/router/rest` | OAuth 2.0 | HMAC-MD5 | 订单/商品/物流 | 2 |
-| 拼多多 | [open.pinduoduo.com](https://open.pinduoduo.com) | `gw-api.pinduoduo.com/api/router` | OAuth 2.0 | MD5 | 订单/商品/推广 | 2 |
-| 快手 | [open.kuaixiaodian.com](https://open.kuaixiaodian.com) | `openapi.kwaixiaodian.com` | OAuth 2.0 | MD5 | 订单/商品/物流 | 3 |
-| 小红书 | [open.xiaohongshu.com](https://open.xiaohongshu.com) | (开放平台) | OAuth 2.0 | MD5 | 订单/商品/库存 | 3 |
-| 微信小店 | [developers.weixin.qq.com](https://developers.weixin.qq.com) | `api.weixin.qq.com` | OAuth 2.0 | MD5 | 订单/商品/售后 | 3 |
+2026-09-10 的来源核查见 [official-access-status.md](official-access-status.md)。这里记录代码接入方式和需要验证的接口契约，不承诺未经真实账号验证的可用率、token 固定有效期或资质政策。
 
-## Auth Mechanisms
+| 平台 | 代码凭证 | 协议实现及验证要求 |
+|---|---|---|
+| 巨量引擎 | `OCEANENGINE_ACCESS_TOKEN` | 官方 SDK 使用 `Access-Token` 请求头；广告主、广告、千川和星图分别需要对应授权。应用 key/secret 用于授权管理时才配置。 |
+| 抖店 | `DOUDIAN_APP_KEY`、`DOUDIAN_APP_SECRET`、`DOUDIAN_ACCESS_TOKEN`；部分接口需要 shop id | 已按官方指南实现 HMAC-SHA256，规范化 JSON 与实际发送正文一致；业务方法、权限和响应仍需授权店铺逐项验证。不能把 token 当永久有效。 |
+| 京东 | `JD_APP_KEY`、`JD_APP_SECRET`、`JD_ACCESS_TOKEN` | JOS 参数封装、签名参与字段和各金额单位需逐接口验证。 |
+| 淘宝 | `TAOBAO_APP_KEY`、`TAOBAO_APP_SECRET`、`TAOBAO_ACCESS_TOKEN` | TOP session 映射、timestamp 格式、签名方式和店铺权限需逐项核对。 |
+| 拼多多 | `PINDUODUO_CLIENT_ID`、`PINDUODUO_CLIENT_SECRET`、`PINDUODUO_ACCESS_TOKEN` | 商家数据权限与多多进宝推广权限分别核实；时间类型、窗口和复杂参数编码需契约样例。 |
+| 快手 | `KUAISHOU_APP_KEY`、`KUAISHOU_APP_SECRET`、`KUAISHOU_SIGN_SECRET`、`KUAISHOU_ACCESS_TOKEN` | 签名密钥单独保留；修复配置传参后仍需官方签名向量和接口样例。 |
+| 小红书 | `XHS_CLIENT_ID`、`XHS_CLIENT_SECRET`、`XHS_ACCESS_TOKEN` | 已按官方统一网关、签名和 schema 迁移 9 个业务工具；评论、店铺信息、活动、优惠券 4 个旧入口明确返回不支持，不发送请求。须使用商家应用及对应接口权限；真实店铺联调待完成。 |
+| 微信小店 | 静态：`WX_ACCESS_TOKEN`；自动管理：`WX_APP_ID`、`WX_APP_SECRET` | 默认有 token 时使用静态模式；`WX_TOKEN_MODE=managed` 明确启用刷新。业务请求无需套通用 MD5；订单时间、游标/页码需按当前接口核对。 |
 
-| 平台 | Auth Type | Token Source | Token Refresh | Notes |
-|---|---|---|---|---|
-| 巨量引擎 | OAuth 2.0 (Authorization Code) | `/oauth2/access_token` | Refresh token (long-lived) | Access token expires in 24h |
-| 抖店 | App Key + App Secret | Manual in developer console | N/A (permanent) | No OAuth flow — key/secret directly |
-| 京东 | OAuth 2.0 (Authorization Code) | `/oauth2/access_token` | Refresh token | Access token expires; refresh before expiry |
-| 淘宝 | OAuth 2.0 (Authorization Code) | `/token` | Refresh token (48h validity, 30d refresh window) | Access token 48h, refreshable within 30d |
-| 拼多多 | OAuth 2.0 (Authorization Code) | `/oauth2/access_token` | Refresh token | Standard OAuth 2.0 flow |
-| 快手 | OAuth 2.0 (Authorization Code) | `/oauth2/access_token` | Refresh token | Access token expires in 7d |
-| 小红书 | OAuth 2.0 (Authorization Code) | Token via authorization callback | Refresh token | Standard OAuth 2.0 flow |
-| 微信小店 | OAuth 2.0 (Authorization Code) | `/cgi-bin/token` | Refresh via `/cgi-bin/stable_token` | WeChat-style OAuth, not full OAuth 2.0 |
+## 小红书当前映射
 
-## Signing Methods
+公共请求使用官方统一 POST JSON 网关；业务字段与公共字段进入同一正文，签名仅覆盖官方规定的系统字段。签名和网关来源：[官方签名指南](https://open.xiaohongshu.com/document/developer/file/39)、[系统参数](https://open.xiaohongshu.com/document/developer/file/40)。
 
-| 平台 | Sign Method | Algorithm | Input Construction |
-|---|---|---|---|
-| 巨量引擎 | MD5 | `md5(app_secret + sorted_kv_string + app_secret)` | All params sorted alphabetically |
-| 抖店 | MD5 | `md5(app_secret + sorted_kv_string + app_secret)` | All params sorted alphabetically |
-| 京东 | HMAC-MD5 | `hmac_md5(key=app_secret, msg=app_secret + sorted_kv_string + app_secret)` | System params only |
-| 淘宝 | HMAC-MD5 | `hmac_md5(key=app_secret, msg=app_secret + sorted_kv_string + app_secret)` | All params sorted alphabetically |
-| 拼多多 | MD5 | `md5(app_secret + sorted_kv_string + app_secret)` | All params, JSON values serialized |
-| 快手 | MD5 | `md5(app_secret + sorted_kv_string + app_secret)` | System + biz params combined |
-| 小红书 | MD5 | `md5(app_secret + sorted_kv_string + app_secret)` | All params sorted alphabetically |
-| 微信小店 | MD5 | `md5(app_secret + sorted_kv_string + app_secret)` | All params sorted alphabetically |
+| 本项目工具 | 当前官方方法 / 状态 |
+|---|---|
+| `get_order_list` | `order.getOrderList`，创建时间窗口不超过 24 小时 |
+| `get_order_detail` | `order.getOrderDetail` |
+| `get_product_list` | `product.searchItemList` |
+| `get_product_detail` | `product.getItemInfo` |
+| `get_refund_list` | `afterSale.listAfterSaleInfos` |
+| `get_refund_detail` | `afterSale.getAfterSaleInfo` |
+| `get_logistics_tracking` | `order.getOrderTracking` |
+| `get_inventory` | `inventory.getSkuStockV2`，必须提供 `sku_id` |
+| `get_bill_list` | `finance.querySellerAccountRecords`，仅接受官方枚举 |
+| `get_review_list`、`get_shop_info`、`list_promotions`、`list_coupons` | 未取得对应官方接口合同，明确不支持，不发送 HTTP |
 
-## API Capability Matrix
+以上是源码中的协议映射，不代表已通过真实店铺授权调用。原先按月查询订单/退款、只传商品 ID 查询库存、传旧数字账单类型的调用，需要按新的参数约束调整。
 
-| 平台 | 订单查询 | 商品管理 | 售后/退款 | 物流查询 | 库存管理 | 广告报表 | 推广工具 | 店铺管理 |
-|---|---|---|---|---|---|---|---|---|
-| 巨量引擎 | -- | -- | -- | -- | -- | Yes | Yes | Yes |
-| 抖店 | Yes | Yes | Yes | Yes | Yes | -- | -- | Yes |
-| 京东 | Yes | Yes | -- | -- | -- | -- | -- | Yes |
-| 淘宝 | Yes | Yes | Yes | Yes | Yes | -- | Yes | Yes |
-| 拼多多 | Yes | Yes | Yes | -- | -- | -- | Yes | Yes |
-| 快手 | Yes | Yes | Yes | Yes | -- | -- | -- | Yes |
-| 小红书 | Yes | Yes | -- | -- | Yes | -- | -- | Yes |
-| 微信小店 | Yes | Yes | Yes | Yes | Yes | -- | -- | Yes |
+## 共享 transport 的边界
 
-## Phase Roadmap
+平台适配器构造最终 URL、参数、请求头、签名和响应解析器；共享 transport 负责连接复用、HTTP 状态、重试、限流、指标和 trace。不能假设所有平台都有同样的 app_key/sign/access_token 系统参数，也不能用一种 error_response 包装推断所有平台业务成功。
 
-### Phase 1 — Foundation (Read-only MVP)
-- **巨量引擎**: Ad campaign & report read APIs
-- **抖店**: Order, product, after-sale read APIs
-- **京东**: Order, product, shop read APIs
+查询接口即使使用 POST，也只有在适配器明确其只读语义后才配置重试。动态签名在每次尝试前重新生成。请求监控记录实际尝试结果，业务错误也计为失败。
 
-### Phase 2 — Mid-tier Expansion
-- **淘宝**: Full Top API integration — orders, products, logistics
-- **拼多多**: Orders, products, promotion tools
+## 接入验收记录
 
-### Phase 3 — Long-tail Coverage
-- **快手**: Orders, products, logistics
-- **小红书**: Orders, products, inventory
-- **微信小店**: Orders, products, after-sale
+每个已承诺接口应有以下记录，缺失证据时维持“待验证”状态：
 
-## Common Patterns
+1. 官方文档/SDK 链接、接口名与版本、查询日期。
+2. 应用类型、商家授权、权限包、店铺类型限制。
+3. 最终请求的签名向量、URL、header、query/body 编码。
+4. 脱敏的成功、业务失败、权限不足响应。
+5. 时间单位/时区、金额单位、分页方式、最大窗口和配额。
+6. 两页以上数据的去重、终止条件和完整性验证。
+7. 真实只读联调日期、环境与后台核对结果；不得保存真实凭证。
 
-All platforms share a similar request pattern:
+“代码已实现”“本地契约通过”“真实店铺通过”分别记录。注册工具数量、模拟响应和官网首页均不能替代真实店铺验收。
 
-1. **Base URL** + router/endpoint path
-2. **System params**: `app_key`, `timestamp`, `sign_method`, `sign`, `access_token`
-3. **Business params**: method-specific parameters (in query string or body)
-4. **Signing**: `app_secret` sandwich around alphabetically-sorted KV pairs, then hash
-5. **Response**: unified `{ error_response, result }` envelope (naming varies by platform)
+## 数据输出
 
-The shared base class `CommerceMCPBase` in `shared/cn_commerce_base.py` encapsulates this pattern so each platform server only needs to:
-- Set `BASE_URL` and `sign_method`
-- Override `_sign()` if non-MD5 signing is needed
-- Define tools that call `self._request()` or a platform-specific `_call()` wrapper
+平台工具保留原始响应契约。使用 build_daily_report 时，应先提取订单/退款列表，完成事件日期窗口内的全部分页，再提交 raw 或 normalized 记录和明确的 coverage。金额、时间、质量错误与日报口径见 [data-contracts.md](data-contracts.md) 和 [template-guide.md](template-guide.md)。

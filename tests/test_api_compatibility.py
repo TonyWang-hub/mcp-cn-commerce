@@ -15,27 +15,14 @@ import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
-
-# MCP compat shim
-import mcp.server
 import pytest
-
-_orig_server_cls = mcp.server.Server
-if not hasattr(_orig_server_cls, "tool"):
-
-    def _mock_tool(self, *args, **kwargs):
-        def decorator(func):
-            return func
-
-        return decorator
-
-    _orig_server_cls.tool = _mock_tool  # type: ignore[attr-defined]
 
 from shared.cn_commerce_base import (  # noqa: E402
     CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,
     MetricsCollector,
+    RateLimiter,
     RetryConfig,
     SignMethod,
     format_error_response,
@@ -103,6 +90,21 @@ class CompatTestResult:
 _compat_results = CompatTestResult()
 
 
+async def _parse_http_response(client, payload, operation, *args, **kwargs):
+    """Exercise the production adapter using a real HTTP response and transport."""
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json=payload)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        with patch.object(client, "_ensure_client", return_value=http):
+            result = await getattr(client, operation)(*args, **kwargs)
+    assert len(requests) == 1
+    return result, requests[0]
+
+
 # ====================================================================
 #  1. Backward Compatibility: Old Response Formats
 # ====================================================================
@@ -111,11 +113,12 @@ _compat_results = CompatTestResult()
 class TestBackwardCompatibilityOldResponseFormats:
     """Verify code handles legacy API response formats."""
 
-    def test_oceanengine_v1_response_without_page_info(self):
+    @pytest.mark.asyncio
+    async def test_oceanengine_v1_response_without_page_info(self):
         """OceanEngine: old API responses without page_info field should parse."""
         from servers.oceanengine.server import OceanEngine
 
-        OceanEngine(app_key="k", app_secret="s", access_token="t")
+        client = OceanEngine(app_key="k", app_secret="s", access_token="t")
 
         # V1 format: no page_info, flat data list
         old_response = {
@@ -125,19 +128,24 @@ class TestBackwardCompatibilityOldResponseFormats:
                 # No page_info — this was added later
             },
         }
-        assert old_response["code"] == 0
-        assert len(old_response["data"]["list"]) == 1
+        result, _ = await _parse_http_response(client, old_response, "_request", "GET", "2/advertiser/info/")
+        assert result["code"] == 0
+        assert len(result["data"]["list"]) == 1
         _compat_results.add("backward_compat", "oceanengine_v1_no_page_info", "oceanengine", True)
 
-    def test_oceanengine_error_response_legacy_format(self):
-        """OceanEngine: legacy error_response format (code + msg) still works."""
-        old_error = {"error_response": {"code": 40001, "msg": "Invalid params"}}
-        err = CommerceAPIError(
-            old_error["error_response"]["code"],
-            old_error["error_response"]["msg"],
-        )
-        assert err.code == 40001
-        assert "Invalid params" in str(err)
+    @pytest.mark.asyncio
+    async def test_oceanengine_error_response_legacy_format(self):
+        """OceanEngine business errors are parsed by its own adapter."""
+        from servers.oceanengine.server import OceanEngine
+
+        client = OceanEngine(access_token="t")
+        with pytest.raises(CommerceAPIError) as caught:
+            await _parse_http_response(
+                client, {"code": 40001, "message": "Invalid params"},
+                "_request", "GET", "2/advertiser/info/",
+            )
+        assert caught.value.code == 40001
+        assert "Invalid params" in str(caught.value)
         _compat_results.add(
             "backward_compat",
             "oceanengine_legacy_error_format",
@@ -145,7 +153,8 @@ class TestBackwardCompatibilityOldResponseFormats:
             True,
         )
 
-    def test_jd_legacy_response_flat_structure(self):
+    @pytest.mark.asyncio
+    async def test_jd_legacy_response_flat_structure(self):
         """JD: legacy response without nested 'result' wrapper."""
         # Old JD API sometimes returned flat structures
         legacy_response = {
@@ -156,12 +165,18 @@ class TestBackwardCompatibilityOldResponseFormats:
                 }
             }
         }
-        assert "jd_pop_order_search_response" in legacy_response
-        orders = legacy_response["jd_pop_order_search_response"]["searchorderinfo_result"]["orderInfoList"]
+        from servers.jd.server import JDMCP
+
+        result, _ = await _parse_http_response(
+            JDMCP(app_key="k", app_secret="s", access_token="t"),
+            legacy_response, "_call", "jd.pop.order.search", {},
+        )
+        orders = result["jd_pop_order_search_response"]["searchorderinfo_result"]["orderInfoList"]
         assert len(orders) == 1
         _compat_results.add("backward_compat", "jd_legacy_flat_structure", "jd", True)
 
-    def test_taobao_error_response_legacy_format(self):
+    @pytest.mark.asyncio
+    async def test_taobao_error_response_legacy_format(self):
         """Taobao: legacy error_response with code + msg + sub_code."""
         legacy_error = {
             "error_response": {
@@ -171,8 +186,15 @@ class TestBackwardCompatibilityOldResponseFormats:
                 "sub_msg": "Invalid App Key",
             }
         }
-        assert legacy_error["error_response"]["code"] == 7
-        assert "sub_code" in legacy_error["error_response"]
+        from servers.taobao.server import TaobaoMCP
+
+        with pytest.raises(CommerceAPIError) as caught:
+            await _parse_http_response(
+                TaobaoMCP(app_key="k", app_secret="s", access_token="t"),
+                legacy_error, "_call", "taobao.trades.sold.get", {},
+            )
+        assert caught.value.code == 7
+        assert caught.value.msg == "Invalid app key"
         _compat_results.add(
             "backward_compat",
             "taobao_legacy_error_with_sub_code",
@@ -180,11 +202,17 @@ class TestBackwardCompatibilityOldResponseFormats:
             True,
         )
 
-    def test_doudian_legacy_response_code_10000(self):
+    @pytest.mark.asyncio
+    async def test_doudian_legacy_response_code_10000(self):
         """Doudian: legacy success code 10000 (not 0)."""
         legacy_response = {"code": 10000, "data": {"list": [], "total": 0}}
-        # Doudian uses 10000 as success, not 0
-        assert legacy_response["code"] == 10000
+        from servers.doudian.server import DouDianClient
+
+        result, _ = await _parse_http_response(
+            DouDianClient(app_key="k", app_secret="s", access_token="t", shop_id="shop"),
+            legacy_response, "request", "order/list", {},
+        )
+        assert result == {"list": [], "total": 0}
         _compat_results.add(
             "backward_compat",
             "doudian_legacy_success_code_10000",
@@ -192,7 +220,8 @@ class TestBackwardCompatibilityOldResponseFormats:
             True,
         )
 
-    def test_pinduoduo_legacy_response_types(self):
+    @pytest.mark.asyncio
+    async def test_pinduoduo_legacy_response_types(self):
         """Pinduoduo: legacy response with different key naming conventions."""
         # Older PDD APIs used snake_case differently
         legacy_response = {
@@ -201,7 +230,13 @@ class TestBackwardCompatibilityOldResponseFormats:
                 "total_count": 1,
             }
         }
-        assert legacy_response["order_list_get_response"]["total_count"] == 1
+        from servers.pinduoduo.server import PinduoduoMCP
+
+        result, _ = await _parse_http_response(
+            PinduoduoMCP(app_key="k", app_secret="s", access_token="t"),
+            legacy_response, "_call", "pdd.order.list.get", {},
+        )
+        assert result["order_list_get_response"]["total_count"] == 1
         _compat_results.add(
             "backward_compat",
             "pinduoduo_legacy_order_response",
@@ -209,14 +244,22 @@ class TestBackwardCompatibilityOldResponseFormats:
             True,
         )
 
-    def test_wechat_store_legacy_token_response(self):
+    @pytest.mark.asyncio
+    async def test_wechat_store_legacy_token_response(self):
         """WeChat Store: legacy token response format with expires_in."""
         legacy_token = {
             "access_token": "fetched_token_abc",
             "expires_in": 7200,
         }
-        assert "access_token" in legacy_token
-        assert legacy_token["expires_in"] == 7200
+        from servers.weixin_store.server import WeixinStoreMCP
+
+        client = WeixinStoreMCP(app_key="k", app_secret="s", token_mode="managed")
+        result, request = await _parse_http_response(client, legacy_token, "_ensure_token")
+        assert result == "fetched_token_abc"
+        assert request.url.params["grant_type"] == "client_credential"
+        # A second call must reuse the token without trying to create a client.
+        with patch.object(client, "_ensure_client", side_effect=AssertionError("unexpected token refresh")):
+            assert await client._ensure_token() == result
         _compat_results.add(
             "backward_compat",
             "wechat_legacy_token_format",
@@ -224,13 +267,21 @@ class TestBackwardCompatibilityOldResponseFormats:
             True,
         )
 
-    def test_kuaishou_legacy_response_format(self):
+    @pytest.mark.asyncio
+    async def test_kuaishou_legacy_response_format(self):
         """Kuaishou: legacy response without result wrapper."""
         legacy_response = {
             "result": 1,
             "data": {"list": [{"order_id": "KS001"}], "total": 1},
         }
-        assert legacy_response["result"] == 1
+        from servers.kuaishou.server import KuaishouMCP
+
+        result, _ = await _parse_http_response(
+            KuaishouMCP(app_key="k", app_secret="s", sign_secret="ss", access_token="t"),
+            legacy_response, "_call", "/open/order/list", {},
+        )
+        assert result["result"] == 1
+        assert result["data"]["list"][0]["order_id"] == "KS001"
         _compat_results.add(
             "backward_compat",
             "kuaishou_legacy_response",
@@ -238,14 +289,22 @@ class TestBackwardCompatibilityOldResponseFormats:
             True,
         )
 
-    def test_xiaohongshu_legacy_response_format(self):
+    @pytest.mark.asyncio
+    async def test_xiaohongshu_legacy_response_format(self):
         """Xiaohongshu: legacy response with success flag."""
         legacy_response = {
             "code": 0,
             "success": True,
             "data": {"items": [], "total": 0},
         }
-        assert legacy_response["success"] is True
+        from servers.xiaohongshu.server import XiaohongshuMCP
+
+        result, _ = await _parse_http_response(
+            XiaohongshuMCP(app_key="k", app_secret="s", access_token="t"),
+            legacy_response, "_call", "GET", "/api/product/list", {"page": "1", "page_size": "20"},
+        )
+        assert result["success"] is True
+        assert result["data"] == {"items": [], "total": 0}
         _compat_results.add(
             "backward_compat",
             "xiaohongshu_legacy_response",
@@ -283,7 +342,9 @@ class TestForwardCompatibilityUnknownFields:
     @pytest.mark.asyncio
     async def test_oceanengine_response_with_extra_fields(self):
         """OceanEngine: response with new unknown fields should not break parsing."""
-        client = CommerceMCPBase(app_key="k", app_secret="s", access_token="t")
+        from servers.oceanengine.server import OceanEngine
+
+        client = OceanEngine(app_key="k", app_secret="s", access_token="t")
 
         # Future API might add new top-level fields
         future_response = {
@@ -297,7 +358,7 @@ class TestForwardCompatibilityUnknownFields:
         mock_http.is_closed = False
 
         with patch.object(client, "_ensure_client", return_value=mock_http):
-            result = await client._request("GET", "/api/test")
+            result = await client._request("GET", "2/advertiser/info/")
 
         # Should still parse correctly, unknown fields preserved
         assert result["code"] == 0
@@ -312,7 +373,9 @@ class TestForwardCompatibilityUnknownFields:
     @pytest.mark.asyncio
     async def test_jd_response_with_new_order_fields(self):
         """JD: new fields in order objects should pass through."""
-        client = CommerceMCPBase(app_key="k", app_secret="s", access_token="t")
+        from servers.jd.server import JDMCP
+
+        client = JDMCP(app_key="k", app_secret="s", access_token="t")
 
         future_order = {
             "jd_pop_order_search_response": {
@@ -334,7 +397,7 @@ class TestForwardCompatibilityUnknownFields:
         mock_http.is_closed = False
 
         with patch.object(client, "_ensure_client", return_value=mock_http):
-            result = await client._request("POST", "", data={})
+            result = await client._call("jd.pop.order.search", {})
 
         orders = result["jd_pop_order_search_response"]["searchorderinfo_result"]["orderInfoList"]
         assert orders[0]["new_ai_field"] == "value"
@@ -349,7 +412,9 @@ class TestForwardCompatibilityUnknownFields:
     @pytest.mark.asyncio
     async def test_taobao_response_with_new_product_fields(self):
         """Taobao: new fields in product objects should not break."""
-        client = CommerceMCPBase(app_key="k", app_secret="s", access_token="t")
+        from servers.taobao.server import TaobaoMCP
+
+        client = TaobaoMCP(app_key="k", app_secret="s", access_token="t")
 
         future_product = {
             "items_onsale_get_response": {
@@ -371,7 +436,7 @@ class TestForwardCompatibilityUnknownFields:
         mock_http.is_closed = False
 
         with patch.object(client, "_ensure_client", return_value=mock_http):
-            result = await client._request("POST", "", data={})
+            result = await client._call("taobao.items.onsale.get", {})
 
         items = result["items_onsale_get_response"]["items"]["item"]
         assert items[0]["ai_recommendation_score"] == 0.95
@@ -457,13 +522,20 @@ class TestForwardCompatibilityUnknownFields:
 class TestVersionNegotiationCompatibility:
     """Test API version parameters across platforms."""
 
-    def test_taobao_api_version_parameter(self):
+    @pytest.mark.asyncio
+    async def test_taobao_api_version_parameter(self):
         """Taobao uses v=2.0 in API calls."""
         from servers.taobao.server import TaobaoMCP
 
         client = TaobaoMCP(app_key="k", app_secret="s", access_token="t")
-        # The _call method should include version parameter
-        assert client.BASE_URL == "https://eco.taobao.com/router/rest"
+        _, request = await _parse_http_response(
+            client, {"trades_sold_get_response": {"total_results": 0}},
+            "_call", "taobao.trades.sold.get", {},
+        )
+        from urllib.parse import parse_qs
+
+        assert str(request.url).split("?")[0] == "https://eco.taobao.com/router/rest"
+        assert parse_qs(request.content.decode())["v"] == ["2.0"]
         _compat_results.add(
             "version_negotiation",
             "taobao_api_version_v2",
@@ -471,12 +543,17 @@ class TestVersionNegotiationCompatibility:
             True,
         )
 
-    def test_jd_api_version_parameter(self):
+    @pytest.mark.asyncio
+    async def test_jd_api_version_parameter(self):
         """JD uses v=2.0 in API calls."""
         from servers.jd.server import JDMCP
 
         client = JDMCP(app_key="k", app_secret="s", access_token="t")
-        assert client.BASE_URL == "https://api.jd.com/routerjson"
+        _, request = await _parse_http_response(
+            client, {"jd_pop_order_search_response": {}}, "_call", "jd.pop.order.search", {},
+        )
+        assert request.url.host == "api.jd.com"
+        assert request.url.params["v"] == "2.0"
         _compat_results.add(
             "version_negotiation",
             "jd_api_version_v2",
@@ -484,13 +561,19 @@ class TestVersionNegotiationCompatibility:
             True,
         )
 
-    def test_oceanengine_api_version_in_path(self):
+    @pytest.mark.asyncio
+    async def test_oceanengine_api_version_in_path(self):
         """OceanEngine uses version prefix in API path (e.g. '2/advertiser/info/')."""
         from servers.oceanengine.server import OceanEngine
 
         client = OceanEngine(app_key="k", app_secret="s", access_token="t")
-        # API paths start with version number
-        assert client.BASE_URL == "https://ad.oceanengine.com/open_api/"
+        _, request = await _parse_http_response(
+            client, {"code": 0, "data": {"list": []}},
+            "_request", "GET", "2/advertiser/info/",
+        )
+        assert request.url.host == "api.oceanengine.com"
+        assert request.url.path == "/open_api/2/advertiser/info/"
+        assert request.headers["Access-Token"] == "t"
         _compat_results.add(
             "version_negotiation",
             "oceanengine_version_in_path",
@@ -502,8 +585,8 @@ class TestVersionNegotiationCompatibility:
         """Doudian uses a specific API gateway URL."""
         from servers.doudian.server import DouDianClient
 
-        DouDianClient(app_key="k", app_secret="s", access_token="t")
-        assert "jinritemai.com" in "https://openapi-fxg.jinritemai.com/"
+        client = DouDianClient(app_key="k", app_secret="s", access_token="t")
+        assert client.BASE_URL == "https://openapi-fxg.jinritemai.com/"
         _compat_results.add(
             "version_negotiation",
             "doudian_api_base_url",
@@ -534,10 +617,7 @@ class TestVersionNegotiationCompatibility:
         with patch.dict(os.environ, env, clear=False):
             import importlib
 
-            if "servers.xiaohongshu.server" in sys.modules:
-                importlib.reload(sys.modules["servers.xiaohongshu.server"])
-            else:
-                import servers.xiaohongshu.server  # noqa: F401
+            importlib.import_module("servers.xiaohongshu.server")
             xhs_mod = sys.modules["servers.xiaohongshu.server"]
             client = xhs_mod.XiaohongshuMCP(app_key="k", app_secret="s", access_token="t")
             assert "xiaohongshu.com" in client.BASE_URL
@@ -554,10 +634,7 @@ class TestVersionNegotiationCompatibility:
         with patch.dict(os.environ, env, clear=False):
             import importlib
 
-            if "servers.weixin_store.server" in sys.modules:
-                importlib.reload(sys.modules["servers.weixin_store.server"])
-            else:
-                import servers.weixin_store.server  # noqa: F401
+            importlib.import_module("servers.weixin_store.server")
             wx_mod = sys.modules["servers.weixin_store.server"]
             client = wx_mod.WeixinStoreMCP(app_key="k", app_secret="s", access_token="t")
             assert "weixin.qq.com" in client.BASE_URL
@@ -578,10 +655,7 @@ class TestVersionNegotiationCompatibility:
         with patch.dict(os.environ, env, clear=False):
             import importlib
 
-            if "servers.pinduoduo.server" in sys.modules:
-                importlib.reload(sys.modules["servers.pinduoduo.server"])
-            else:
-                import servers.pinduoduo.server  # noqa: F401
+            importlib.import_module("servers.pinduoduo.server")
             pdd_mod = sys.modules["servers.pinduoduo.server"]
             client = pdd_mod.PinduoduoMCP(app_key="k", app_secret="s", access_token="t")
             assert "pinduoduo.com" in client.BASE_URL
@@ -647,15 +721,16 @@ class TestSigningMethodCompatibility:
         assert all(c in "0123456789ABCDEF" for c in sig)
         _compat_results.add("signing_compat", "jd_hmac_md5_format", "jd", True)
 
-    def test_doudian_md5_sign_format(self):
-        """Doudian MD5 produces 32-char hex (lowercase)."""
+    def test_doudian_hmac_sha256_sign_format(self):
+        """Doudian signs its public fields using lowercase HMAC-SHA256."""
         from servers.doudian.server import DouDianClient
 
         client = DouDianClient(app_key="k", app_secret="s", access_token="t")
-        sig = client._sign({"order_id": "123"})
-        assert len(sig) == 32
+        sig = client._sign({"app_key": "k", "method": "order.list",
+                            "param_json": '{"order_id":"123"}', "timestamp": "123", "v": "2"})
+        assert len(sig) == 64
         assert all(c in "0123456789abcdef" for c in sig)
-        _compat_results.add("signing_compat", "doudian_md5_format", "doudian", True)
+        _compat_results.add("signing_compat", "doudian_hmac_sha256_format", "doudian", True)
 
     def test_kuaishou_sign_uses_sign_secret(self):
         """Kuaishou signing uses sign_secret, not app_secret."""
@@ -845,29 +920,23 @@ class TestCrossPlatformInterfaceConsistency:
     """Verify all platforms implement consistent interfaces."""
 
     def test_all_platforms_extend_commerce_mcp_base(self):
-        """All platform clients extend CommerceMCPBase (checked via MRO names)."""
+        """All platform clients share the same canonical CommerceMCPBase type."""
         from servers.jd.server import JDMCP
         from servers.kuaishou.server import KuaishouMCP
         from servers.oceanengine.server import OceanEngine
         from servers.taobao.server import TaobaoMCP
 
-        # Use MRO class names to avoid cross-module import path issues
         for cls in [OceanEngine, JDMCP, TaobaoMCP, KuaishouMCP]:
-            base_names = [c.__name__ for c in cls.__mro__]
-            assert "CommerceMCPBase" in base_names, f"{cls.__name__} should extend CommerceMCPBase, MRO: {base_names}"
+            assert issubclass(cls, CommerceMCPBase)
 
         # WeixinStore needs env vars to import
         env = {"WX_APP_ID": "wx_id", "WX_APP_SECRET": "wx_secret"}
         with patch.dict(os.environ, env, clear=False):
             import importlib
 
-            if "servers.weixin_store.server" in sys.modules:
-                importlib.reload(sys.modules["servers.weixin_store.server"])
-            else:
-                import servers.weixin_store.server  # noqa: F401
+            importlib.import_module("servers.weixin_store.server")
             wx_mod = sys.modules["servers.weixin_store.server"]
-            base_names = [c.__name__ for c in wx_mod.WeixinStoreMCP.__mro__]
-            assert "CommerceMCPBase" in base_names
+            assert issubclass(wx_mod.WeixinStoreMCP, CommerceMCPBase)
 
         _compat_results.add(
             "interface_consistency",
@@ -944,8 +1013,7 @@ class TestCrossPlatformInterfaceConsistency:
         for cls in [OceanEngine, JDMCP, TaobaoMCP]:
             client = cls(app_key="k", app_secret="s")
             assert hasattr(client, "metrics"), f"{cls.__name__} missing metrics"
-            # Check type name instead of isinstance to avoid cross-module import issues
-            assert type(client.metrics).__name__ == "MetricsCollector"
+            assert isinstance(client.metrics, MetricsCollector)
 
         _compat_results.add(
             "interface_consistency",
@@ -963,8 +1031,7 @@ class TestCrossPlatformInterfaceConsistency:
         for cls in [OceanEngine, JDMCP, TaobaoMCP]:
             client = cls(app_key="k", app_secret="s")
             assert hasattr(client, "rate_limiter"), f"{cls.__name__} missing rate_limiter"
-            # Check type name instead of isinstance to avoid cross-module import issues
-            assert type(client.rate_limiter).__name__ == "RateLimiter"
+            assert isinstance(client.rate_limiter, RateLimiter)
 
         _compat_results.add(
             "interface_consistency",
@@ -1202,9 +1269,9 @@ class TestPaginationCompatibility:
             call_count += 1
             return {"result": [{"id": i} for i in range(page_size)]}
 
-        results = await client._paginate(fetch_fn, page_size=5, max_pages=3)
+        with pytest.raises(RuntimeError, match="result may be incomplete"):
+            await client._paginate(fetch_fn, page_size=5, max_pages=3)
         assert call_count == 3
-        assert len(results) == 15
         _compat_results.add(
             "pagination_compat",
             "paginate_max_pages",

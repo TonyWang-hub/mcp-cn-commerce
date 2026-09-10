@@ -14,6 +14,8 @@
 
 根据以下多平台经营数据，生成一份**每日经营日报**。要求：
 
+先检查 `complete`、各店 `completeness` 和 `metric_definitions`。正式汇总使用 `total_summary`；`null` 表示未知或未定义，不能写成零。`observed_summary` 仅为已获取的部分数据，不得当作全店总数。说明日期、时区、缺页或质量错误；商品支付 GMV、库存和新老客数据未知时明确显示“暂无可靠数据”。不要自行更换退款率口径。
+
 1. **核心指标汇总**：总 GMV、总订单量、客单价、退款率
 2. **平台对比**：各平台 GMV、订单量、退款率横向对比
 3. **热销品 Top3**：按销量排序，标注 GMV 贡献
@@ -58,4 +60,4 @@
 {{EXAMPLE_DATA}}
 ```
 
-请根据以上数据生成日报。
+请根据以上数据生成日报。示例数据来自 `examples/daily-report/input.json` 的合成订单，运行 `python examples/daily-report/generate.py` 可重建；不代表真实店铺数据。

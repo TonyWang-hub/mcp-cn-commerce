@@ -66,7 +66,7 @@ EXPECTED_TOOLS = {
 BUSINESS_CALLS = {
     "oceanengine": ("get_advertiser_info", {"advertiser_ids": "1"}),
     "doudian": ("get_order_detail", {"order_id": "1"}),
-    "jd": ("get_order_detail", {"order_id": "1"}),
+    "jd": ("get_order_detail", {"order_id": "1", "source_id": "JOS", "optional_fields": "orderId"}),
     "taobao": ("get_order_detail", {"tid": "1"}),
     "pinduoduo": ("get_product_list", {}),
     "kuaishou": ("get_order_detail", {"order_id": "1"}),

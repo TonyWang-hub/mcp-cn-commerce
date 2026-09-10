@@ -329,11 +329,14 @@ _ORDER_STATUS_MAP: dict[str, dict[str | int, str]] = {
         105: "paid",
     },
     "jd": {
+        "NOT_PAY": "pending",
         "WAIT_SELLER_STOCK_OUT": "paid",
+        "DengDaiChuKu": "paid",
         "WAIT_GOODS_RECEIVE_CONFIRM": "shipped",
+        "DengDaiQueRenShouHuo": "shipped",
         "FINISHED_L": "completed",
+        "WanCheng": "completed",
         "TRADE_CANCELED": "cancelled",
-        "LOCKED": "paid",
     },
     "pdd": {
         1: "paid",
@@ -637,6 +640,7 @@ _MONEY_SCHEMA["taobao"] = dict.fromkeys(
     ("payment", "received_payment", "total_fee", "discount_fee", "post_fee", "price", "refund_fee"), "yuan"
 )
 _MONEY_SCHEMA["youzan"] = dict.fromkeys(("real_payment", "total_fee", "post_fee", "price", "refund_fee"), "yuan")
+_MONEY_SCHEMA["jd"] = dict.fromkeys(("actualPay", "freightPrice", "jdPrice"), "yuan")
 
 
 class _Record:
@@ -763,6 +767,8 @@ class Normalizer:
         if platform == "youzan":
             return self._youzan_order(raw, r)
         info = r.mapping(raw.get("orderInfo", raw), "orderInfo") if platform == "jd" else raw
+        if platform == "jd" and any(key in info for key in ("venderId", "actualPay", "paymentConfirmTime", "modified")):
+            return self._jd_order(raw, r)
         detail = r.mapping(raw.get("order_detail", raw), "order_detail") if platform == "weixin" else info
         prices = r.mapping(detail.get("price_info"), "price_info") if platform == "weixin" else info
         buyer = r.mapping(raw.get("buyer_info", raw.get("buyer") if platform == "doudian" else None), "buyer_info")
@@ -978,6 +984,57 @@ class Normalizer:
             applied_at=r.time(_first(raw, "apply_time", "create_at", "afsApplyTime", "applyTime"), "applied_at"),
             completed_at=r.time(_first(raw, "completed_at", "refund_time", "success_time"), "completed_at") or None,
         )
+        if result.status == "unknown":
+            _warn(r.warnings, "status", "status_unknown")
+        return r.attach(result)
+
+    @staticmethod
+    def _jd_order(raw: dict, r: _Record) -> UnifiedOrder:
+        """Modern JOS fields; legacy caller-supplied unit shapes stay separate."""
+        info = r.mapping(raw.get("orderInfo", raw), "orderInfo")
+        status = info.get("orderState")
+        paid_time = info.get("paymentConfirmTime")
+        if paid_time == "0001-01-01 00:00:00":
+            paid_time = None
+        result = UnifiedOrder(
+            order_id=r.identifier(info.get("orderId"), "order_id"),
+            shop_id=r.identifier(raw.get("shop_id"), "shop_id"),
+            platform="jd",
+            status=normalize_order_status(status, "jd"),
+            status_raw=str(status),
+            created_at=r.time(info.get("orderStartTime"), "created_at"),
+            updated_at=r.time(info.get("modified"), "updated_at") or None,
+            paid_at=r.time(paid_time, "paid_at") or None,
+            amount_paid=r.amount(info, ("actualPay",), "amount_paid"),
+            amount_shipping=r.amount(info, ("freightPrice",), "amount_shipping"),
+        )
+        # Goods-only totals and seller receivables do not establish order totals
+        # or settled receipts. Due/stale payment fields never replace actualPay.
+        if result.amount_paid is not None and result.amount_paid < 0:
+            result.amount_paid = None
+            _warn(r.warnings, "amount_paid", "amount_invalid")
+        # This marker is documented only for Jingxi second-stage supply orders;
+        # the detail contract explicitly excludes Jingxi from actualPay support.
+        if info.get("tradeOrderId") not in (None, ""):
+            result.amount_paid = None
+        if result.amount_paid is None:
+            _warn(r.warnings, "amount_paid", "buyer_payment_unknown")
+        # Awaiting warehouse dispatch includes COD and other pay-later orders.
+        if result.status == "paid" and (not result.paid_at or result.amount_paid is None):
+            result.status = "unknown"
+        for i, item in enumerate(r.array(info.get("itemInfoList"), "items")):
+            if not isinstance(item, dict):
+                _warn(r.warnings, f"items[{i}]", "object_invalid")
+                continue
+            prefix = f"items[{i}]"
+            result.items.append(
+                OrderItem(
+                    product_id=r.identifier(item.get("wareId"), prefix + ".product_id"),
+                    sku_id=r.identifier(item.get("skuId"), prefix + ".sku_id"),
+                    price=r.amount(item, ("jdPrice",), prefix + ".price"),
+                    quantity=r.integer(item.get("itemTotal"), prefix + ".quantity"),
+                )
+            )
         if result.status == "unknown":
             _warn(r.warnings, "status", "status_unknown")
         return r.attach(result)

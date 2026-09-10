@@ -1,113 +1,111 @@
-# ─────────────────────────────────────────────────────────────
-# mcp-cn-commerce — Docker Compose for Local Development
-# ─────────────────────────────────────────────────────────────
-# Usage:
-#   docker compose up test          # Run all tests
-#   docker compose up lint          # Run linting
-#   docker compose run --rm shell   # Interactive shell
-#
-# All platform credentials are read from .env (see .env.example)
-# ─────────────────────────────────────────────────────────────
-
+# Requires Docker Compose 2.24+ for optional env_file.
+# Use one stdio connection per service, without a TTY:
+# docker compose run --rm -T jd
+# Tests do not need merchant credentials: docker compose run --rm test
 services:
-  # ── Run full test suite ───────────────────────────────────
   test:
-    build: .
-    command: make test
-    env_file: .env
-    environment:
-      - PYTHONUNBUFFERED=1
-
-  # ── Run tests with coverage ───────────────────────────────
+    build:
+      context: .
+      target: development
+    command: ["make", "test"]
   test-cov:
-    build: .
-    command: make test-cov
-    env_file: .env
-    environment:
-      - PYTHONUNBUFFERED=1
+    build:
+      context: .
+      target: development
+    command: ["make", "test-cov"]
     volumes:
       - ./htmlcov:/app/htmlcov
-
-  # ── Lint & format check ───────────────────────────────────
   lint:
-    build: .
-    command: make lint
-    environment:
-      - PYTHONUNBUFFERED=1
-
-  # ── Interactive development shell ─────────────────────────
+    build:
+      context: .
+      target: development
+    command: ["make", "lint"]
   shell:
-    build: .
+    build:
+      context: .
+      target: development
     command: /bin/bash
-    env_file: .env
     stdin_open: true
     tty: true
     volumes:
       - .:/app
-      - /app/.venv  # Exclude host venv
-
-  # ── Individual platform servers (stdio MCP) ───────────────
-  # These run as MCP servers via stdin/stdout.
-  # Connect your MCP client (Claude Desktop, etc.) to them.
-  #
-  # Example with Claude Desktop config:
-  #   "oceanengine": {
-  #     "command": "docker",
-  #     "args": ["compose", "run", "--rm", "oceanengine"]
-  #   }
-
   oceanengine:
-    build: .
-    command: ["mcp-cn-oceanengine"]
-    env_file: .env
+    build:
+      context: .
+      target: runtime
+    command: ["mcp-cn-commerce", "start", "oceanengine"]
+    env_file:
+      - path: .env
+        required: false
     stdin_open: true
-    tty: true
-
+    tty: false
   doudian:
-    build: .
-    command: ["mcp-cn-doudian"]
-    env_file: .env
+    build:
+      context: .
+      target: runtime
+    command: ["mcp-cn-commerce", "start", "doudian"]
+    env_file:
+      - path: .env
+        required: false
     stdin_open: true
-    tty: true
-
+    tty: false
   jd:
-    build: .
-    command: ["mcp-cn-jd"]
-    env_file: .env
+    build:
+      context: .
+      target: runtime
+    command: ["mcp-cn-commerce", "start", "jd"]
+    env_file:
+      - path: .env
+        required: false
     stdin_open: true
-    tty: true
-
+    tty: false
   taobao:
-    build: .
-    command: ["mcp-cn-taobao"]
-    env_file: .env
+    build:
+      context: .
+      target: runtime
+    command: ["mcp-cn-commerce", "start", "taobao"]
+    env_file:
+      - path: .env
+        required: false
     stdin_open: true
-    tty: true
-
+    tty: false
   pinduoduo:
-    build: .
-    command: ["mcp-cn-pinduoduo"]
-    env_file: .env
+    build:
+      context: .
+      target: runtime
+    command: ["mcp-cn-commerce", "start", "pinduoduo"]
+    env_file:
+      - path: .env
+        required: false
     stdin_open: true
-    tty: true
-
+    tty: false
   kuaishou:
-    build: .
-    command: ["mcp-cn-kuaishou"]
-    env_file: .env
+    build:
+      context: .
+      target: runtime
+    command: ["mcp-cn-commerce", "start", "kuaishou"]
+    env_file:
+      - path: .env
+        required: false
     stdin_open: true
-    tty: true
-
+    tty: false
   xiaohongshu:
-    build: .
-    command: ["mcp-cn-xiaohongshu"]
-    env_file: .env
+    build:
+      context: .
+      target: runtime
+    command: ["mcp-cn-commerce", "start", "xiaohongshu"]
+    env_file:
+      - path: .env
+        required: false
     stdin_open: true
-    tty: true
-
+    tty: false
   weixin_store:
-    build: .
-    command: ["mcp-cn-weixin-store"]
-    env_file: .env
+    build:
+      context: .
+      target: runtime
+    command: ["mcp-cn-commerce", "start", "weixin_store"]
+    env_file:
+      - path: .env
+        required: false
     stdin_open: true
-    tty: true
+    tty: false

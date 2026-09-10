@@ -2,8 +2,8 @@
 
 Item 3B verifies that ``register_common_tools`` (defined in
 ``shared.cn_commerce_base``) is correctly hooked into all eight platform
-servers, exposing the four operational tools ``get_metrics``, ``get_traces``,
-``get_alerts`` and ``export_data`` on each one.
+servers, exposing ``get_metrics``, ``get_traces``, ``get_alerts``,
+``export_data`` and ``build_daily_report`` on each one.
 
 All eight servers expose an MCPServer instance (named ``mcp`` on six of them,
 ``server`` on doudian/oceanengine) whose registered tools are introspectable
@@ -66,7 +66,7 @@ import servers.weixin_store.server as weixin_store_server  # noqa: E402
 import servers.xiaohongshu.server as xiaohongshu_server  # noqa: E402
 from shared.cn_commerce_base import CommerceMCPBase  # noqa: E402
 
-COMMON_TOOLS = {"get_metrics", "get_traces", "get_alerts", "export_data"}
+COMMON_TOOLS = {"get_metrics", "get_traces", "get_alerts", "export_data", "build_daily_report"}
 
 # All servers expose an MCPServer instance; the attribute is ``mcp`` on six of
 # them and ``server`` on doudian/oceanengine.
@@ -93,7 +93,7 @@ def _mcp_server(module):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("module", MCP_SERVERS)
 async def test_mcpserver_registers_common_tools(module):
-    """Each MCPServer exposes all four common operational tools."""
+    """Each MCPServer exposes all five common operational tools."""
     tools = await _mcp_server(module).list_tools()
     names = {t.name for t in tools}
     missing = COMMON_TOOLS - names
@@ -104,7 +104,7 @@ async def test_mcpserver_registers_common_tools(module):
 def test_mcpserver_keeps_platform_tools(module):
     """Wiring common tools must not drop a server's existing platform tools."""
     registered = set(_mcp_server(module)._tool_manager._tools.keys())
-    # Every server has more than just the four common tools.
+    # Every server has more than just the five common tools.
     assert len(registered - COMMON_TOOLS) > 0
 
 
@@ -182,3 +182,92 @@ async def test_register_common_tools_with_callable_client():
 
     export_raw = await _call_tool_text(mcp, "export_data", {"records_json": json.dumps([{"a": 1}])})
     assert isinstance(export_raw, str) and export_raw.strip()
+
+
+def _report_shops():
+    """Synthetic normalized records: amounts are integer fen, dates have offsets."""
+    shops = []
+    for platform, shop_id, amount in (("doudian", "one", 1999), ("jd", "two", 3001)):
+        shops.append(
+            {
+                "platform": platform,
+                "shop_id": shop_id,
+                "input_format": "normalized",
+                "coverage": {day: {"orders": True, "refunds": True} for day in ("2026-09-09", "2026-09-10")},
+                "orders": [
+                    {
+                        "order_id": "same-id-in-different-shops",
+                        "platform": platform,
+                        "shop_id": shop_id,
+                        "status": "paid",
+                        "amount_paid": amount,
+                        "paid_at": "2026-09-10T10:00:00+08:00",
+                        "items": [
+                            {
+                                "product_id": "product-one",
+                                "product_name": "Synthetic product",
+                                "price": amount,
+                                "quantity": 1,
+                            }
+                        ],
+                    }
+                ],
+                "refunds": [],
+            }
+        )
+    return shops
+
+
+def _report_mcp_server():
+    """Register the real common tool without credentials or platform clients."""
+    from mcp.server.mcpserver import MCPServer
+
+    from shared.cn_commerce_base import register_common_tools
+
+    server = MCPServer("daily-report-contract")
+    register_common_tools(server, CommerceMCPBase())
+    return server
+
+
+@pytest.mark.asyncio
+async def test_build_daily_report_through_mcp_returns_complete_scoped_totals():
+    payload = json.loads(
+        await _call_tool_text(
+            _report_mcp_server(),
+            "build_daily_report",
+            {
+                "shops_json": json.dumps(_report_shops()),
+                "report_date": "2026-09-10",
+            },
+        )
+    )
+    assert payload["complete"] is True
+    assert payload["money_unit"] == "fen"
+    assert payload["total_summary"]["order_count"] == 2
+    assert payload["total_summary"]["gmv"] == 5000
+    assert payload["total_summary"]["avg_order_value"] == 2500
+    assert payload["total_summary"]["refund_amount"] == 0
+    assert payload["yesterday_summary"]["gmv"] == 0
+
+
+@pytest.mark.asyncio
+async def test_build_daily_report_through_mcp_keeps_missing_coverage_unknown():
+    shops = _report_shops()
+    del shops[0]["coverage"]["2026-09-10"]["orders"]
+    payload = json.loads(
+        await _call_tool_text(
+            _report_mcp_server(),
+            "build_daily_report",
+            {
+                "shops_json": json.dumps(shops),
+                "report_date": "2026-09-10",
+            },
+        )
+    )
+    assert payload["complete"] is False
+    assert payload["total_summary"]["gmv"] is None
+    assert payload["total_summary"]["order_count"] is None
+    partial = next(shop for shop in payload["shops"] if shop["shop_id"] == "one")
+    assert partial["observed_summary"]["gmv"] == 1999
+    assert any(error["code"] == "coverage_unconfirmed" for error in partial["errors"])
+    assert payload["yesterday_complete"] is True

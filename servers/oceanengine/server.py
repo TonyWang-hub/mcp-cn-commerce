@@ -8,12 +8,17 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import asynccontextmanager
 
 from mcp.server.mcpserver import MCPServer
 
 from shared.cn_commerce_base import (
+    DEFAULT_RETRY,
+    CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,
+    RetryConfig,
+    canonicalize_sign_value,
     handle_tool_errors,
     register_common_tools,
 )
@@ -22,29 +27,75 @@ from shared.cn_commerce_base import (
 
 
 class OceanEngine(CommerceMCPBase):
-    """Ocean Engine (巨量引擎) API client using MD5 signing."""
+    """Ocean Engine API client authenticated by the Access-Token header."""
 
-    BASE_URL: str = "https://ad.oceanengine.com/open_api/"
-    sign_method: str = "md5"
+    PLATFORM = "OCEANENGINE"
+    BASE_URL: str = "https://api.oceanengine.com/open_api/"
+    sign_method: str = ""
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        params: dict | None = None,
+        data: dict | None = None,
+        retry_config: RetryConfig | None = DEFAULT_RETRY,
+    ) -> dict:
+        if not self.access_token:
+            raise ConfigValidationError("OCEANENGINE", ["OCEANENGINE_ACCESS_TOKEN"])
+        if self.validate_input:
+            self._validate_params(params or {})
+            self._validate_params(data or {})
+        # The official SDK JSON-encodes array/object query values once.
+        values = {**(params or {}), **(data or {})} if method.upper() == "GET" else (params or {})
+        query = {k: canonicalize_sign_value(v) for k, v in values.items() if v is not None}
+
+        def parse_response(payload):
+            if str(payload.get("code", 0)) != "0":
+                raise CommerceAPIError(code=payload["code"], msg=payload.get("message", "unknown"))
+            return payload
+
+        return await self._send_request(
+            method,
+            self.BASE_URL + path.lstrip("/"),
+            endpoint=path,
+            params=query,
+            json_body=data if method.upper() != "GET" else None,
+            headers={"Access-Token": self.access_token},
+            retry_config=retry_config if method.upper() == "GET" else None,
+            parse_response=parse_response,
+        )
+
+
+_client: OceanEngine | None = None
 
 
 def _get_client() -> OceanEngine:
-    """Create an OceanEngine client from OCEANENGINE_* environment variables."""
-    try:
-        return OceanEngine.from_env("OCEANENGINE", ["APP_KEY", "APP_SECRET", "ACCESS_TOKEN"])
-    except ConfigValidationError:
-        # Fallback to direct instantiation for backward compatibility
-        return OceanEngine(
+    """Reuse the same credential-scoped connection pool and monitoring state."""
+    global _client
+    if _client is None:
+        _client = OceanEngine(
             app_key=os.environ.get("OCEANENGINE_APP_KEY", ""),
             app_secret=os.environ.get("OCEANENGINE_APP_SECRET", ""),
             access_token=os.environ.get("OCEANENGINE_ACCESS_TOKEN", ""),
         )
+    return _client
 
 
 # ── MCP Server ───────────────────────────────────────────
 
 
-server = MCPServer("mcp-cn-oceanengine")
+@asynccontextmanager
+async def _lifespan(_server):
+    try:
+        yield {}
+    finally:
+        client = _client
+        if client is not None:
+            await client.close()
+
+
+server = MCPServer("mcp-cn-oceanengine", lifespan=_lifespan)
 
 
 # ── Helpers ──────────────────────────────────────────────
@@ -60,7 +111,7 @@ def _safe_int_list(comma_separated: str) -> list[int]:
 
 @server.tool()
 @handle_tool_errors
-async def get_advertiser_info(advertiser_ids: str) -> dict:
+async def get_advertiser_info(advertiser_ids: str) -> str:
     """Get basic advertiser account information including name, balance, and status.
 
     Args:
@@ -76,7 +127,7 @@ async def get_advertiser_info(advertiser_ids: str) -> dict:
 
 @server.tool()
 @handle_tool_errors
-async def get_account_balance(advertiser_id: str) -> dict:
+async def get_account_balance(advertiser_id: str) -> str:
     """Get the account balance for an advertiser.
 
     Args:
@@ -101,7 +152,7 @@ async def get_campaign_report(
     end_date: str,
     page: int = 1,
     page_size: int = 20,
-) -> dict:
+) -> str:
     """Get campaign-level advertising report with impressions, clicks, cost, conversions, CTR, CPC, etc.
 
     Args:
@@ -133,7 +184,7 @@ async def get_ad_detail_report(
     end_date: str,
     page: int = 1,
     page_size: int = 20,
-) -> dict:
+) -> str:
     """Get ad-level detail report with per-ad performance metrics (impressions, clicks, cost, conversions).
 
     Args:
@@ -167,7 +218,7 @@ async def list_campaigns(
     page: int = 1,
     page_size: int = 20,
     filtering: str = "",
-) -> dict:
+) -> str:
     """List campaigns under an advertiser account with optional status filtering.
 
     Args:
@@ -189,7 +240,7 @@ async def list_campaigns(
 
 @server.tool()
 @handle_tool_errors
-async def get_campaign_detail(advertiser_id: str, campaign_id: str) -> dict:
+async def get_campaign_detail(advertiser_id: str, campaign_id: str) -> str:
     """广告计划详情 (Campaign detail).
 
     Get detailed information about a specific advertising campaign
@@ -217,7 +268,7 @@ async def list_ads(
     campaign_id: str = "",
     page: int = 1,
     page_size: int = 20,
-) -> dict:
+) -> str:
     """广告创意列表 (Ad creative list).
 
     List ad creatives under an advertiser account, optionally filtered by campaign.
@@ -241,7 +292,7 @@ async def list_ads(
 
 @server.tool()
 @handle_tool_errors
-async def get_ad_detail(advertiser_id: str, ad_id: str) -> dict:
+async def get_ad_detail(advertiser_id: str, ad_id: str) -> str:
     """广告创意详情 (Ad creative detail).
 
     Get detailed information about a specific ad creative
@@ -273,7 +324,7 @@ async def get_qianchuan_report(
     end_date: str,
     page: int = 1,
     page_size: int = 20,
-) -> dict:
+) -> str:
     """千川电商广告报表 (Qianchuan ecommerce ad report).
 
     Get advertising performance report for Qianchuan (千川) ecommerce ads
@@ -306,7 +357,7 @@ async def get_qianchuan_campaign_list(
     advertiser_id: str,
     page: int = 1,
     page_size: int = 20,
-) -> dict:
+) -> str:
     """千川广告计划列表 (Qianchuan campaign list).
 
     List Qianchuan (千川) ecommerce ad campaigns under an advertiser account.
@@ -339,7 +390,7 @@ async def get_star_report(
     end_date: str,
     page: int = 1,
     page_size: int = 20,
-) -> dict:
+) -> str:
     """星图达人投放报表 (Star influencer marketing report).
 
     Get performance report for Star (星图) influencer marketing campaigns
@@ -373,7 +424,7 @@ async def list_star_tasks(
     status: str = "",
     page: int = 1,
     page_size: int = 20,
-) -> dict:
+) -> str:
     """星图任务列表 (Star task list).
 
     List Star (星图) influencer marketing tasks under an advertiser account,
@@ -407,7 +458,7 @@ async def get_creative_report(
     end_date: str,
     page: int = 1,
     page_size: int = 20,
-) -> dict:
+) -> str:
     """素材/创意报表 (Creative/materials report).
 
     Get creative-level performance report including impressions, clicks,
@@ -441,7 +492,7 @@ async def list_materials(
     page: int = 1,
     page_size: int = 20,
     material_type: str = "",
-) -> dict:
+) -> str:
     """素材库列表 (Material library list).
 
     List materials in the creative library under an advertiser account,
@@ -473,7 +524,7 @@ async def list_audience_packages(
     advertiser_id: str,
     page: int = 1,
     page_size: int = 20,
-) -> dict:
+) -> str:
     """DMP 人群包列表 (DMP audience package list).
 
     List DMP (Data Management Platform) audience packages under an advertiser
@@ -504,7 +555,7 @@ async def get_audience_report(
     end_date: str,
     page: int = 1,
     page_size: int = 20,
-) -> dict:
+) -> str:
     """人群分析报表 (Audience analysis report).
 
     Get audience analysis report including demographic breakdown, interest
@@ -536,7 +587,7 @@ async def get_audience_report(
 
 @server.tool()
 @handle_tool_errors
-async def get_bid_suggestion(advertiser_id: str, campaign_id: str) -> dict:
+async def get_bid_suggestion(advertiser_id: str, campaign_id: str) -> str:
     """出价建议 (Bid suggestion).
 
     Get bid optimization suggestions for a campaign, including recommended bid
@@ -559,7 +610,7 @@ async def get_bid_suggestion(advertiser_id: str, campaign_id: str) -> dict:
 
 @server.tool()
 @handle_tool_errors
-async def get_diagnosis(advertiser_id: str, campaign_id: str) -> dict:
+async def get_diagnosis(advertiser_id: str, campaign_id: str) -> str:
     """广告诊断 (Ad diagnosis).
 
     Get diagnostic analysis for a campaign, identifying delivery issues,

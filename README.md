@@ -9,7 +9,7 @@
 
 > 🛒 **让 AI Agent 直接读取中国电商平台的商家经营数据。** 不做内容发布，只做**经营数据**的 MCP 连接器。
 >
-> 国内首个面向中国电商商家经营场景的开源 MCP Server 套件。支持 Claude、ChatGPT、Gemini 等 AI Agent 接入。
+> 面向中国电商商家经营场景的开源 MCP Server 套件。通过支持 stdio MCP 的客户端接入。
 >
 > **搜索关键词**: MCP Server, Model Context Protocol, 电商 MCP, AI Agent, 电商数据, 抖店 MCP, 京东 MCP, 巨量引擎 MCP, 淘宝 MCP, 拼多多 MCP, Python MCP, MCP 中国电商, 商家经营数据, 电商经营分析, AI 电商, Claude MCP
 
@@ -38,7 +38,7 @@
 一个 **MCP (Model Context Protocol) Server 套件**（Monorepo），让 AI Agent 能够结构化地访问中国电商平台的商家经营数据。每个平台是一个独立的 MCP Server，按需安装使用：
 
 - **巨量引擎 / 巨量千川** — 广告投放数据（广告计划、报表、账户余额）
-- **抖店** — TikTok 电商店铺经营数据（订单、商品、售后、退款）
+- **抖店** — 抖音电商店铺经营数据（订单、商品、售后、退款）
 - **京东** — 京东商家后台数据（订单、商品、店铺信息）
 - **淘宝 / 拼多多** — 订单、商品、物流
 - **快手 / 小红书 / 微信小店** — 订单、商品、库存
@@ -47,17 +47,13 @@
 
 ## 为什么选择这个项目？
 
-国内已有的 MCP Server 全是**内容发布**（发视频、搜热搜），没有一个是**商家经营**（拉广告数据、看订单、管售后）。
+本项目聚焦商家已授权的经营数据，提供平台适配、只读查询和确定性日报汇总。
 
-| | 内容侧 MCP（HuiMei/Astron 等） | mcp-cn-commerce |
-|---|---|---|
-| **做什么** | 发视频、搜热点 | 拉广告报表、查订单 |
-| **目标用户** | 自媒体/创作者 | **电商老板/运营/数据分析师** |
-| **数据类型** | 内容数据（播放量、点赞、热搜） | **经营数据**（收入、订单、退款、ROAS） |
-| **覆盖平台** | 内容平台 | 电商+广告平台 |
-| **操作** | 发布/写入 | 只读分析 & 监控 |
+- 各平台独立 stdio 服务，按店铺已有授权配置。
+- 共享连接池、限流、重试、指标与脱敏。
+- 统一金额与时间处理；日报明确标记缺失数据和不完整分页。
 
-**这是国内首个面向电商商家经营场景的开源 MCP Server 套件。**
+平台开放 API、平台官方 MCP 与本项目的第三方 MCP 适配器是不同层次；详见[官方接入核查](docs/official-access-status.md)。
 
 **典型使用场景**：
 - AI Agent 每日自动拉取广告 ROAS 和消耗，生成投放优化建议
@@ -67,21 +63,18 @@
 
 ## 平台覆盖
 
-| 平台 | 类型 | Phase | 状态 | 测试 | 开放平台 |
-|---|---|---|---|---|---|
-| 巨量引擎 (Ocean Engine) | 广告投放 | 1 | ✅ | 24 | [open.oceanengine.com](https://open.oceanengine.com) |
-| 巨量千川 (Qianchuan) | 电商广告 | 1 | ✅ | (同上) | [qianchuan.jinritemai.com](https://qianchuan.jinritemai.com) |
-| 抖店 (Douyin Shop) | 电商店铺 | 1 | ✅ | 31 | [op.jinritemai.com](https://op.jinritemai.com) |
-| 京东 (JD.com) | 电商店铺 | 1 | ✅ | 19 | [jos.jd.com](https://jos.jd.com) |
-| 淘宝 (Taobao) | 电商店铺 | 2 | ✅ | 36 | [open.taobao.com](https://open.taobao.com) |
-| 拼多多 (Pinduoduo) | 电商店铺 | 2 | ✅ | 30 | [open.pinduoduo.com](https://open.pinduoduo.com) |
-| 快手 (Kuaishou) | 电商店铺 | 3 | ✅ | 33 | [open.kuaixiaodian.com](https://open.kuaixiaodian.com) |
-| 小红书 (Xiaohongshu) | 电商店铺 | 3 | ✅ | 33 | [open.xiaohongshu.com](https://open.xiaohongshu.com) |
-| 微信小店 (WeChat Store) | 电商店铺 | 3 | ✅ | 25 | [developers.weixin.qq.com](https://developers.weixin.qq.com) |
+| 平台 | 数据范围 | 代码状态 | 官方入口 |
+|---|---|---|---|
+| 巨量引擎 / 千川 | 广告与账户数据 | 适配器已提供，接口权限需逐项验证 | [巨量开放平台](https://open.oceanengine.com/) |
+| 抖店 | 商家订单、商品、售后 | 已按官方指南修正 HMAC-SHA256 签名；业务接口待店铺联调 | [抖店开放平台](https://op.jinritemai.com/) |
+| 京东 | 商家经营数据 | 适配器已提供，协议与字段契约待确认 | [京东零售开放平台](https://open.jd.com/) |
+| 淘宝 | 商家经营数据 | 适配器已提供，授权与字段契约待确认 | [淘宝开放平台](https://open.taobao.com/) |
+| 拼多多 | 商家经营数据 | 适配器已提供，接口权限需逐项验证 | [拼多多开放平台](https://open.pinduoduo.com/) |
+| 快手 | 商家经营数据 | 适配器已提供，签名样例与接口权限待确认 | [快手电商开放平台](https://open.kwaixiaodian.com/) |
+| 小红书 | 商家经营数据 | 9 个业务工具按官方 schema 迁移；4 个未核实工具明确不支持 | [小红书开放平台](https://open.xiaohongshu.com/) |
+| 微信小店 | 商家经营数据 | 适配器已提供，订单时间与分页契约待确认 | [微信开发文档](https://developers.weixin.qq.com/doc/store/) |
 
-> Phase 4: 闲鱼、美团、饿了么（API 受限，待政策明朗）
->
-> **358 个测试**，所有 8 个平台全部通过。CI 覆盖 Python 3.11/3.12/3.13。
+工具数量统计包含兼容保留的入口；小红书评论、店铺信息、活动和优惠券入口目前返回明确不支持，不发送请求。工具注册和模拟测试不代表真实店铺接口已经联调。每项能力需按店铺类型、授权和平台接口权限验证；当前证据及未核实范围见[平台说明](docs/platforms.md)与[官方接入核查](docs/official-access-status.md)。CI 配置覆盖 Python 3.11/3.12/3.13，实际结果以对应提交的工作流为准。
 
 ## 快速开始
 
@@ -103,7 +96,8 @@ pip install mcp-cn-commerce
 # https://github.com/TonyWang-hub/mcp-cn-commerce/releases/latest
 
 # 或直接安装：
-pip install https://github.com/TonyWang-hub/mcp-cn-commerce/releases/latest/download/mcp_cn_commerce-0.1.0-py3-none-any.whl
+# Download the wheel shown on the latest Release page, then install that local file.
+python -m pip install /path/to/downloaded.whl
 ```
 
 #### 从 Git 安装（始终最新）
@@ -226,7 +220,7 @@ env = { OCEANENGINE_APP_KEY = "你的Key", OCEANENGINE_APP_SECRET = "你的Secre
 
 ## 工作流模板 🆕
 
-开箱即用的 AI 工作流模板，**无需 API 凭证即可体验**。模拟数据格式与真实 API 完全一致。
+开箱即用的 AI 工作流模板，**无需 API 凭证即可体验**。示例数据遵循日报输入契约；原始平台返回需先完成分页、字段归一化和完整性声明。
 
 | 模板 | 用途 | 适用角色 | Demo |
 |------|------|----------|------|
@@ -288,18 +282,18 @@ env = { OCEANENGINE_APP_KEY = "你的Key", OCEANENGINE_APP_SECRET = "你的Secre
 
 | Server | 工具数 | 覆盖类别 |
 |---|---|---|
-| oceanengine | 22 | 广告、千川、星图、素材、人群、优化 |
-| doudian | 24 | 订单、商品、售后、物流、评价、直播、流量、营销、资金、店铺 |
-| jd | 19 | 订单、商品、售后、物流、评价、价格、库存、营销、店铺 |
-| taobao | 17 | 订单、商品、售后、物流、评价、店铺、营销、类目 |
-| pinduoduo | 17 | 订单、商品、售后、物流、评价、店铺、营销、多多客 |
-| kuaishou | 16 | 订单、商品、售后、物流、评价、店铺、营销 |
-| xiaohongshu | 17 | 订单、商品、售后、物流、评价、店铺、营销、库存、财务 |
-| weixin_store | 15 | 订单、商品、售后、物流、店铺、营销、供货、类目 |
-| **合计** | **147** | 平台工具 + 每个 server 额外 4 个通用运维工具 |
+| oceanengine | 23 | 广告、千川、星图、素材、人群、优化 |
+| doudian | 25 | 订单、商品、售后、物流、评价、直播、流量、营销、资金、店铺 |
+| jd | 20 | 订单、商品、售后、物流、评价、价格、库存、营销、店铺 |
+| taobao | 18 | 订单、商品、售后、物流、评价、店铺、营销、类目 |
+| pinduoduo | 18 | 订单、商品、售后、物流、评价、店铺、营销、多多客 |
+| kuaishou | 17 | 订单、商品、售后、物流、评价、店铺、营销 |
+| xiaohongshu | 18 | 订单、商品、售后、物流、评价、店铺、营销、库存、财务 |
+| weixin_store | 16 | 订单、商品、售后、物流、店铺、营销、供货、类目 |
+| **合计** | **155** | 平台工具 + 每个 server 5 个公共工具（运维、导出、日报） |
 
-每个 server 还额外暴露 **4 个跨平台运维工具**（已计入上表）：`get_metrics`（各接口延迟/成功/错误统计）、
-`get_traces`（最近请求链路）、`get_alerts`（按实时指标评估告警规则）、`export_data`（导出记录为 CSV/JSON）。
+每个 server 还额外暴露 **5 个跨平台公共工具**（已计入上表）：`get_metrics`（各接口延迟/成功/错误统计）、
+`get_traces`（最近请求链路）、`get_alerts`（按实时指标评估告警规则）、`export_data`（导出记录为 CSV/JSON）、`build_daily_report`（按时区和数据完整性生成日报）。
 请求链路追踪与指标在每次调用时自动采集。
 
 每个工具的具体用法见各 `servers/<平台>/server.py` 源码。
@@ -327,10 +321,10 @@ mcp-cn-commerce/
 
 本项目处理敏感的电商 API 凭证，安全保障：
 
-- 🔒 **本地运行** — API 密钥和凭证存在你的电脑上，不经过任何服务器
+- 🔒 **本地运行** — 凭证由本地读取，必要的认证信息发送给对应平台 API
 - 📖 **代码开源** — 每一行代码都可审计
 - 👁️ **默认只读** — 全部平台工具只读数据，零写入/修改/删除操作
-- 📡 **无数据收集** — 不收集、不追踪、不上传任何使用数据
+- 📡 **无数据收集** — 本项目不向自建服务上报使用数据；业务查询结果会返回你配置的 MCP/AI 客户端
 - 🖥️ **直连平台 API** — 代码直接调用平台 API，无中间服务器或代理
 - 🔑 **环境变量配置** — 凭证通过环境变量加载，绝不硬编码
 
@@ -343,7 +337,7 @@ mcp-cn-commerce/
 答：部分平台需要：抖店需要企业/个体户资质，京东需要企业资质。拼多多个人可接入。详见 [docs/platforms.md](docs/platforms.md)。
 
 **问：MCP 和 CLI 哪个更好？**
-答：MCP 给 AI Agent 用（结构化 tool call，让 AI 自动分析），CLI 给人用（终端直接调，快速查数据）。Phase 2 会加 CLI 入口，共享同一套核心逻辑。
+答：MCP 给 AI Agent 用（结构化 tool call，让 AI 自动分析），CLI 给人用（终端直接调，快速查数据）。CLI 提供启动和健康诊断；每个 stdio 连接启动一个平台，经营查询通过 MCP 工具完成。
 
 **问：会支持闲鱼/美团/饿了么吗？**
 答：在 Phase 4 计划中。这些平台的 API 在 2025 年大幅收紧（ISV 白名单制），等政策明朗后再接入。
@@ -360,7 +354,7 @@ mcp-cn-commerce/
 
 | 能力 | 开源版 | Pro 版 |
 |---|---|---|
-| 8 平台只读数据工具（147 个） | ✅ | ✅ |
+| 8 平台只读数据工具（155 个） | ✅ | ✅ |
 | Access Token 管理 | 手动获取、过期手动换 | **自动刷新**（过期前自动续约，巨量引擎 24h 过期不再是问题） |
 | OAuth 授权 | 自己去开放平台抓 token | **`auth` 向导**：本地一条命令走完授权流程 |
 | 店铺数量 | 单店铺（一进程一套凭证） | **多店铺**：`shops.yaml` 统一管理，按别名路由，跨店聚合 |

@@ -11,15 +11,17 @@ from __future__ import annotations
 import json
 import os
 import time
+from contextlib import asynccontextmanager
 
-import httpx
 from mcp.server.mcpserver import MCPServer
 
 from shared.cn_commerce_base import (
+    DEFAULT_RETRY,
     CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,
     SignMethod,
+    canonicalize_sign_value,
     register_common_tools,
 )
 
@@ -34,6 +36,7 @@ class PinduoduoMCP(CommerceMCPBase):
     Signing is standard MD5 (provided by the base class).
     """
 
+    PLATFORM = "PINDUODUO"
     BASE_URL = "https://gw-api.pinduoduo.com/api/router"
     sign_method = SignMethod.MD5
 
@@ -44,6 +47,19 @@ class PinduoduoMCP(CommerceMCPBase):
         access_token), merges business params, signs with MD5, and POSTs
         as form data.
         """
+        missing = [
+            name
+            for name, value in (
+                ("PINDUODUO_CLIENT_ID", self.app_key),
+                ("PINDUODUO_CLIENT_SECRET", self.app_secret),
+                ("PINDUODUO_ACCESS_TOKEN", self.access_token),
+            )
+            if not value
+        ]
+        if missing:
+            raise ConfigValidationError("PINDUODUO", missing)
+        if self.validate_input:
+            self._validate_params(biz_params or {})
         params: dict[str, str] = {
             "type": api_type,
             "client_id": self.app_key,
@@ -56,21 +72,31 @@ class PinduoduoMCP(CommerceMCPBase):
         # Merge business params (convert all values to strings)
         if biz_params:
             for k, v in biz_params.items():
-                params[k] = str(v)
+                params[k] = canonicalize_sign_value(v)
 
-        # Sign (base-class MD5: secret + sorted_kv + secret → md5 → upper)
-        params["sign"] = self._sign(params)
+        def prepare_request():
+            signed = dict(params)
+            signed["timestamp"] = str(int(time.time() * 1000))
+            signed["sign"] = self._sign(signed)
+            return {"data": signed}
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(self.BASE_URL, data=params)
+        def parse_response(result):
+            if "error_response" in result:
+                error = result["error_response"]
+                raise CommerceAPIError(
+                    code=error.get("error_code", error.get("code", -1)),
+                    msg=error.get("error_msg", error.get("msg", "unknown")),
+                )
+            return result
 
-        result = resp.json()
-        if "error_response" in result:
-            raise CommerceAPIError(
-                code=result["error_response"].get("error_code", result["error_response"].get("code", -1)),
-                msg=result["error_response"].get("error_msg", result["error_response"].get("msg", "unknown")),
-            )
-        return result
+        return await self._send_request(
+            "POST",
+            self.BASE_URL,
+            endpoint=api_type,
+            prepare_request=prepare_request,
+            retry_config=DEFAULT_RETRY,
+            parse_response=parse_response,
+        )
 
 
 # ── Instantiate client from env ────────────────────────────────────────────
@@ -94,7 +120,18 @@ pdd = _create_pinduoduo_client()
 
 # ── MCP server ─────────────────────────────────────────────────────────────
 
-mcp = MCPServer("mcp-cn-pinduoduo")
+
+@asynccontextmanager
+async def _lifespan(_server):
+    try:
+        yield {}
+    finally:
+        client = pdd
+        if client is not None:
+            await client.close()
+
+
+mcp = MCPServer("mcp-cn-pinduoduo", lifespan=_lifespan)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

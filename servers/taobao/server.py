@@ -7,16 +7,22 @@ Sign method: MD5 (secret + sorted_kv_string + secret → MD5 → uppercase)
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+from contextlib import asynccontextmanager
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from mcp.server.mcpserver import MCPServer
 
 from shared.cn_commerce_base import (
+    DEFAULT_RETRY,
     CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,
     SignMethod,
+    canonicalize_sign_value,
     register_common_tools,
 )
 
@@ -30,6 +36,7 @@ class TaobaoMCP(CommerceMCPBase):
     together as query-string params in a POST to the single router endpoint.
     """
 
+    PLATFORM = "TAOBAO"
     BASE_URL = "https://eco.taobao.com/router/rest"
     sign_method = SignMethod.MD5
 
@@ -41,19 +48,66 @@ class TaobaoMCP(CommerceMCPBase):
 
         Returns the API response dict, or an error_response dict on failure.
         """
-        try:
-            params: dict[str, str] = {
-                "method": api_method,
-                "format": "json",
-                "v": "2.0",
-            }
-            if biz_params:
-                params.update(biz_params)
-            return await self._request("POST", "", params=params)
-        except CommerceAPIError as e:
-            return {"error_response": {"code": e.code, "msg": e.msg}}
-        except Exception as e:
-            return {"error_response": {"code": -1, "msg": str(e)}}
+        missing = [
+            name
+            for name, value in (
+                ("TAOBAO_APP_KEY", self.app_key),
+                ("TAOBAO_APP_SECRET", self.app_secret),
+                ("TAOBAO_ACCESS_TOKEN", self.access_token),
+            )
+            if not value
+        ]
+        if missing:
+            raise ConfigValidationError("TAOBAO", missing)
+        params = {"method": api_method, "format": "json", "v": "2.0", **(biz_params or {})}
+        return await self._request("POST", "", params=params, retry_config=DEFAULT_RETRY)
+
+    def _sign(self, params: dict) -> str:
+        """TOP signs all nonempty fields except sign, including sign_method."""
+        raw = (
+            self.app_secret
+            + "".join(
+                key + canonicalize_sign_value(value)
+                for key, value in sorted(params.items())
+                if key != "sign" and value != ""
+            )
+            + self.app_secret
+        )
+        return hashlib.md5(raw.encode("utf-8")).hexdigest().upper()
+
+    async def _request(self, method, path, params=None, data=None, retry_config=None):
+        """TOP uses seller session and GMT+8 timestamps, not generic auth."""
+        business = {**(params or {}), **(data or {})}
+        if self.validate_input:
+            self._validate_params(business)
+
+        def prepare():
+            signed = {key: canonicalize_sign_value(value) for key, value in business.items()}
+            signed.update(
+                app_key=self.app_key,
+                session=self.access_token,
+                timestamp=datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S"),
+                sign_method="md5",
+            )
+            signed["sign"] = self._sign(signed)
+            return {"params": signed}
+
+        def parse(payload):
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object from TOP")
+            if "error_response" in payload:
+                error = payload["error_response"]
+                raise CommerceAPIError(error.get("code", -1), error.get("msg", "unknown"))
+            return payload
+
+        return await self._send_request(
+            method,
+            self.BASE_URL + path,
+            endpoint=business.get("method", path),
+            prepare_request=prepare,
+            parse_response=parse,
+            retry_config=retry_config,
+        )
 
 
 # ── Instantiate client from env ────────────────────────────────────────────────
@@ -77,7 +131,18 @@ taobao = _create_taobao_client()
 
 # ── MCP server ─────────────────────────────────────────────────────────────────
 
-mcp = MCPServer("mcp-cn-taobao")
+
+@asynccontextmanager
+async def _lifespan(_server):
+    try:
+        yield {}
+    finally:
+        client = taobao
+        if client is not None:
+            await client.close()
+
+
+mcp = MCPServer("mcp-cn-taobao", lifespan=_lifespan)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════

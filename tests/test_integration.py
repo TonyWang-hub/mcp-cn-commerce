@@ -20,20 +20,6 @@ import pytest
 # Repo root, used by tests that assert on the on-disk project layout.
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# ── MCP compat shim (same as per-server tests) ──────────────────
-
-import mcp.server
-
-_orig_server_cls = mcp.server.Server
-if not hasattr(_orig_server_cls, "tool"):
-
-    def _mock_tool(self, *args, **kwargs):
-        def decorator(func):
-            return func
-
-        return decorator
-
-    _orig_server_cls.tool = _mock_tool  # type: ignore[attr-defined]
 
 from shared.cli import (  # noqa: E402
     SERVER_REGISTRY,
@@ -102,8 +88,8 @@ class TestOceanEngineFullRequestFlow:
         assert data["data"]["list"][0]["advertiser_id"] == 123
 
     @pytest.mark.asyncio
-    async def test_get_campaign_report_sign_params_passed(self, oe_client):
-        """Verify that sign, sign_method, timestamp are injected into request params."""
+    async def test_get_campaign_report_oauth_header_passed(self, oe_client):
+        """OceanEngine uses OAuth headers and sends only business query fields."""
         mock_response = MagicMock()
         mock_response.json.return_value = {"code": 0, "data": {"list": []}}
         mock_response.status_code = 200
@@ -125,17 +111,15 @@ class TestOceanEngineFullRequestFlow:
         # Inspect the params passed to httpx.get
         call_args = mock_http.get.call_args
         params = call_args[1]["params"] if "params" in call_args[1] else call_args.kwargs.get("params", {})
-        assert "sign" in params
-        assert "sign_method" in params
-        assert "timestamp" in params
-        assert params["app_key"] == "test_key"
-        assert params["access_token"] == "tok"
+        assert call_args.kwargs["headers"]["Access-Token"] == "tok"
+        assert params["advertiser_id"] == "456"
+        assert not {"sign", "sign_method", "timestamp", "app_key", "access_token"} & params.keys()
 
     @pytest.mark.asyncio
     async def test_api_error_response_raises_commerce_api_error(self, oe_client):
-        """When the API returns error_response, _request raises CommerceAPIError."""
+        """OceanEngine business codes are converted to a tool error response."""
         mock_response = MagicMock()
-        mock_response.json.return_value = {"error_response": {"code": 40001, "msg": "Invalid advertiser"}}
+        mock_response.json.return_value = {"code": 40001, "message": "Invalid advertiser"}
         mock_response.status_code = 200
 
         mock_http = AsyncMock()
@@ -660,15 +644,17 @@ class TestConfigLoadingIntegration:
         assert config["servers"] == ["oceanengine", "jd"]
         assert config["verbose"] is True
 
-    def test_load_config_missing_file_returns_empty(self):
-        """load_config returns empty dict for nonexistent path."""
-        assert load_config("/nonexistent/path.json") == {}
+    def test_load_config_missing_file_raises(self):
+        """An explicitly selected missing file must not silently lose credentials."""
+        with pytest.raises(ValueError, match="not found"):
+            load_config("/nonexistent/path.json")
 
-    def test_load_config_invalid_json_returns_empty(self, tmp_path):
-        """load_config returns empty dict for invalid JSON."""
+    def test_load_config_invalid_json_raises(self, tmp_path):
+        """Invalid explicit configuration fails visibly."""
         cfg = tmp_path / "bad.json"
         cfg.write_text("{broken json")
-        assert load_config(str(cfg)) == {}
+        with pytest.raises(ValueError, match="Cannot read"):
+            load_config(str(cfg))
 
     def test_load_config_none_path(self):
         """load_config with None path tries defaults without crashing."""
@@ -687,16 +673,15 @@ class TestConfigLoadingIntegration:
             tests_path = _REPO_ROOT / "servers" / platform / "tests"
             assert tests_path.is_dir(), f"Missing tests dir for {platform}: {tests_path}"
 
-    def test_build_pythonpath_includes_shared(self):
-        """build_pythonpath always includes the shared directory."""
+    def test_build_pythonpath_uses_package_parent(self):
+        """Canonical shared imports resolve from the repository/package parent."""
         pp = build_pythonpath(["oceanengine", "jd"])
-        assert "shared" in pp
+        assert pp == str(_REPO_ROOT)
 
-    def test_build_pythonpath_includes_shared_and_repo(self):
-        """build_pythonpath includes shared dir and repo root."""
+    def test_build_pythonpath_has_no_obsolete_src_directories(self):
+        """Single-package launches need no per-platform src paths."""
         pp = build_pythonpath(["oceanengine", "jd", "taobao"])
-        assert "shared" in pp
-        assert "mcp-cn-commerce" in pp
+        assert pp.split(os.pathsep) == [str(_REPO_ROOT)]
 
     def test_server_registry_has_all_eight_platforms(self):
         """SERVER_REGISTRY contains exactly the 8 expected platforms."""
@@ -923,7 +908,9 @@ class TestSecurityInputValidation:
     def test_sensitive_data_filter_integration(self):
         """SensitiveDataFilter masks JWT tokens in log record messages."""
         flt = SensitiveDataFilter()
-        record = MagicMock()
+        import logging
+
+        record = logging.LogRecord("test", logging.INFO, "", 0, "", (), None)
         record.msg = "Token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
         record.args = None
         flt.filter(record)
@@ -932,12 +919,21 @@ class TestSecurityInputValidation:
     def test_sensitive_data_filter_masks_args(self):
         """SensitiveDataFilter masks sensitive keys in record.args dict."""
         flt = SensitiveDataFilter()
-        record = MagicMock()
-        record.msg = "request params"
-        record.args = {"access_token": "abcdefghijklmnop", "page": "1"}
+        import logging
+
+        record = logging.LogRecord(
+            "test",
+            logging.INFO,
+            "",
+            0,
+            "access_token=%(access_token)s page=%(page)s",
+            ({"access_token": "abcdefghijklmnop", "page": "1"},),
+            None,
+        )
         flt.filter(record)
-        assert "****" in record.args["access_token"]
-        assert record.args["page"] == "1"
+        assert "abcdefghijklmnop" not in record.getMessage()
+        assert "****" in record.getMessage()
+        assert "page=1" in record.getMessage()
 
 
 # ====================================================================
@@ -977,9 +973,9 @@ class TestPaginationIntegration:
             call_count += 1
             return {"result": [{"id": i} for i in range(page_size)]}
 
-        results = await client._paginate(fetch_fn, page_size=5, max_pages=3)
+        with pytest.raises(RuntimeError, match="result may be incomplete"):
+            await client._paginate(fetch_fn, page_size=5, max_pages=3)
         assert call_count == 3
-        assert len(results) == 15
 
     @pytest.mark.asyncio
     async def test_paginate_list_key_fallback(self):
@@ -1171,18 +1167,14 @@ class TestWeixinStoreTokenCache:
     @pytest.mark.asyncio
     async def test_token_is_cached_and_reused(self, wx_env):
         """WeixinStoreMCP caches the access_token and reuses it."""
-        import importlib
-
         import servers.weixin_store.server as wx_mod
 
-        importlib.reload(wx_mod)
         weixin_store_cls = wx_mod.WeixinStoreMCP
 
         client = weixin_store_cls(app_key="wx_id", app_secret="wx_secret")
 
         # Simulate a successful token fetch
-        # _ensure_token creates its own httpx.AsyncClient inline, so we
-        # need to patch the AsyncClient context manager.
+        # Token refresh now shares the persistent HTTP connection pool.
         token_response = MagicMock()
         token_response.json.return_value = {
             "access_token": "fetched_token_abc",
@@ -1193,9 +1185,7 @@ class TestWeixinStoreTokenCache:
         mock_http = AsyncMock()
         mock_http.get.return_value = token_response
 
-        with patch("httpx.AsyncClient") as mock_ctx:
-            mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_http)
-            mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
+        with patch.object(client, "_ensure_client", return_value=mock_http):
             token1 = await client._ensure_token()
 
         assert token1 == "fetched_token_abc"
@@ -1209,11 +1199,8 @@ class TestWeixinStoreTokenCache:
     @pytest.mark.asyncio
     async def test_static_token_bypasses_fetch(self, wx_env):
         """When WX_ACCESS_TOKEN is set directly, no token fetch occurs."""
-        import importlib
-
         import servers.weixin_store.server as wx_mod
 
-        importlib.reload(wx_mod)
         weixin_store_cls = wx_mod.WeixinStoreMCP
 
         client = weixin_store_cls(access_token="static_token_xyz")
@@ -1227,27 +1214,56 @@ class TestWeixinStoreTokenCache:
 
 
 class TestDouDianSigningIntegration:
-    """Integration tests for DouDian's unique MD5 signing scheme."""
+    """Integration tests for DouDian's documented public-field signing scheme."""
 
     def test_doudian_sign_deterministic(self):
-        """DouDian signing is deterministic for the same input."""
+        """The same public fields produce the same 64-character SHA256 signature."""
         from servers.doudian.server import DouDianClient
 
-        client = DouDianClient(app_key="dd_key", app_secret="dd_secret", access_token="tok")
-        params = {"order_id": "12345", "page": "0"}
+        client = DouDianClient(app_key="dd_key", app_secret="dd_secret", access_token="tok", shop_id="shop")
+        params = {
+            "app_key": "dd_key",
+            "method": "order.list",
+            "param_json": '{"order_id":"12345","page":0}',
+            "timestamp": "123",
+            "v": "2",
+        }
         sig1 = client._sign(params)
-        sig2 = client._sign(params)
+        sig2 = client._sign(dict(reversed(list(params.items()))))
         assert sig1 == sig2
-        assert len(sig1) == 32
+        assert len(sig1) == 64
 
-    def test_doudian_sign_excludes_none_and_empty(self):
-        """DouDian signing excludes None and empty values."""
+    @pytest.mark.asyncio
+    async def test_doudian_preserves_none_and_empty_in_signed_body(self):
+        """Native JSON null and empty strings survive the signed HTTP body."""
+        import hashlib
+        import hmac
+
         from servers.doudian.server import DouDianClient
 
-        client = DouDianClient(app_key="dd_key", app_secret="dd_secret", access_token="tok")
-        sig_with = client._sign({"order_id": "12345", "empty": "", "none_val": None})
-        sig_without = client._sign({"order_id": "12345"})
-        assert sig_with == sig_without
+        client = DouDianClient(app_key="dd_key", app_secret="dd_secret", access_token="tok", shop_id="shop")
+        observed = []
+
+        def respond(request):
+            observed.append(request)
+            return httpx.Response(200, json={"code": 10000, "data": {"list": []}})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+            with patch.object(client, "_ensure_client", return_value=http):
+                await client.request("order/list", {"order_id": "12345", "empty": "", "none_val": None})
+        request = observed[0]
+        assert request.content == b'{"empty":"","none_val":null,"order_id":"12345"}'
+        assert request.url.params["method"] == "order.list"
+        assert request.url.params["sign_method"] == "hmac-sha256"
+        canonical = (
+            "dd_secretapp_keydd_keymethodorder.listparam_json"
+            + request.content.decode()
+            + "timestamp"
+            + request.url.params["timestamp"]
+            + "v2dd_secret"
+        )
+        expected = hmac.new(b"dd_secret", canonical.encode(), hashlib.sha256).hexdigest()
+        assert request.url.params["sign"] == expected
 
 
 # ====================================================================
@@ -1263,7 +1279,7 @@ class TestDoudianFullRequestFlow:
         """DouDian get_order_list → request → POST → mock HTTP response."""
         from servers.doudian.server import DouDianClient
 
-        client = DouDianClient(app_key="dd_key", app_secret="dd_secret", access_token="tok")
+        client = DouDianClient(app_key="dd_key", app_secret="dd_secret", access_token="tok", shop_id="shop")
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -1311,10 +1327,7 @@ class TestPinduoduoFullRequestFlow:
         with patch.dict(os.environ, env, clear=False):
             import importlib
 
-            if "servers.pinduoduo.server" in sys.modules:
-                importlib.reload(sys.modules["servers.pinduoduo.server"])
-            else:
-                import servers.pinduoduo.server  # noqa: F401
+            importlib.import_module("servers.pinduoduo.server")
             pdd_mod = sys.modules["servers.pinduoduo.server"]
             pinduoduo_cls = pdd_mod.PinduoduoMCP
 
@@ -1333,9 +1346,7 @@ class TestPinduoduoFullRequestFlow:
         mock_http.post.return_value = mock_response
 
         with patch.object(pdd_mod, "pdd", client):
-            with patch("httpx.AsyncClient") as mock_ctx:
-                mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_http)
-                mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
+            with patch.object(client, "_ensure_client", return_value=mock_http):
                 result = await pdd_mod.get_order_list(
                     start_time="2024-01-01 00:00:00",
                     end_time="2024-01-31 23:59:59",

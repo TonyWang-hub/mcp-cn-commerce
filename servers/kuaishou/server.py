@@ -11,11 +11,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from contextlib import asynccontextmanager
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
 from shared.cn_commerce_base import (
+    DEFAULT_RETRY,
     CommerceMCPBase,
     ConfigValidationError,
     SignMethod,
@@ -37,6 +39,7 @@ class KuaishouMCP(CommerceMCPBase):
     API calls are made via GET to individual REST paths under BASE_URL.
     """
 
+    PLATFORM = "KUAISHOU"
     BASE_URL = "https://openapi.kwaixiaodian.com"
     sign_method = SignMethod.MD5
 
@@ -72,24 +75,27 @@ class KuaishouMCP(CommerceMCPBase):
 
     async def _call(self, path: str, params: dict | None = None) -> dict[str, Any]:
         """Make a signed GET request to a Kuaishou API path."""
-        return await self._request("GET", path, params=params)
+        missing = [
+            f"KUAISHOU_{name.upper()}"
+            for name in ("app_key", "app_secret", "sign_secret", "access_token")
+            if not getattr(self, name)
+        ]
+        if missing:
+            raise ConfigValidationError("KUAISHOU", missing)
+        return await self._request("GET", path, params=params, retry_config=DEFAULT_RETRY)
 
 
 # ── Instantiate client from env ────────────────────────────────────────────
 
 
 def _create_kuaishou_client() -> KuaishouMCP:
-    """Create kuaishou client with configuration validation."""
-    try:
-        return KuaishouMCP.from_env("KUAISHOU", ["APP_KEY", "APP_SECRET", "SIGN_SECRET", "ACCESS_TOKEN"])
-    except ConfigValidationError:
-        # Fallback to direct instantiation for backward compatibility
-        return KuaishouMCP(
-            app_key=os.environ.get("KUAISHOU_APP_KEY", ""),
-            app_secret=os.environ.get("KUAISHOU_APP_SECRET", ""),
-            sign_secret=os.environ.get("KUAISHOU_SIGN_SECRET", ""),
-            access_token=os.environ.get("KUAISHOU_ACCESS_TOKEN", ""),
-        )
+    """Preserve the platform-specific signing secret in every configuration."""
+    return KuaishouMCP(
+        app_key=os.environ.get("KUAISHOU_APP_KEY", ""),
+        app_secret=os.environ.get("KUAISHOU_APP_SECRET", ""),
+        sign_secret=os.environ.get("KUAISHOU_SIGN_SECRET", ""),
+        access_token=os.environ.get("KUAISHOU_ACCESS_TOKEN", ""),
+    )
 
 
 ks = _create_kuaishou_client()
@@ -97,7 +103,18 @@ ks = _create_kuaishou_client()
 
 # ── MCP server ────────────────────────────────────────────────────────────────
 
-mcp = MCPServer("mcp-cn-kuaishou")
+
+@asynccontextmanager
+async def _lifespan(_server):
+    try:
+        yield {}
+    finally:
+        client = ks
+        if client is not None:
+            await client.close()
+
+
+mcp = MCPServer("mcp-cn-kuaishou", lifespan=_lifespan)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

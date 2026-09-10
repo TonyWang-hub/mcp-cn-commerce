@@ -1,4 +1,9 @@
-"""Tests for Xiaohongshu MCP server tools."""
+"""Xiaohongshu tool contracts.
+
+Mocked payload fixtures below check transparent JSON passthrough, not vendor
+schema conformance. Official request/signature contracts use MockTransport in
+``tests/test_platform_regressions.py``. Unverified tools must fail before HTTP.
+"""
 
 from __future__ import annotations
 
@@ -48,6 +53,16 @@ def mock_call():
     """Patch xhs._call with an AsyncMock, reset after each test."""
     with patch.object(xhs, "_call", new_callable=AsyncMock) as mock:
         yield mock
+
+
+async def _assert_unsupported_tool(tool, *args, **kwargs):
+    # Keep the production adapter active: mocking _call would hide an invented API.
+    with patch.object(xhs, "_send_request", new_callable=AsyncMock) as send:
+        with pytest.raises(CommerceAPIError) as caught:
+            await tool(*args, **kwargs)
+    assert caught.value.code == -2
+    assert "no verified official API mapping" in caught.value.msg
+    send.assert_not_awaited()
 
 
 # ── Fixtures: Orders ────────────────────────────────────────────────────────────
@@ -324,7 +339,7 @@ def promotion_list_payload() -> dict:
                     "promotion_type": "满减",
                     "status": 1,
                     "start_time": "2024-01-01 00:00:00",
-                    "end_time": "2024-01-31 23:59:59",
+                    "end_time": "2024-01-01 23:59:59",
                     "description": "满199减30，满399减60",
                 },
                 {
@@ -357,7 +372,7 @@ def coupon_list_payload() -> dict:
                     "total_count": 1000,
                     "used_count": 345,
                     "start_time": "2024-01-01 00:00:00",
-                    "end_time": "2024-01-31 23:59:59",
+                    "end_time": "2024-01-01 23:59:59",
                 },
                 {
                     "coupon_id": "CP00000002",
@@ -453,7 +468,7 @@ async def test_get_order_list_returns_orders_with_correct_fields(mock_call, orde
 
     result_json = await get_order_list(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
+        end_time="2024-01-01 23:59:59",
     )
     result = json.loads(result_json)
 
@@ -471,7 +486,7 @@ async def test_get_order_list_returns_orders_with_correct_fields(mock_call, orde
     mock_call.assert_called_once_with(
         "GET",
         "/api/order/list",
-        {"start_time": "2024-01-01 00:00:00", "end_time": "2024-01-31 23:59:59", "page": "1", "page_size": "20"},
+        {"start_time": "2024-01-01 00:00:00", "end_time": "2024-01-01 23:59:59", "page": "1", "page_size": "20"},
     )
 
 
@@ -482,7 +497,7 @@ async def test_get_order_list_with_status_filter(mock_call, order_list_payload):
 
     await get_order_list(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
+        end_time="2024-01-01 23:59:59",
         order_status="3",
     )
 
@@ -497,7 +512,7 @@ async def test_get_order_list_without_status_omits_field(mock_call, order_list_p
 
     await get_order_list(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
+        end_time="2024-01-01 23:59:59",
         order_status="",
     )
 
@@ -612,7 +627,7 @@ async def test_get_refund_list_returns_refunds_with_expected_fields(mock_call, r
 
     result_json = await get_refund_list(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
+        end_time="2024-01-01 23:59:59",
     )
     result = json.loads(result_json)
 
@@ -630,7 +645,7 @@ async def test_get_refund_list_returns_refunds_with_expected_fields(mock_call, r
     mock_call.assert_called_once_with(
         "GET",
         "/api/refund/list",
-        {"start_time": "2024-01-01 00:00:00", "end_time": "2024-01-31 23:59:59", "page": "1", "page_size": "20"},
+        {"start_time": "2024-01-01 00:00:00", "end_time": "2024-01-01 23:59:59", "page": "1", "page_size": "20"},
     )
 
 
@@ -700,29 +715,8 @@ async def test_get_logistics_tracking_returns_tracking_nodes(mock_call, logistic
 
 
 @pytest.mark.asyncio
-async def test_get_review_list_returns_reviews_with_expected_fields(mock_call, review_list_payload):
-    """get_review_list should return reviews with content, score, and user info."""
-    mock_call.return_value = review_list_payload
-
-    result_json = await get_review_list(product_id="5f8a9b2c3d4e5f6a7b8c9d0e")
-    result = json.loads(result_json)
-
-    comments = result["result"]["comment_list"]
-    assert len(comments) == 2
-
-    for c in comments:
-        assert "comment_id" in c
-        assert "product_id" in c
-        assert "content" in c
-        assert "score" in c
-        assert "create_time" in c
-        assert "user_name" in c
-
-    mock_call.assert_called_once_with(
-        "GET",
-        "/api/review/list",
-        {"product_id": "5f8a9b2c3d4e5f6a7b8c9d0e", "page": "1", "page_size": "20"},
-    )
+async def test_get_review_list_reports_unsupported_before_http():
+    await _assert_unsupported_tool(get_review_list, product_id="5f8a9b2c3d4e5f6a7b8c9d0e")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -731,23 +725,8 @@ async def test_get_review_list_returns_reviews_with_expected_fields(mock_call, r
 
 
 @pytest.mark.asyncio
-async def test_get_shop_info_returns_shop_details(mock_call, shop_info_payload):
-    """get_shop_info should return shop details."""
-    mock_call.return_value = shop_info_payload
-
-    result_json = await get_shop_info()
-    result = json.loads(result_json)
-
-    shop = result["result"]["shop_info"]
-    assert shop["shop_id"] == "SHOP12345"
-    assert shop["shop_name"] == "优雅女装旗舰店"
-    assert shop["shop_type"] == "旗舰店"
-    assert "shop_status" in shop
-    assert "shop_logo" in shop
-    assert "shop_desc" in shop
-    assert "created_at" in shop
-
-    mock_call.assert_called_once_with("GET", "/api/shop/info")
+async def test_get_shop_info_reports_unsupported_before_http():
+    await _assert_unsupported_tool(get_shop_info)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -756,29 +735,8 @@ async def test_get_shop_info_returns_shop_details(mock_call, shop_info_payload):
 
 
 @pytest.mark.asyncio
-async def test_list_promotions_returns_promotions_with_expected_fields(mock_call, promotion_list_payload):
-    """list_promotions should return promotion activities with timing and type."""
-    mock_call.return_value = promotion_list_payload
-
-    result_json = await list_promotions()
-    result = json.loads(result_json)
-
-    promos = result["result"]["promotion_list"]
-    assert len(promos) == 2
-
-    for p in promos:
-        assert "promotion_id" in p
-        assert "promotion_name" in p
-        assert "promotion_type" in p
-        assert "status" in p
-        assert "start_time" in p
-        assert "end_time" in p
-
-    mock_call.assert_called_once_with(
-        "GET",
-        "/api/promotion/list",
-        {"page": "1", "page_size": "20"},
-    )
+async def test_list_promotions_reports_unsupported_before_http():
+    await _assert_unsupported_tool(list_promotions)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -787,48 +745,13 @@ async def test_list_promotions_returns_promotions_with_expected_fields(mock_call
 
 
 @pytest.mark.asyncio
-async def test_list_coupons_returns_coupons_with_expected_fields(mock_call, coupon_list_payload):
-    """list_coupons should return coupons with discount and usage info."""
-    mock_call.return_value = coupon_list_payload
-
-    result_json = await list_coupons()
-    result = json.loads(result_json)
-
-    coupons = result["result"]["coupon_list"]
-    assert len(coupons) == 2
-
-    for c in coupons:
-        assert "coupon_id" in c
-        assert "coupon_name" in c
-        assert "coupon_type" in c
-        assert "status" in c
-        assert "start_time" in c
-        assert "end_time" in c
-
-    # First coupon is a specific-amount coupon
-    assert coupons[0]["discount_amount"] == "20.00"
-    assert coupons[0]["total_count"] == 1000
-    assert coupons[0]["used_count"] == 345
-
-    # Second coupon is a rate-based coupon
-    assert coupons[1]["discount_rate"] == 8.5
-
-    mock_call.assert_called_once_with(
-        "GET",
-        "/api/coupon/list",
-        {"page": "1", "page_size": "20"},
-    )
+async def test_list_coupons_reports_unsupported_before_http():
+    await _assert_unsupported_tool(list_coupons)
 
 
 @pytest.mark.asyncio
-async def test_list_coupons_with_status_filter(mock_call, coupon_list_payload):
-    """list_coupons should include status in biz params when provided."""
-    mock_call.return_value = coupon_list_payload
-
-    await list_coupons(status="1")
-
-    _, _, biz_params = mock_call.call_args[0]
-    assert biz_params["status"] == "1"
+async def test_list_coupons_status_cannot_bypass_unsupported_api():
+    await _assert_unsupported_tool(list_coupons, status="1")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -841,7 +764,7 @@ async def test_get_inventory_returns_inventory_with_sku_details(mock_call, inven
     """get_inventory should return inventory with SKU-level stock data."""
     mock_call.return_value = inventory_payload
 
-    result_json = await get_inventory()
+    result_json = await get_inventory(sku_id="SKU1")
     result = json.loads(result_json)
 
     items = result["result"]["inventory_list"]
@@ -860,19 +783,16 @@ async def test_get_inventory_returns_inventory_with_sku_details(mock_call, inven
     mock_call.assert_called_once_with(
         "GET",
         "/api/inventory/query",
-        {"page": "1", "page_size": "20"},
+        {"page": "1", "page_size": "20", "sku_id": "SKU1"},
     )
 
 
 @pytest.mark.asyncio
-async def test_get_inventory_with_product_id_filter(mock_call, inventory_payload):
-    """get_inventory should include product_id in biz params when provided."""
-    mock_call.return_value = inventory_payload
-
-    await get_inventory(product_id="5f8a9b2c3d4e5f6a7b8c9d0e")
-
-    _, _, biz_params = mock_call.call_args[0]
-    assert biz_params["product_id"] == "5f8a9b2c3d4e5f6a7b8c9d0e"
+async def test_get_inventory_rejects_product_id_before_http():
+    with patch.object(xhs, "_send_request", new_callable=AsyncMock) as send:
+        with pytest.raises(ValueError, match="sku_id"):
+            await get_inventory(product_id="5f8a9b2c3d4e5f6a7b8c9d0e")
+    send.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -880,7 +800,7 @@ async def test_get_inventory_without_product_id_omits_field(mock_call, inventory
     """get_inventory should NOT include product_id when empty string."""
     mock_call.return_value = inventory_payload
 
-    await get_inventory(product_id="")
+    await get_inventory(product_id="", sku_id="SKU1")
 
     _, _, biz_params = mock_call.call_args[0]
     assert "product_id" not in biz_params
@@ -898,7 +818,7 @@ async def test_get_bill_list_returns_bills_with_expected_fields(mock_call, bill_
 
     result_json = await get_bill_list(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
+        end_time="2024-01-01 23:59:59",
     )
     result = json.loads(result_json)
 
@@ -916,7 +836,7 @@ async def test_get_bill_list_returns_bills_with_expected_fields(mock_call, bill_
     mock_call.assert_called_once_with(
         "GET",
         "/api/bill/list",
-        {"start_time": "2024-01-01 00:00:00", "end_time": "2024-01-31 23:59:59", "page": "1", "page_size": "20"},
+        {"start_time": "2024-01-01 00:00:00", "end_time": "2024-01-01 23:59:59", "page": "1", "page_size": "20"},
     )
 
 
@@ -926,22 +846,13 @@ async def test_get_bill_list_returns_bills_with_expected_fields(mock_call, bill_
 
 
 @pytest.mark.asyncio
-async def test_missing_order_id_returned_in_result(mock_call):
-    """When order_id is not found, the error response is serialized as JSON."""
-    error_response = {
-        "error_response": {
-            "code": 10001,
-            "msg": "order not found",
-        },
-    }
-    mock_call.return_value = error_response
-
-    result_json = await get_order_detail(order_id="XHS99999999999999")
-    result = json.loads(result_json)
-
-    assert "error_response" in result
-    assert result["error_response"]["code"] == 10001
-    assert "order not found" in result["error_response"]["msg"]
+async def test_missing_order_id_propagates_api_error(mock_call):
+    """An adapter error must propagate, not be serialized as successful data."""
+    mock_call.side_effect = CommerceAPIError(10001, "order not found")
+    with pytest.raises(CommerceAPIError) as caught:
+        await get_order_detail(order_id="XHS99999999999999")
+    assert caught.value.code == 10001
+    assert caught.value.msg == "order not found"
 
 
 @pytest.mark.asyncio
@@ -952,7 +863,7 @@ async def test_api_error_propagates(mock_call):
     with pytest.raises(CommerceAPIError) as exc_info:
         await get_order_list(
             start_time="2024-01-01 00:00:00",
-            end_time="2024-01-31 23:59:59",
+            end_time="2024-01-01 23:59:59",
         )
 
     assert exc_info.value.code == 40001
@@ -992,7 +903,7 @@ async def test_pagination_default_page_and_size(mock_call, order_list_payload):
 
     await get_order_list(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
+        end_time="2024-01-01 23:59:59",
     )
 
     _, _, biz_params = mock_call.call_args[0]
@@ -1007,7 +918,7 @@ async def test_pagination_custom_page(mock_call, order_list_payload):
 
     await get_order_list(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
+        end_time="2024-01-01 23:59:59",
         page=3,
         page_size=50,
     )
@@ -1052,16 +963,8 @@ async def test_pagination_product_list_defaults(mock_call, product_list_payload)
 
 
 @pytest.mark.asyncio
-async def test_pagination_review_list_custom(mock_call, review_list_payload):
-    """Review list should support custom pagination."""
-    mock_call.return_value = review_list_payload
-
-    await get_review_list(product_id="5f8a9b2c3d4e5f6a7b8c9d0e", page=2, page_size=10)
-
-    _, _, biz_params = mock_call.call_args[0]
-    assert biz_params["product_id"] == "5f8a9b2c3d4e5f6a7b8c9d0e"
-    assert biz_params["page"] == "2"
-    assert biz_params["page_size"] == "10"
+async def test_review_pagination_cannot_bypass_unsupported_api():
+    await _assert_unsupported_tool(get_review_list, product_id="5f8a9b2c3d4e5f6a7b8c9d0e", page=2, page_size=10)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -1076,7 +979,7 @@ async def test_output_is_valid_json_string(mock_call, order_list_payload):
 
     result = await get_order_list(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
+        end_time="2024-01-01 23:59:59",
     )
 
     assert isinstance(result, str)
@@ -1091,7 +994,7 @@ async def test_refund_output_is_valid_json_string(mock_call, refund_list_payload
 
     result = await get_refund_list(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
+        end_time="2024-01-01 23:59:59",
     )
 
     assert isinstance(result, str)
@@ -1100,14 +1003,8 @@ async def test_refund_output_is_valid_json_string(mock_call, refund_list_payload
 
 
 @pytest.mark.asyncio
-async def test_shop_info_output_is_valid_json_string(mock_call, shop_info_payload):
-    """Shop info should return valid JSON string."""
-    mock_call.return_value = shop_info_payload
-
-    result = await get_shop_info()
-    assert isinstance(result, str)
-    parsed = json.loads(result)
-    assert isinstance(parsed, dict)
+async def test_shop_info_raises_explicit_error_instead_of_fabricated_json():
+    await _assert_unsupported_tool(get_shop_info)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -1129,15 +1026,8 @@ async def test_call_passthrough_with_minimal_params(mock_call):
 
 
 @pytest.mark.asyncio
-async def test_call_passthrough_get_shop_info(mock_call):
-    """Verify _call receives correct method and path for no-arg tool."""
-    mock_call.return_value = _mock_response({"ok": True})
-
-    await get_shop_info()
-
-    args = mock_call.call_args[0]
-    assert args[0] == "GET"
-    assert args[1] == "/api/shop/info"
+async def test_shop_info_does_not_send_unverified_http_request():
+    await _assert_unsupported_tool(get_shop_info)
 
 
 @pytest.mark.asyncio

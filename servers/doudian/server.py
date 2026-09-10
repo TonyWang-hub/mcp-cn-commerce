@@ -16,26 +16,40 @@ Usage:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
 import os
 import time
+from contextlib import asynccontextmanager
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
 from shared.cn_commerce_base import (
+    DEFAULT_RETRY,
     CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,
-    SignMethod,
-    canonicalize_sign_value,
+    SensitiveDataFilter,
     register_common_tools,
 )
 
 logger = logging.getLogger(__name__)
+logger.addFilter(SensitiveDataFilter())
 
-server = MCPServer("mcp-cn-doudian")
+
+@asynccontextmanager
+async def _lifespan(_server):
+    try:
+        yield {}
+    finally:
+        client = _client
+        if client is not None:
+            await client.close()
+
+
+server = MCPServer("mcp-cn-doudian", lifespan=_lifespan)
 
 # ── Exceptions ──────────────────────────────────────────────
 
@@ -76,19 +90,15 @@ class ConfigError(ConfigValidationError):
 
 
 class DouDianClient(CommerceMCPBase):
-    """HTTP client for the Doudian Open API.
+    """Doudian HMAC-SHA256 adapter using the official API calling guide.
 
-    Inherits the shared :class:`CommerceMCPBase` for connection pooling,
-    auto-reconnect, rate limiting and input validation, and overrides the
-    Doudian-specific signing scheme:
-
-    1. Filter out None/empty business params.
-    2. Sort alphabetically by key and serialize to compact JSON.
-    3. Compute ``MD5(app_key + param_json + app_secret)``.
+    Protocol source: https://op.jinritemai.com/docs/guide-docs/10/23
+    Business JSON is recursively sorted and signed in its exact wire form.
     """
 
+    PLATFORM = "DOUDIAN"
     BASE_URL = "https://openapi-fxg.jinritemai.com/"
-    sign_method = SignMethod.MD5
+    sign_method = "hmac-sha256"
 
     def __init__(
         self,
@@ -106,20 +116,29 @@ class DouDianClient(CommerceMCPBase):
 
     # ── Signing ─────────────────────────────────────────
 
-    def _sign(self, params: dict[str, Any]) -> str:
-        """Generate Doudian's MD5 signature over the business params.
+    @staticmethod
+    def _serialize_business(params: dict[str, Any]) -> str:
+        # Official examples require integral floats as integers and preserve
+        # native nested values, Unicode and HTML punctuation.
+        def normalize(value):
+            if isinstance(value, dict):
+                return {k: normalize(v) for k, v in value.items()}
+            if isinstance(value, (list, tuple)):
+                return [normalize(v) for v in value]
+            if isinstance(value, float) and value.is_integer():
+                return int(value)
+            return value
 
-        Overrides the base scheme. Empty/``None`` values are dropped, the
-        remaining params are sorted by key and serialised to compact JSON,
-        then signed as ``MD5(app_key + json + app_secret)``. Values are run
-        through :func:`canonicalize_sign_value` so dict/list/bool params
-        serialise deterministically (matching the base class guarantee).
-        """
-        clean = {k: canonicalize_sign_value(v) for k, v in params.items() if v is not None and v != ""}
-        sorted_params = dict(sorted(clean.items()))
-        param_json = json.dumps(sorted_params, separators=(",", ":"), ensure_ascii=False)
-        sign_str = f"{self.app_key}{param_json}{self.app_secret}"
-        return hashlib.md5(sign_str.encode()).hexdigest()
+        return json.dumps(normalize(params), sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+
+    def _sign(self, params: dict[str, Any]) -> str:
+        """Sign app_key, method, param_json, timestamp and v in that order."""
+        raw = (
+            self.app_secret
+            + "".join(f"{key}{params[key]}" for key in ("app_key", "method", "param_json", "timestamp", "v"))
+            + self.app_secret
+        )
+        return hmac.new(self.app_secret.encode(), raw.encode(), hashlib.sha256).hexdigest()
 
     # ── Request ─────────────────────────────────────────
 
@@ -128,68 +147,60 @@ class DouDianClient(CommerceMCPBase):
         method: str,
         params: dict | None = None,
     ) -> dict[str, Any]:
-        """Make a signed POST request to the Doudian Open API.
-
-        Reuses the base class HTTP client (``_ensure_client``), rate limiter
-        and input validation, but keeps Doudian's wire format: common auth
-        params (``app_key``/``timestamp``/``v``/``sign_method``/``access_token``
-        and the business-param ``sign``) go in the query string, the business
-        params go in the JSON body, and success is signalled by ``code == 10000``.
-
-        Args:
-            method: API method name, e.g. ``"order/list"``.
-            params: Business parameters (placed in the POST body as JSON).
-
-        Returns:
-            Parsed response ``data`` dict.
-
-        Raises:
-            DouDianAPIError: When the API returns a non-success code.
-        """
+        """POST canonical business JSON with OAuth and signed public query fields."""
+        missing = [
+            name
+            for name, value in (
+                ("DOUDIAN_APP_KEY", self.app_key),
+                ("DOUDIAN_APP_SECRET", self.app_secret),
+                ("DOUDIAN_ACCESS_TOKEN", self.access_token),
+                ("DOUDIAN_SHOP_ID", self.shop_id),
+            )
+            if not value
+        ]
+        if missing:
+            raise ConfigError(f"Missing required environment variables: {', '.join(missing)}")
         params = params or {}
-
         if self.validate_input:
             self._validate_params(params)
+        param_json = self._serialize_business(params)
+        api_method = method.strip("/").replace("/", ".")
 
-        if self.rate_limiter:
-            await self.rate_limiter.acquire()
+        def prepare_request():
+            common = {
+                "app_key": self.app_key,
+                "method": api_method,
+                "timestamp": str(int(time.time())),
+                "v": "2",
+                "sign_method": self.sign_method,
+                "access_token": self.access_token,
+            }
+            common["sign"] = self._sign({**common, "param_json": param_json})
+            return {
+                "params": common,
+                "content": param_json.encode("utf-8"),
+                "headers": {"Content-Type": "application/json"},
+            }
 
-        url = f"{self.BASE_URL.rstrip('/')}/{method.lstrip('/')}"
+        def parse_response(result):
+            error_code = result.get("code", 10000)
+            if str(error_code) != "10000":
+                raise DouDianAPIError(
+                    code=error_code,
+                    msg=result.get("msg", "unknown error"),
+                    sub_code=str(result.get("sub_code", "")),
+                    sub_msg=result.get("sub_msg", ""),
+                )
+            return result.get("data", result)
 
-        common = {
-            "app_key": self.app_key,
-            "timestamp": str(int(time.time())),
-            "v": "2",
-            "sign_method": self.sign_method,
-            "access_token": self.access_token,
-            "sign": self._sign(params),
-        }
-
-        logger.debug("Request: %s %s", method, params)
-
-        client = await self._ensure_client()
-        resp = await client.post(url, params=common, json=params)
-
-        logger.debug("Response status: %s", resp.status_code)
-
-        try:
-            result = resp.json()
-        except json.JSONDecodeError:
-            raise DouDianAPIError(
-                code=-1,
-                msg=f"Invalid JSON response (HTTP {resp.status_code}): {resp.text[:500]}",
-            )
-
-        error_code = result.get("code", 10000)
-        if error_code != 10000:
-            raise DouDianAPIError(
-                code=error_code,
-                msg=result.get("msg", "unknown error"),
-                sub_code=str(result.get("sub_code", "")),
-                sub_msg=result.get("sub_msg", ""),
-            )
-
-        return result.get("data", result)
+        return await self._send_request(
+            "POST",
+            f"{self.BASE_URL.rstrip('/')}/{method.lstrip('/')}",
+            endpoint=method,
+            prepare_request=prepare_request,
+            retry_config=DEFAULT_RETRY,
+            parse_response=parse_response,
+        )
 
 
 # ── Client singleton ────────────────────────────────────────
@@ -207,19 +218,6 @@ def _get_client() -> DouDianClient:
     app_secret = os.environ.get("DOUDIAN_APP_SECRET", "")
     shop_id = os.environ.get("DOUDIAN_SHOP_ID", "")
     access_token = os.environ.get("DOUDIAN_ACCESS_TOKEN", "")
-
-    missing = []
-    if not app_key:
-        missing.append("DOUDIAN_APP_KEY")
-    if not app_secret:
-        missing.append("DOUDIAN_APP_SECRET")
-    if not shop_id:
-        missing.append("DOUDIAN_SHOP_ID")
-    if not access_token:
-        missing.append("DOUDIAN_ACCESS_TOKEN")
-
-    if missing:
-        raise ConfigError(f"Missing required environment variables: {', '.join(missing)}")
 
     _client = DouDianClient(
         app_key=app_key,
@@ -581,6 +579,9 @@ async def get_refund_list(
                 "product_id": _safe_get(r, "product_id"),
                 "buyer_name": _safe_get(r, "buyer_name"),
                 "arbitrate_status": _safe_get(r, "arbitrate_status"),
+                # Preserve source completion timestamps; update_time is not a
+                # substitute for the date on which money was refunded.
+                **{key: r[key] for key in ("completed_at", "refund_time", "success_time") if key in r},
             }
             for r in raw_refunds
         ]

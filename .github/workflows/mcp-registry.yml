@@ -1,17 +1,20 @@
 name: Publish to MCP Registry
 
-# Publishes server.json to registry.modelcontextprotocol.io using GitHub
-# Actions OIDC — no interactive device-flow login needed. The OIDC identity
-# (repository owner) grants publish rights for io.github.TonyWang-hub/*.
-#
-# Run manually (workflow_dispatch) or automatically after a GitHub Release
-# is published. Make sure server.json's versions match the released version
-# BEFORE triggering.
-
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Existing tag already published to PyPI"
+        required: true
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
   publish-registry:
@@ -21,17 +24,37 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
-
-      - name: Install mcp-publisher
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Require the corresponding package to be available on PyPI
         run: |
-          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
-          sudo mv mcp-publisher /usr/local/bin/
-
-      - name: Validate server.json
-        run: mcp-publisher validate
-
-      - name: Login via GitHub OIDC
-        run: mcp-publisher login github-oidc
-
-      - name: Publish
-        run: mcp-publisher publish
+          python - <<'PY'
+          import json, time, urllib.request
+          from shared import __version__
+          manifest = json.load(open("server.json"))
+          assert manifest["version"] == __version__
+          for package in manifest["packages"]:
+              assert package["version"] == __version__
+              url = f'https://pypi.org/pypi/{package["identifier"]}/{package["version"]}/json'
+              for attempt in range(6):
+                  try:
+                      with urllib.request.urlopen(url, timeout=15) as response:
+                          data = json.load(response)
+                      assert data["urls"], "Published package has no distribution files"
+                      break
+                  except Exception:
+                      if attempt == 5:
+                          raise
+                      time.sleep(10)
+          PY
+      - name: Install pinned publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz" -o "$RUNNER_TEMP/mcp-publisher.tar.gz"
+          tar xzf "$RUNNER_TEMP/mcp-publisher.tar.gz" -C "$RUNNER_TEMP" mcp-publisher
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - run: mcp-publisher validate
+      - run: mcp-publisher login github-oidc
+      - run: mcp-publisher publish

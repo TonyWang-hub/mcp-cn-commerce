@@ -5,44 +5,34 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  # Allow other workflows (e.g. release) to require this suite as a gate.
   workflow_call:
+    inputs:
+      ref:
+        required: false
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     strategy:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
-
     steps:
       - uses: actions/checkout@v7
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest pytest-asyncio pytest-cov httpx mcp
-
-      - name: Run server tests
-        run: |
-          python -m pytest servers/ -v --tb=short
-
-      - name: Run automation and shared tests
-        run: |
-          python -m pytest tests/ -v --tb=short
-
-      - name: Generate test report
-        if: always()
-        run: |
-          python -m pytest servers/ tests/ -v --tb=short --junitxml=test-results.xml || true
-
+      - name: Install root package with the verified runtime lock
+        run: python -m pip install -c requirements-lock.txt -e ".[dev]"
+      - name: Check tool and documentation metadata
+        run: python scripts/check_tool_metadata.py
+      - name: Run all tests once and generate report
+        run: python -m pytest servers/ tests/ -v --tb=short --junitxml=test-results.xml
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7
@@ -50,93 +40,110 @@ jobs:
           name: test-results-py${{ matrix.python-version }}
           path: test-results.xml
 
-  # Build the wheel, install it into a clean venv, and exercise the INSTALLED
-  # package against the real MCP SDK. Catches broken packaging and modules
-  # that only import under mocked tests (both shipped in 0.1.x releases).
   install-smoke:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dependency-set: [locked, latest-supported]
     steps:
       - uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-
-      - name: Build wheel
+      - name: Build wheel and sdist
         run: |
-          python -m pip install --upgrade pip build
-          python -m build --wheel
-
-      - name: Install into clean venv and run smoke test
+          python -m pip install build
+          python -m build
+      - name: Install wheel into a clean environment
+        env:
+          DEPENDENCY_SET: ${{ matrix.dependency-set }}
         run: |
           python -m venv "$RUNNER_TEMP/smoke-venv"
           source "$RUNNER_TEMP/smoke-venv/bin/activate"
-          pip install dist/*.whl
+          if [ "$DEPENDENCY_SET" = locked ]; then
+            python -m pip install -c requirements-lock.txt dist/*.whl
+          else
+            python -m pip install --upgrade dist/*.whl
+          fi
           cd "$RUNNER_TEMP"
           python "$GITHUB_WORKSPACE/scripts/smoke_install.py"
+      - name: Install sdist and exercise its entry points
+        if: matrix.dependency-set == 'locked'
+        run: |
+          python -m venv "$RUNNER_TEMP/sdist-venv"
+          source "$RUNNER_TEMP/sdist-venv/bin/activate"
+          python -m pip install -c requirements-lock.txt dist/*.tar.gz
+          cd "$RUNNER_TEMP"
+          python "$GITHUB_WORKSPACE/scripts/smoke_install.py"
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Build runtime and development images
+        run: |
+          docker build --target runtime -t mcp-cn-commerce:smoke .
+          docker build --target development -t mcp-cn-commerce:dev-smoke .
+      - name: Test the development image
+        run: docker run --rm mcp-cn-commerce:dev-smoke make test
+      - name: Exercise real stdio connections to the runtime image
+        run: |
+          cd "$RUNNER_TEMP"
+          python "$GITHUB_WORKSPACE/scripts/smoke_install.py" --docker mcp-cn-commerce:smoke
+
+  manifest-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - name: Validate Registry schema before publishing a package
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz" -o "$RUNNER_TEMP/mcp-publisher.tar.gz"
+          tar xzf "$RUNNER_TEMP/mcp-publisher.tar.gz" -C "$RUNNER_TEMP" mcp-publisher
+          "$RUNNER_TEMP/mcp-publisher" validate
 
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-
-      - name: Install linting tools
-        run: |
-          python -m pip install --upgrade pip
-          pip install black ruff
-
-      - name: Check code formatting
-        run: |
-          black --check .
-
-      - name: Check code style
-        run: |
-          ruff check .
+      - run: python -m pip install -c requirements-lock.txt -e ".[dev]"
+      - run: black --check .
+      - run: ruff check .
 
   typecheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install mypy types-requests httpx mcp
-
-      - name: Run mypy type checking
-        run: |
-          mypy servers/ shared/ tests/ --config-file=pyproject.toml
+      - run: python -m pip install -c requirements-lock.txt -e ".[dev]"
+      - run: mypy servers/ shared/ tests/ --config-file=pyproject.toml
 
   code-quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pylint bandit[toml] mcp httpx
-
-      - name: Run pylint
-        run: |
-          pylint --rcfile=pyproject.toml --disable=import-error servers/ shared/
-
-      - name: Run bandit security check
-        run: |
-          bandit -c pyproject.toml -r servers/ shared/
+      - run: python -m pip install -c requirements-lock.txt -e ".[dev]"
+      - run: pylint --rcfile=pyproject.toml --disable=import-error servers/ shared/
+      - run: bandit -c pyproject.toml -r servers/ shared/

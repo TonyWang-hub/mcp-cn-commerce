@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -217,6 +217,9 @@ class DashboardAlert:
     metric_value: float
     threshold: float
     timestamp: float = field(default_factory=time.time)
+    state: str = "active"
+    last_seen: float = field(default_factory=time.time)
+    resolved_at: float | None = None
 
 
 # ── Alert Rules ────────────────────────────────────────────
@@ -273,6 +276,8 @@ class MonitoringDashboard:
         metrics_collector: Any = None,
         webhook_manager: Any = None,
         cache_max_entries: int = 0,
+        max_alerts: int = 1000,
+        max_alert_rules: int = 1000,
     ) -> None:
         """Initialize the monitoring dashboard.
 
@@ -281,6 +286,14 @@ class MonitoringDashboard:
             webhook_manager: Optional WebhookManager instance.
             cache_max_entries: Maximum cache entries for CacheStatsTracker.
         """
+        if any(
+            not isinstance(capacity, int) or isinstance(capacity, bool) or capacity < 1
+            for capacity in (max_alerts, max_alert_rules)
+        ):
+            raise ValueError("Alert and rule capacities must be positive integers")
+        self._max_alerts = max_alerts
+        self._max_alert_rules = max_alert_rules
+        self._active_alerts: dict[tuple, DashboardAlert] = {}
         self._metrics_collector = metrics_collector
         self._webhook_manager = webhook_manager
         self.cache = CacheStatsTracker(max_entries=cache_max_entries)
@@ -302,7 +315,13 @@ class MonitoringDashboard:
             rule: AlertRule configuration.
         """
         with self._lock:
-            self._alert_rules.append(rule)
+            if rule.direction not in ("above", "below"):
+                raise ValueError("Alert direction must be above or below")
+            if rule in self._alert_rules:
+                return
+            if len(self._alert_rules) >= self._max_alert_rules:
+                raise ValueError("Maximum alert rule capacity reached")
+            self._alert_rules.append(replace(rule))
 
     def remove_alert_rules(self, metric_name: str) -> int:
         """Remove all alert rules for a given metric.
@@ -316,6 +335,11 @@ class MonitoringDashboard:
         with self._lock:
             before = len(self._alert_rules)
             self._alert_rules = [r for r in self._alert_rules if r.metric_name != metric_name]
+            for key in list(self._active_alerts):
+                if key[0] == metric_name:
+                    alert = self._active_alerts.pop(key)
+                    alert.state = "resolved"
+                    alert.resolved_at = time.time()
             return before - len(self._alert_rules)
 
     def get_alerts(self, severity: AlertSeverity | None = None) -> list[DashboardAlert]:
@@ -329,13 +353,14 @@ class MonitoringDashboard:
         """
         with self._lock:
             if severity is None:
-                return list(self._alerts)
-            return [a for a in self._alerts if a.severity == severity]
+                return [replace(a) for a in self._alerts]
+            return [replace(a) for a in self._alerts if a.severity == severity]
 
     def clear_alerts(self) -> None:
         """Clear all raised alerts."""
         with self._lock:
             self._alerts.clear()
+            self._active_alerts.clear()
 
     def _resolve_metric_value(self, metric_path: str, snapshot: dict[str, Any]) -> float | None:
         """Resolve a dot-separated metric path against a snapshot dict.
@@ -359,32 +384,52 @@ class MonitoringDashboard:
         return None
 
     def _evaluate_alerts(self, snapshot: dict[str, Any]) -> None:
-        """Evaluate alert rules against a snapshot and raise alerts."""
-        for rule in self._alert_rules:
-            value = self._resolve_metric_value(rule.metric_name, snapshot)
-            if value is None:
-                continue
+        """Update one alert per active rule; retain bounded resolved history.
 
-            triggered = False
-            if rule.direction == "above" and value > rule.threshold:
-                triggered = True
-            elif rule.direction == "below" and value < rule.threshold:
-                triggered = True
-
-            if triggered:
+        A threshold breach opens an episode. Polling updates it without appending
+        duplicates. Recovery closes it, and a later breach starts a new episode.
+        """
+        now = time.time()
+        with self._lock:
+            for rule in self._alert_rules:
+                key = (rule.metric_name, rule.threshold, rule.severity, rule.direction)
+                value = self._resolve_metric_value(rule.metric_name, snapshot)
+                if value is None:
+                    continue
+                triggered = value > rule.threshold if rule.direction == "above" else value < rule.threshold
+                active = self._active_alerts.get(key)
+                if not triggered:
+                    if active is not None:
+                        active.state = "resolved"
+                        active.resolved_at = now
+                        active.last_seen = now
+                        del self._active_alerts[key]
+                    continue
+                message = (
+                    f"{rule.metric_name} = {value} "
+                    f"{'>' if rule.direction == 'above' else '<'} threshold {rule.threshold}"
+                )
+                if active is not None:
+                    active.metric_value = value
+                    active.message = message
+                    active.last_seen = now
+                    continue
                 alert = DashboardAlert(
                     severity=rule.severity,
-                    message=(
-                        f"{rule.metric_name} = {value} "
-                        f"{'>' if rule.direction == 'above' else '<'} "
-                        f"threshold {rule.threshold}"
-                    ),
+                    message=message,
                     metric_name=rule.metric_name,
                     metric_value=value,
                     threshold=rule.threshold,
+                    timestamp=now,
+                    last_seen=now,
                 )
-                with self._lock:
-                    self._alerts.append(alert)
+                self._active_alerts[key] = alert
+                self._alerts.append(alert)
+                if len(self._alerts) > self._max_alerts:
+                    # Prefer evicting resolved history; active state is still
+                    # bounded by max_alert_rules even when omitted from history.
+                    index = next((i for i, old in enumerate(self._alerts) if old.state == "resolved"), 0)
+                    del self._alerts[index]
 
     def get_snapshot(self) -> dict[str, Any]:
         """Get a complete dashboard snapshot.
@@ -471,6 +516,9 @@ class MonitoringDashboard:
                     "metric_value": a.metric_value,
                     "threshold": a.threshold,
                     "timestamp": a.timestamp,
+                    "state": a.state,
+                    "last_seen": a.last_seen,
+                    "resolved_at": a.resolved_at,
                 }
                 for a in self._alerts
             ]
@@ -492,6 +540,7 @@ class MonitoringDashboard:
         """Reset all dashboard state."""
         with self._lock:
             self._alerts.clear()
+            self._active_alerts.clear()
             self._alert_rules.clear()
         self.cache.reset()
         self.response_times.reset()

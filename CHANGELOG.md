@@ -4,6 +4,40 @@ All notable changes to mcp-cn-commerce will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Local acceptance repairs
+- Redact default HTTPX request logs at the emitting logger, including SDK-configured logging.
+- Correct Xiaohongshu order/refund states and reject false complete-zero refund reports.
+- Surface missing configuration as an expected MCP SDK tool error.
+- Repair the Pydantic/core runtime lock mismatch found by a real dependency installation.
+- Correct TOP seller session, GMT+8 timestamp and MD5 signing against the official fixed vector.
+- Use the official WeChat order seconds window and next_key cursor; reject unsupported page numbers.
+- Fix stale test contracts, typing and formatting; include Excel export dependency in development tests.
+
+
+### Fixed
+
+- 修复单包 CLI、配置文件优先级、健康检查、Docker/Make 安装路径与 stdio 多平台启动冲突。
+- 所有适配器复用共享 HTTP transport 和 MCP 生命周期清理；状态检查、可重试请求、限流、指标与 trace 进入实际请求路径。
+- 巨量引擎使用官方 `Access-Token` 请求头；快手保留独立签名密钥；微信支持显式静态 token 和受锁保护的自动刷新模式。
+- 抖店签名按官方调用指南改用 HMAC-SHA256，确保签名 JSON 与实际正文一致；小红书按当前官方网关、签名和业务 schema 迁移。
+- 金额使用精确十进制转换；未知单位和坏字段返回未知值及质量警告。修复时间单位、时区、身份字段、CSV 列丢失及公式注入防护。
+- 修复凭证/个人信息脱敏、trace 内存保留、重复告警、队列取消、fail-fast、熔断恢复、分页截断和错误类型契约。
+- CI 从单一包构建并测试 wheel/sdist、实际 stdio 调用和 Docker；Registry 发布由显式依赖链触发。移除掩盖 SDK 差异的测试垫片及无效断言。
+
+### Added
+
+- `build_daily_report` 公共工具与确定性聚合器：逐店铺分页完整性、付款/退款事件时间、去重和冲突检测；缺失来源不能变成完整零值。
+- 可重复生成的双店铺日报示例，以及官方接入证据、平台协议边界、金额和时间契约文档。
+
+### Changed
+
+- 金额未知时输出 `null`；跨接口金额单位必须明确，不能默认按平台猜测。日报必须显式提交订单/退款来源及各日期 coverage。
+- 小红书评论、店铺信息、活动、优惠券 4 个兼容入口返回明确不支持；未取得官方合同前不再发送旧的猜测请求。
+- README 工具数量按实际注册统计（155 个，含兼容保留入口），不再把注册数量或模拟测试描述为真实店铺已经可用。
+- 本次变更尚未发布；完整 SDK/pytest、格式检查及真实店铺联调须分别取得对应提交的验证结果。
+
 ## [0.1.5] - 2026-07-13
 
 ### Fixed

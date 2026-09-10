@@ -1,4 +1,5 @@
 """Semantic regressions: lossless money, explicit timezone and bounded alerts."""
+
 import unittest
 from datetime import datetime
 
@@ -18,11 +19,16 @@ class MoneyAndTimeRegressionTests(unittest.TestCase):
         self.assertIsNone(normalize_price("1.5", "doudian", unit="fen"))
 
     def test_bad_item_never_discards_order_amount_and_retains_source_value(self):
-        order = Normalizer().normalize_order({
-            "order_id": "order", "order_status": 2, "pay_amount": "1999",
-            "product_info": {"list": [None, {"product_id": "P", "price": 1999, "combo_num": "bad"}]},
-            "buyer_info": ["invalid object"],
-        }, "doudian")
+        order = Normalizer().normalize_order(
+            {
+                "order_id": "order",
+                "order_status": 2,
+                "pay_amount": "1999",
+                "product_info": {"list": [None, {"product_id": "P", "price": 1999, "combo_num": "bad"}]},
+                "buyer_info": ["invalid object"],
+            },
+            "doudian",
+        )
         self.assertEqual(order.amount_paid, 1999)
         self.assertIsNone(order.amount_shipping)
         self.assertIsNone(order.items[0].quantity)
@@ -30,7 +36,9 @@ class MoneyAndTimeRegressionTests(unittest.TestCase):
         self.assertIn({"field": "items[1].quantity", "code": "integer_invalid"}, order.warnings)
 
     def test_malformed_status_isolated_from_money(self):
-        result = Normalizer().normalize_order({"order_id": "o", "order_status": {"bad": "status"}, "pay_amount": 1299}, "doudian")
+        result = Normalizer().normalize_order(
+            {"order_id": "o", "order_status": {"bad": "status"}, "pay_amount": 1299}, "doudian"
+        )
         self.assertEqual(result.amount_paid, 1299)
         self.assertEqual(result.status, "unknown")
 
@@ -40,10 +48,16 @@ class MoneyAndTimeRegressionTests(unittest.TestCase):
             cases = (
                 (n.normalize_order, {"order_id": invalid, "shop_id": invalid}, ("order_id", "shop_id")),
                 (n.normalize_product, {"product_id": invalid}, ("product_id",)),
-                (n.normalize_refund, {"refund_id": invalid, "order_id": invalid, "shop_id": invalid},
-                 ("refund_id", "order_id", "shop_id")),
-                (n.normalize_review, {"review_id": invalid, "order_id": invalid, "product_id": invalid},
-                 ("review_id", "order_id", "product_id")),
+                (
+                    n.normalize_refund,
+                    {"refund_id": invalid, "order_id": invalid, "shop_id": invalid},
+                    ("refund_id", "order_id", "shop_id"),
+                ),
+                (
+                    n.normalize_review,
+                    {"review_id": invalid, "order_id": invalid, "product_id": invalid},
+                    ("review_id", "order_id", "product_id"),
+                ),
                 (n.normalize_shop, {"shop_id": invalid}, ("shop_id",)),
             )
             for method, raw, fields in cases:
@@ -51,7 +65,9 @@ class MoneyAndTimeRegressionTests(unittest.TestCase):
                 for field in fields:
                     self.assertEqual(getattr(result, field), "")
                     self.assertIn({"field": field, "code": "identifier_invalid"}, result.warnings)
-            result = n.normalize_order({"order_id": 123, "items": [{"product_id": invalid, "sku_id": invalid}]}, "doudian")
+            result = n.normalize_order(
+                {"order_id": 123, "items": [{"product_id": invalid, "sku_id": invalid}]}, "doudian"
+            )
             self.assertEqual(result.order_id, "123")
             self.assertEqual(result.items[0].product_id, "")
             self.assertEqual(result.items[0].sku_id, "")

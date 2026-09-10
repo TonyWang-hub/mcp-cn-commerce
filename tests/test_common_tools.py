@@ -188,17 +188,33 @@ def _report_shops():
     """Synthetic normalized records: amounts are integer fen, dates have offsets."""
     shops = []
     for platform, shop_id, amount in (("doudian", "one", 1999), ("jd", "two", 3001)):
-        shops.append({
-            "platform": platform, "shop_id": shop_id, "input_format": "normalized",
-            "coverage": {day: {"orders": True, "refunds": True}
-                         for day in ("2026-09-09", "2026-09-10")},
-            "orders": [{"order_id": "same-id-in-different-shops", "platform": platform,
-                        "shop_id": shop_id, "status": "paid", "amount_paid": amount,
+        shops.append(
+            {
+                "platform": platform,
+                "shop_id": shop_id,
+                "input_format": "normalized",
+                "coverage": {day: {"orders": True, "refunds": True} for day in ("2026-09-09", "2026-09-10")},
+                "orders": [
+                    {
+                        "order_id": "same-id-in-different-shops",
+                        "platform": platform,
+                        "shop_id": shop_id,
+                        "status": "paid",
+                        "amount_paid": amount,
                         "paid_at": "2026-09-10T10:00:00+08:00",
-                        "items": [{"product_id": "product-one", "product_name": "Synthetic product",
-                                   "price": amount, "quantity": 1}]}],
-            "refunds": [],
-        })
+                        "items": [
+                            {
+                                "product_id": "product-one",
+                                "product_name": "Synthetic product",
+                                "price": amount,
+                                "quantity": 1,
+                            }
+                        ],
+                    }
+                ],
+                "refunds": [],
+            }
+        )
     return shops
 
 
@@ -215,9 +231,16 @@ def _report_mcp_server():
 
 @pytest.mark.asyncio
 async def test_build_daily_report_through_mcp_returns_complete_scoped_totals():
-    payload = json.loads(await _call_tool_text(_report_mcp_server(), "build_daily_report", {
-        "shops_json": json.dumps(_report_shops()), "report_date": "2026-09-10",
-    }))
+    payload = json.loads(
+        await _call_tool_text(
+            _report_mcp_server(),
+            "build_daily_report",
+            {
+                "shops_json": json.dumps(_report_shops()),
+                "report_date": "2026-09-10",
+            },
+        )
+    )
     assert payload["complete"] is True
     assert payload["money_unit"] == "fen"
     assert payload["total_summary"]["order_count"] == 2
@@ -231,9 +254,16 @@ async def test_build_daily_report_through_mcp_returns_complete_scoped_totals():
 async def test_build_daily_report_through_mcp_keeps_missing_coverage_unknown():
     shops = _report_shops()
     del shops[0]["coverage"]["2026-09-10"]["orders"]
-    payload = json.loads(await _call_tool_text(_report_mcp_server(), "build_daily_report", {
-        "shops_json": json.dumps(shops), "report_date": "2026-09-10",
-    }))
+    payload = json.loads(
+        await _call_tool_text(
+            _report_mcp_server(),
+            "build_daily_report",
+            {
+                "shops_json": json.dumps(shops),
+                "report_date": "2026-09-10",
+            },
+        )
+    )
     assert payload["complete"] is False
     assert payload["total_summary"]["gmv"] is None
     assert payload["total_summary"]["order_count"] is None

@@ -224,8 +224,15 @@ def normalize_price(
         _warn(warnings, field_name, "amount_missing")
         return None
     if unit is None:
-        unit = {"kuaishou": "yuan", "xiaohongshu": "yuan", "doudian": "fen",
-                "jd": "fen", "pdd": "fen", "weixin": "fen", "taobao": "fen"}.get(platform)
+        unit = {
+            "kuaishou": "yuan",
+            "xiaohongshu": "yuan",
+            "doudian": "fen",
+            "jd": "fen",
+            "pdd": "fen",
+            "weixin": "fen",
+            "taobao": "fen",
+        }.get(platform)
         _warn(warnings, field_name, "legacy_platform_unit")
     if unit not in ("yuan", "fen"):
         _warn(warnings, field_name, "amount_unit_unknown")
@@ -343,10 +350,13 @@ _ORDER_STATUS_MAP: dict[str, dict[str | int, str]] = {
     },
     "weixin": {
         10: "pending",
+        12: "pending",
+        13: "pending",
         20: "paid",
+        21: "paid",
         30: "shipped",
-        50: "completed",
-        100: "cancelled",
+        100: "completed",
+        250: "cancelled",
     },
     "taobao": {
         "WAIT_BUYER_PAY": "pending",
@@ -385,7 +395,7 @@ _REFUND_STATUS_MAP: dict[str, dict[str | int, str]] = {
 }
 
 # Refund type mapping
-_REFUND_TYPE_MAP: dict[str, dict[str, str]] = {
+_REFUND_TYPE_MAP: dict[str, dict[str | int, str]] = {
     "doudian": {"仅退款": "refund_only", "退货退款": "return_and_refund"},
     "jd": {"退款": "refund_only", "退换货": "return_and_refund"},
     "pdd": {"1": "refund_only", "2": "return_and_refund"},
@@ -474,11 +484,71 @@ def safe_get(data: dict, *keys: str, default: Any = None) -> Any:
 # platform. Mixed/unaudited fields (notably JD, Taobao and ad spend) deliberately
 # require an override. Units may also be overridden with platform.field keys.
 _MONEY_SCHEMA = {
-    "doudian": dict.fromkeys(("pay_amount", "amount", "order_amount", "total_amount", "discount_amount", "post_amount", "price", "min_price", "max_price", "refund_amount"), "fen"),
-    "weixin": dict.fromkeys(("product_price", "discounted_price", "freight", "order_price", "sale_price", "min_price", "max_price", "price", "refund_amount", "amount"), "fen"),
+    "doudian": dict.fromkeys(
+        (
+            "pay_amount",
+            "amount",
+            "order_amount",
+            "total_amount",
+            "discount_amount",
+            "post_amount",
+            "price",
+            "min_price",
+            "max_price",
+            "refund_amount",
+        ),
+        "fen",
+    ),
+    "weixin": dict.fromkeys(
+        (
+            "product_price",
+            "discounted_price",
+            "freight",
+            "order_price",
+            "sale_price",
+            "min_price",
+            "max_price",
+            "price",
+            "refund_amount",
+            "amount",
+        ),
+        "fen",
+    ),
     "pdd": dict.fromkeys(("pay_amount", "goods_price", "min_group_price", "market_price", "refund_amount"), "fen"),
-    "kuaishou": dict.fromkeys(("order_amount", "total_amount", "pay_amount", "payment", "discount_amount", "post_amount", "price", "sale_price", "min_price", "max_price", "refund_amount", "amount"), "yuan"),
-    "xiaohongshu": dict.fromkeys(("order_amount", "total_amount", "pay_amount", "payment", "discount_amount", "post_amount", "price", "sale_price", "min_price", "max_price", "refund_amount", "amount"), "yuan"),
+    "kuaishou": dict.fromkeys(
+        (
+            "order_amount",
+            "total_amount",
+            "pay_amount",
+            "payment",
+            "discount_amount",
+            "post_amount",
+            "price",
+            "sale_price",
+            "min_price",
+            "max_price",
+            "refund_amount",
+            "amount",
+        ),
+        "yuan",
+    ),
+    "xiaohongshu": dict.fromkeys(
+        (
+            "order_amount",
+            "total_amount",
+            "pay_amount",
+            "payment",
+            "discount_amount",
+            "post_amount",
+            "price",
+            "sale_price",
+            "min_price",
+            "max_price",
+            "refund_amount",
+            "amount",
+        ),
+        "yuan",
+    ),
 }
 
 
@@ -502,8 +572,13 @@ class _Record:
 
     def time(self, value: Any, output: str) -> str:
         self.source_values[output] = value
-        return normalize_time(value, self.platform, source_timezone=self.normalizer.source_timezone,
-                              field_name=output, warnings=self.warnings)
+        return normalize_time(
+            value,
+            self.platform,
+            source_timezone=self.normalizer.source_timezone,
+            field_name=output,
+            warnings=self.warnings,
+        )
 
     def identifier(self, value: Any, output: str) -> str:
         return normalize_identifier(value, field_name=output, warnings=self.warnings)
@@ -572,8 +647,7 @@ class Normalizer:
     malformed optional item never discards already parsed order-level money.
     """
 
-    def __init__(self, *, source_timezone: str | tzinfo | None = None,
-                 amount_units: dict[str, str] | None = None):
+    def __init__(self, *, source_timezone: str | tzinfo | None = None, amount_units: dict[str, str] | None = None):
         if isinstance(source_timezone, str):
             ZoneInfo(source_timezone)  # configuration errors fail at construction
         self.source_timezone = source_timezone
@@ -609,25 +683,58 @@ class Normalizer:
         result = UnifiedOrder(
             order_id=r.identifier(_first(info, "order_id", "order_sn", "orderId", "tid"), "order_id"),
             shop_id=r.identifier(_first(raw, "shop_id", "mall_id"), "shop_id"),
-            platform=platform, status=normalize_order_status(status, platform), status_raw=str(status),
-            created_at=r.time(_first(detail, "create_time", "created_at", "orderStartTime", "created", default=_first(raw, "create_time", "created_at")), "created_at"),
-            paid_at=r.time(_first(detail, "pay_time", "paid_at", "paymentTime", default=_first(raw, "pay_time", "paid_at")), "paid_at") or None,
-            buyer_name=str(_first(buyer, "name", "fullname", "receiver_name", "buyer_name", default=raw.get("receiver_name", ""))),
-            buyer_phone=str(_first(buyer, "phone", "mobile", "receiver_tel", "buyer_phone", default=raw.get("receiver_phone", ""))),
-            buyer_address=str(_first(buyer, "fullAddress", "receiver_address", default=raw.get("receiver_address", ""))),
+            platform=platform,
+            status=normalize_order_status(status, platform),
+            status_raw=str(status),
+            created_at=r.time(
+                _first(
+                    detail,
+                    "create_time",
+                    "created_at",
+                    "orderStartTime",
+                    "created",
+                    default=_first(raw, "create_time", "created_at"),
+                ),
+                "created_at",
+            ),
+            paid_at=r.time(
+                _first(detail, "pay_time", "paid_at", "paymentTime", default=_first(raw, "pay_time", "paid_at")),
+                "paid_at",
+            )
+            or None,
+            buyer_name=str(
+                _first(buyer, "name", "fullname", "receiver_name", "buyer_name", default=raw.get("receiver_name", ""))
+            ),
+            buyer_phone=str(
+                _first(buyer, "phone", "mobile", "receiver_tel", "buyer_phone", default=raw.get("receiver_phone", ""))
+            ),
+            buyer_address=str(
+                _first(buyer, "fullAddress", "receiver_address", default=raw.get("receiver_address", ""))
+            ),
             remark=str(_first(info, "buyer_words", "remark", default="")),
         )
+        money: dict[str, tuple[str, ...]]
         if platform == "weixin":
-            money = {"amount_total": ("product_price",), "amount_discount": ("discounted_price",),
-                     "amount_shipping": ("freight",), "amount_paid": ("order_price",)}
+            money = {
+                "amount_total": ("product_price",),
+                "amount_discount": ("discounted_price",),
+                "amount_shipping": ("freight",),
+                "amount_paid": ("order_price",),
+            }
         elif platform == "jd":
-            money = {"amount_total": ("orderTotalPrice",), "amount_discount": ("sellerDiscount",),
-                     "amount_shipping": ("freightPrice",), "amount_paid": ("payment",)}
+            money = {
+                "amount_total": ("orderTotalPrice",),
+                "amount_discount": ("sellerDiscount",),
+                "amount_shipping": ("freightPrice",),
+                "amount_paid": ("payment",),
+            }
         else:
-            money = {"amount_total": ("order_amount", "total_amount", "order_total_price"),
-                     "amount_discount": ("discount_amount", "seller_discount"),
-                     "amount_shipping": ("post_amount", "postage", "freight_price"),
-                     "amount_paid": ("pay_amount", "payment")}
+            money = {
+                "amount_total": ("order_amount", "total_amount", "order_total_price"),
+                "amount_discount": ("discount_amount", "seller_discount"),
+                "amount_shipping": ("post_amount", "postage", "freight_price"),
+                "amount_paid": ("pay_amount", "payment"),
+            }
             if platform == "doudian":
                 # Our own get_order_list projects pay_amount as amount (fen).
                 # This alias is scoped to Doudian, never inferred globally.
@@ -653,8 +760,12 @@ class Normalizer:
                 _warn(r.warnings, prefix, "object_invalid")
                 continue
             item = OrderItem(
-                product_id=r.identifier(_first(value, "product_id", "item_id", "goods_id", "skuId"), f"{prefix}.product_id"),
-                product_name=str(_first(value, "product_name", "item_name", "goods_name", "title", "skuName", default="")),
+                product_id=r.identifier(
+                    _first(value, "product_id", "item_id", "goods_id", "skuId"), f"{prefix}.product_id"
+                ),
+                product_name=str(
+                    _first(value, "product_name", "item_name", "goods_name", "title", "skuName", default="")
+                ),
                 sku_id=r.identifier(_first(value, "sku_id", "outerSkuId"), f"{prefix}.sku_id"),
                 sku_name=str(_first(value, "sku_name", "spec_desc", "spec", default="")),
                 price=r.amount(value, ("price", "sale_price", "item_price", "salePrice", "jdPrice"), f"{prefix}.price"),
@@ -674,13 +785,18 @@ class Normalizer:
         r = self._record(raw, platform)
         result = UnifiedProduct(
             product_id=r.identifier(_first(raw, "product_id", "goods_id", "item_id", "wareId"), "product_id"),
-            platform=platform, name=str(_first(raw, "product_name", "goods_name", "item_name", "title", default="")),
-            status=self._map_product_status(_first(raw, "product_status", "goods_status", "is_onsale", "status"), platform),
+            platform=platform,
+            name=str(_first(raw, "product_name", "goods_name", "item_name", "title", default="")),
+            status=self._map_product_status(
+                _first(raw, "product_status", "goods_status", "is_onsale", "status"), platform
+            ),
             category=str(raw.get("category_name", "")),
             price_min=r.amount(raw, ("min_price", "min_group_price"), "price_min"),
             price_max=r.amount(raw, ("max_price", "market_price"), "price_max"),
             stock=r.integer(_first(raw, "stock", "stock_num", default=0), "stock", 0),
-            sold_count=r.integer(_first(raw, "sold_count", "sold_quantity", "total_sold_num", default=0), "sold_count", 0),
+            sold_count=r.integer(
+                _first(raw, "sold_count", "sold_quantity", "total_sold_num", default=0), "sold_count", 0
+            ),
             rating=r.number(_first(raw, "rating", "dsr_score", default=0), "rating"),
             rating_count=r.integer(raw.get("rating_count", 0), "rating_count", 0),
             images=r.array(_first(raw, "images", "head_imgs", default=[]), "images"),
@@ -690,10 +806,14 @@ class Normalizer:
             if not isinstance(value, dict):
                 _warn(r.warnings, f"skus[{i}]", "object_invalid")
                 continue
-            result.skus.append(ProductSku(sku_id=r.identifier(value.get("sku_id"), f"skus[{i}].sku_id"),
-                spec=str(_first(value, "spec", "spec_desc", default="")),
-                price=r.amount(value, ("price", "sale_price"), f"skus[{i}].price"),
-                stock=r.integer(_first(value, "stock", "stock_num", default=0), f"skus[{i}].stock", 0)))
+            result.skus.append(
+                ProductSku(
+                    sku_id=r.identifier(value.get("sku_id"), f"skus[{i}].sku_id"),
+                    spec=str(_first(value, "spec", "spec_desc", default="")),
+                    price=r.amount(value, ("price", "sale_price"), f"skus[{i}].price"),
+                    stock=r.integer(_first(value, "stock", "stock_num", default=0), f"skus[{i}].stock", 0),
+                )
+            )
         return r.attach(result)
 
     def normalize_products(self, raw_list: list[dict], platform: str) -> list[UnifiedProduct]:
@@ -714,7 +834,8 @@ class Normalizer:
         result = UnifiedRefund(
             refund_id=r.identifier(_first(raw, "refund_id", "after_sale_order_id", "afsNo"), "refund_id"),
             order_id=r.identifier(_first(raw, "order_id", "order_sn", "orderId"), "order_id"),
-            shop_id=r.identifier(_first(raw, "shop_id", "mall_id"), "shop_id"), platform=platform,
+            shop_id=r.identifier(_first(raw, "shop_id", "mall_id"), "shop_id"),
+            platform=platform,
             status=normalize_refund_status(_first(raw, "refund_status", "status", "orderState"), platform),
             type=normalize_refund_type(_first(raw, "refund_type", "type", "serviceType"), platform),
             amount=r.amount(prices, ("refund_amount", "amount"), "amount"),
@@ -734,15 +855,20 @@ class Normalizer:
     def normalize_review(self, raw: dict, platform: str) -> UnifiedReview:
         platform = normalize_platform(platform)
         r = self._record(raw, platform)
-        return r.attach(UnifiedReview(
-            review_id=r.identifier(_first(raw, "review_id", "comment_id"), "review_id"),
-            product_id=r.identifier(_first(raw, "product_id", "item_id", "goods_id"), "product_id"),
-            order_id=r.identifier(_first(raw, "order_id", "order_sn"), "order_id"), platform=platform,
-            score=r.integer(raw.get("score", 0), "score", 0),
-            content=str(_first(raw, "content", "comment", default="")),
-            images=r.array(_first(raw, "images", "pic_urls", default=[]), "images"),
-            user_name=str(_first(raw, "user_name", "buyer_nick", default="")), reply=str(raw.get("reply", "")),
-            created_at=r.time(_first(raw, "create_time", "comment_time", "created_at"), "created_at")))
+        return r.attach(
+            UnifiedReview(
+                review_id=r.identifier(_first(raw, "review_id", "comment_id"), "review_id"),
+                product_id=r.identifier(_first(raw, "product_id", "item_id", "goods_id"), "product_id"),
+                order_id=r.identifier(_first(raw, "order_id", "order_sn"), "order_id"),
+                platform=platform,
+                score=r.integer(raw.get("score", 0), "score", 0),
+                content=str(_first(raw, "content", "comment", default="")),
+                images=r.array(_first(raw, "images", "pic_urls", default=[]), "images"),
+                user_name=str(_first(raw, "user_name", "buyer_nick", default="")),
+                reply=str(raw.get("reply", "")),
+                created_at=r.time(_first(raw, "create_time", "comment_time", "created_at"), "created_at"),
+            )
+        )
 
     def normalize_reviews(self, raw_list: list[dict], platform: str) -> list[UnifiedReview]:
         return [self.normalize_review(raw, platform) for raw in raw_list]
@@ -751,13 +877,28 @@ class Normalizer:
         platform = normalize_platform(platform)
         r = self._record(raw, platform)
         scores = r.mapping(_first(raw, "scores", "dsr", default={}), "scores")
-        return r.attach(UnifiedShop(
-            shop_id=r.identifier(_first(raw, "shop_id", "mall_id"), "shop_id"),
-            shop_name=str(_first(raw, "shop_name", "mall_name", default="")), platform=platform,
-            type=str(_first(raw, "shop_type", "merchant_type", default="")),
-            status=str(_first(raw, "shop_status", "status", default="")),
-            score_overall=r.number(_first(scores, "overall", "dsr_score", default=raw.get("dsr_score", 0)), "score_overall"),
-            score_product=r.number(_first(scores, "product", "itemScore", default=raw.get("itemScore", 0)), "score_product"),
-            score_service=r.number(_first(scores, "service", "serviceScore", default=raw.get("serviceScore", 0)), "score_service"),
-            score_logistics=r.number(_first(scores, "logistics", "logisticsScore", default=raw.get("logisticsScore", 0)), "score_logistics"),
-            product_count=r.integer(_first(raw, "product_count", "goods_onsale_count", default=0), "product_count", 0)))
+        return r.attach(
+            UnifiedShop(
+                shop_id=r.identifier(_first(raw, "shop_id", "mall_id"), "shop_id"),
+                shop_name=str(_first(raw, "shop_name", "mall_name", default="")),
+                platform=platform,
+                type=str(_first(raw, "shop_type", "merchant_type", default="")),
+                status=str(_first(raw, "shop_status", "status", default="")),
+                score_overall=r.number(
+                    _first(scores, "overall", "dsr_score", default=raw.get("dsr_score", 0)), "score_overall"
+                ),
+                score_product=r.number(
+                    _first(scores, "product", "itemScore", default=raw.get("itemScore", 0)), "score_product"
+                ),
+                score_service=r.number(
+                    _first(scores, "service", "serviceScore", default=raw.get("serviceScore", 0)), "score_service"
+                ),
+                score_logistics=r.number(
+                    _first(scores, "logistics", "logisticsScore", default=raw.get("logisticsScore", 0)),
+                    "score_logistics",
+                ),
+                product_count=r.integer(
+                    _first(raw, "product_count", "goods_onsale_count", default=0), "product_count", 0
+                ),
+            )
+        )

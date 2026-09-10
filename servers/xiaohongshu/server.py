@@ -13,7 +13,7 @@ import json
 import os
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 from mcp.server.mcpserver import MCPServer
 
@@ -43,8 +43,10 @@ class XiaohongshuMCP(CommerceMCPBase):
     def _sign(self, params: dict) -> str:
         # Official OAuth v2 protocol signs only these system fields, never
         # accessToken or business data. The digest is lower-case hexadecimal.
-        raw = (f"{params['method']}?appId={params['appId']}"
-               f"&timestamp={params['timestamp']}&version={params['version']}{self.app_secret}")
+        raw = (
+            f"{params['method']}?appId={params['appId']}"
+            f"&timestamp={params['timestamp']}&version={params['version']}{self.app_secret}"
+        )
         return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
     @staticmethod
@@ -57,7 +59,7 @@ class XiaohongshuMCP(CommerceMCPBase):
             dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone(timedelta(hours=8)))
-            delta = dt - datetime(1970, 1, 1, tzinfo=timezone.utc)
+            delta = dt - datetime(1970, 1, 1, tzinfo=UTC)
             millis = (delta.days * 86400 + delta.seconds) * 1000 + delta.microseconds // 1000
         return millis if milliseconds else millis // 1000
 
@@ -127,21 +129,44 @@ class XiaohongshuMCP(CommerceMCPBase):
             return "afterSale.listAfterSaleInfos", result
         result["pageNum"] = result.pop("pageNo")
         if params.get("bill_type"):
-            valid = {"RECHARGE", "STATEMENT_IN", "STATEMENT_REFUND", "PAY_SUCCESS", "BOUNCE",
-                     "SELLER_FINE", "REFUND", "LOGISTIC_OUT", "MANUAL_ADJUST_STATEMENT", "TRANSFER_IN",
-                     "TRANSFER_OUT", "CUSTOMER_SERVICE_FEE", "MESSAGE_FEE", "INVOICE_SEND",
-                     "COMMISION_RETURN", "OTHER_IN", "OTHER_OUT"}
+            valid = {
+                "RECHARGE",
+                "STATEMENT_IN",
+                "STATEMENT_REFUND",
+                "PAY_SUCCESS",
+                "BOUNCE",
+                "SELLER_FINE",
+                "REFUND",
+                "LOGISTIC_OUT",
+                "MANUAL_ADJUST_STATEMENT",
+                "TRANSFER_IN",
+                "TRANSFER_OUT",
+                "CUSTOMER_SERVICE_FEE",
+                "MESSAGE_FEE",
+                "INVOICE_SEND",
+                "COMMISION_RETURN",
+                "OTHER_IN",
+                "OTHER_OUT",
+            }
             types = [value.strip() for value in str(params["bill_type"]).split(",")]
             if any(value not in valid for value in types):
-                raise ValueError("bill_type must contain official tradeTypes names, e.g. STATEMENT_IN or STATEMENT_REFUND")
+                raise ValueError(
+                    "bill_type must contain official tradeTypes names, e.g. STATEMENT_IN or STATEMENT_REFUND"
+                )
             result["tradeTypes"] = types
         return "finance.querySellerAccountRecords", result
 
     async def _call(self, method: str, path: str, biz_params: dict | None = None) -> dict:
         """Translate a legacy local alias and POST the verified official contract."""
-        missing = [name for name, value in (
-            ("XHS_CLIENT_ID", self.app_key), ("XHS_CLIENT_SECRET", self.app_secret),
-            ("XHS_ACCESS_TOKEN", self.access_token)) if not value]
+        missing = [
+            name
+            for name, value in (
+                ("XHS_CLIENT_ID", self.app_key),
+                ("XHS_CLIENT_SECRET", self.app_secret),
+                ("XHS_ACCESS_TOKEN", self.access_token),
+            )
+            if not value
+        ]
         if missing:
             raise ConfigValidationError("XHS", missing)
         if method.upper() not in {"GET", "POST"}:
@@ -152,8 +177,11 @@ class XiaohongshuMCP(CommerceMCPBase):
 
         def prepare_request():
             payload = {
-                **business, "appId": self.app_key, "method": api_method,
-                "timestamp": str(int(time.time())), "version": "2.0",
+                **business,
+                "appId": self.app_key,
+                "method": api_method,
+                "timestamp": str(int(time.time())),
+                "version": "2.0",
                 "accessToken": self.access_token,
             }
             payload["sign"] = self._sign(payload)
@@ -174,8 +202,12 @@ class XiaohongshuMCP(CommerceMCPBase):
             return result
 
         return await self._send_request(
-            "POST", self.BASE_URL, endpoint=api_method, prepare_request=prepare_request,
-            retry_config=DEFAULT_RETRY, parse_response=parse_response,
+            "POST",
+            self.BASE_URL,
+            endpoint=api_method,
+            prepare_request=prepare_request,
+            retry_config=DEFAULT_RETRY,
+            parse_response=parse_response,
         )
 
 

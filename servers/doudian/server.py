@@ -129,14 +129,15 @@ class DouDianClient(CommerceMCPBase):
                 return int(value)
             return value
 
-        return json.dumps(normalize(params), sort_keys=True, separators=(",", ":"),
-                          ensure_ascii=False, allow_nan=False)
+        return json.dumps(normalize(params), sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
 
     def _sign(self, params: dict[str, Any]) -> str:
         """Sign app_key, method, param_json, timestamp and v in that order."""
-        raw = self.app_secret + "".join(
-            f"{key}{params[key]}" for key in ("app_key", "method", "param_json", "timestamp", "v")
-        ) + self.app_secret
+        raw = (
+            self.app_secret
+            + "".join(f"{key}{params[key]}" for key in ("app_key", "method", "param_json", "timestamp", "v"))
+            + self.app_secret
+        )
         return hmac.new(self.app_secret.encode(), raw.encode(), hashlib.sha256).hexdigest()
 
     # ── Request ─────────────────────────────────────────
@@ -147,10 +148,16 @@ class DouDianClient(CommerceMCPBase):
         params: dict | None = None,
     ) -> dict[str, Any]:
         """POST canonical business JSON with OAuth and signed public query fields."""
-        missing = [name for name, value in (
-            ("DOUDIAN_APP_KEY", self.app_key), ("DOUDIAN_APP_SECRET", self.app_secret),
-            ("DOUDIAN_ACCESS_TOKEN", self.access_token), ("DOUDIAN_SHOP_ID", self.shop_id)
-        ) if not value]
+        missing = [
+            name
+            for name, value in (
+                ("DOUDIAN_APP_KEY", self.app_key),
+                ("DOUDIAN_APP_SECRET", self.app_secret),
+                ("DOUDIAN_ACCESS_TOKEN", self.access_token),
+                ("DOUDIAN_SHOP_ID", self.shop_id),
+            )
+            if not value
+        ]
         if missing:
             raise ConfigError(f"Missing required environment variables: {', '.join(missing)}")
         params = params or {}
@@ -161,28 +168,38 @@ class DouDianClient(CommerceMCPBase):
 
         def prepare_request():
             common = {
-                "app_key": self.app_key, "method": api_method,
-                "timestamp": str(int(time.time())), "v": "2",
-                "sign_method": self.sign_method, "access_token": self.access_token,
+                "app_key": self.app_key,
+                "method": api_method,
+                "timestamp": str(int(time.time())),
+                "v": "2",
+                "sign_method": self.sign_method,
+                "access_token": self.access_token,
             }
             common["sign"] = self._sign({**common, "param_json": param_json})
-            return {"params": common, "content": param_json.encode("utf-8"),
-                    "headers": {"Content-Type": "application/json"}}
+            return {
+                "params": common,
+                "content": param_json.encode("utf-8"),
+                "headers": {"Content-Type": "application/json"},
+            }
 
         def parse_response(result):
             error_code = result.get("code", 10000)
             if str(error_code) != "10000":
                 raise DouDianAPIError(
-                    code=error_code, msg=result.get("msg", "unknown error"),
+                    code=error_code,
+                    msg=result.get("msg", "unknown error"),
                     sub_code=str(result.get("sub_code", "")),
                     sub_msg=result.get("sub_msg", ""),
                 )
             return result.get("data", result)
 
         return await self._send_request(
-            "POST", f"{self.BASE_URL.rstrip('/')}/{method.lstrip('/')}",
-            endpoint=method, prepare_request=prepare_request,
-            retry_config=DEFAULT_RETRY, parse_response=parse_response,
+            "POST",
+            f"{self.BASE_URL.rstrip('/')}/{method.lstrip('/')}",
+            endpoint=method,
+            prepare_request=prepare_request,
+            retry_config=DEFAULT_RETRY,
+            parse_response=parse_response,
         )
 
 

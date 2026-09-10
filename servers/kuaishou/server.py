@@ -75,9 +75,11 @@ class KuaishouMCP(CommerceMCPBase):
 
     async def _call(self, path: str, params: dict | None = None) -> dict[str, Any]:
         """Make a signed GET request to a Kuaishou API path."""
-        missing = [f"KUAISHOU_{name.upper()}" for name in
-                   ("app_key", "app_secret", "sign_secret", "access_token")
-                   if not getattr(self, name)]
+        missing = [
+            f"KUAISHOU_{name.upper()}"
+            for name in ("app_key", "app_secret", "sign_secret", "access_token")
+            if not getattr(self, name)
+        ]
         if missing:
             raise ConfigValidationError("KUAISHOU", missing)
         return await self._request("GET", path, params=params, retry_config=DEFAULT_RETRY)

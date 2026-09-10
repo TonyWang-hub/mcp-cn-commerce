@@ -460,7 +460,7 @@ async def test_get_order_list_returns_orders_with_correct_fields(mock_request, o
 
     result_json = await get_order_list(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
+        end_time="2024-01-07 23:59:59",
     )
     result = json.loads(result_json)
 
@@ -480,9 +480,8 @@ async def test_get_order_list_returns_orders_with_correct_fields(mock_request, o
         "POST",
         "/channels/ec/order/list/get",
         data={
-            "start_create_time": "2024-01-01 00:00:00",
-            "end_create_time": "2024-01-31 23:59:59",
-            "page": 1,
+            "create_time_range": {"start_time": 1704038400, "end_time": 1704643199},
+            "next_key": "",
             "page_size": 20,
         },
     )
@@ -495,7 +494,7 @@ async def test_get_order_list_with_status_filter(mock_request, order_list_payloa
 
     await get_order_list(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
+        end_time="2024-01-07 23:59:59",
         order_status="20",
     )
 
@@ -510,7 +509,7 @@ async def test_get_order_list_without_status_omits_field(mock_request, order_lis
 
     await get_order_list(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
+        end_time="2024-01-07 23:59:59",
         order_status="",
     )
 
@@ -893,7 +892,7 @@ async def test_api_error_propagates(mock_request):
     with pytest.raises(CommerceAPIError) as exc_info:
         await get_order_list(
             start_time="2024-01-01 00:00:00",
-            end_time="2024-01-31 23:59:59",
+            end_time="2024-01-07 23:59:59",
         )
 
     assert exc_info.value.code == 40001
@@ -948,7 +947,7 @@ async def test_output_is_valid_json_string(mock_request, order_list_payload):
 
     result = await get_order_list(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
+        end_time="2024-01-07 23:59:59",
     )
 
     assert isinstance(result, str)
@@ -994,11 +993,11 @@ async def test_pagination_default_page_and_size(mock_request, order_list_payload
 
     await get_order_list(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
+        end_time="2024-01-07 23:59:59",
     )
 
     kwargs = mock_request.call_args[1]
-    assert kwargs["data"]["page"] == 1
+    assert kwargs["data"]["next_key"] == ""
     assert kwargs["data"]["page_size"] == 20
 
 
@@ -1009,13 +1008,13 @@ async def test_pagination_custom_page(mock_request, order_list_payload):
 
     await get_order_list(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-        page=3,
+        end_time="2024-01-07 23:59:59",
+        next_key="cursor-page-3",
         page_size=50,
     )
 
     kwargs = mock_request.call_args[1]
-    assert kwargs["data"]["page"] == 3
+    assert kwargs["data"]["next_key"] == "cursor-page-3"
     assert kwargs["data"]["page_size"] == 50
 
 

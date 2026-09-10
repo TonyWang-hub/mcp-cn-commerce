@@ -994,7 +994,7 @@ class TestSensitiveDataFilter:
         )
         result = f.filter(record)
         assert result is True
-        assert record.msg == 42
+        assert record.getMessage() == "42"
 
 
 # ── validate_platform_name Tests ───────────────────────────
@@ -1046,7 +1046,9 @@ class TestValidateApiParam:
     def test_valid_param(self):
         assert validate_api_param("page", "1") == "1"
 
-    @pytest.mark.parametrize("value", ["hello world", "SELECT coffee", "DROP shoulder shirt", "CREATE collection", "商品 -- 新款"])
+    @pytest.mark.parametrize(
+        "value", ["hello world", "SELECT coffee", "DROP shoulder shirt", "CREATE collection", "商品 -- 新款"]
+    )
     def test_normal_string(self, value):
         assert validate_api_param("name", value) == value
 

@@ -55,8 +55,6 @@ def mock_call():
         yield mock
 
 
-
-
 async def _assert_unsupported_tool(tool, *args, **kwargs):
     # Keep the production adapter active: mocking _call would hide an invented API.
     with patch.object(xhs, "_send_request", new_callable=AsyncMock) as send:
@@ -718,7 +716,7 @@ async def test_get_logistics_tracking_returns_tracking_nodes(mock_call, logistic
 
 @pytest.mark.asyncio
 async def test_get_review_list_reports_unsupported_before_http():
-    await _assert_unsupported_tool(get_review_list, product_id='5f8a9b2c3d4e5f6a7b8c9d0e')
+    await _assert_unsupported_tool(get_review_list, product_id="5f8a9b2c3d4e5f6a7b8c9d0e")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -753,7 +751,7 @@ async def test_list_coupons_reports_unsupported_before_http():
 
 @pytest.mark.asyncio
 async def test_list_coupons_status_cannot_bypass_unsupported_api():
-    await _assert_unsupported_tool(list_coupons, status='1')
+    await _assert_unsupported_tool(list_coupons, status="1")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -966,7 +964,7 @@ async def test_pagination_product_list_defaults(mock_call, product_list_payload)
 
 @pytest.mark.asyncio
 async def test_review_pagination_cannot_bypass_unsupported_api():
-    await _assert_unsupported_tool(get_review_list, product_id='5f8a9b2c3d4e5f6a7b8c9d0e', page=2, page_size=10)
+    await _assert_unsupported_tool(get_review_list, product_id="5f8a9b2c3d4e5f6a7b8c9d0e", page=2, page_size=10)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════

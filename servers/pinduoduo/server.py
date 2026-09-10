@@ -47,9 +47,15 @@ class PinduoduoMCP(CommerceMCPBase):
         access_token), merges business params, signs with MD5, and POSTs
         as form data.
         """
-        missing = [name for name, value in (
-            ("PINDUODUO_CLIENT_ID", self.app_key), ("PINDUODUO_CLIENT_SECRET", self.app_secret),
-            ("PINDUODUO_ACCESS_TOKEN", self.access_token)) if not value]
+        missing = [
+            name
+            for name, value in (
+                ("PINDUODUO_CLIENT_ID", self.app_key),
+                ("PINDUODUO_CLIENT_SECRET", self.app_secret),
+                ("PINDUODUO_ACCESS_TOKEN", self.access_token),
+            )
+            if not value
+        ]
         if missing:
             raise ConfigValidationError("PINDUODUO", missing)
         if self.validate_input:
@@ -84,8 +90,12 @@ class PinduoduoMCP(CommerceMCPBase):
             return result
 
         return await self._send_request(
-            "POST", self.BASE_URL, endpoint=api_type, prepare_request=prepare_request,
-            retry_config=DEFAULT_RETRY, parse_response=parse_response,
+            "POST",
+            self.BASE_URL,
+            endpoint=api_type,
+            prepare_request=prepare_request,
+            retry_config=DEFAULT_RETRY,
+            parse_response=parse_response,
         )
 
 

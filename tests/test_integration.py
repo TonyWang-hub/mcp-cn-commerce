@@ -644,15 +644,17 @@ class TestConfigLoadingIntegration:
         assert config["servers"] == ["oceanengine", "jd"]
         assert config["verbose"] is True
 
-    def test_load_config_missing_file_returns_empty(self):
-        """load_config returns empty dict for nonexistent path."""
-        assert load_config("/nonexistent/path.json") == {}
+    def test_load_config_missing_file_raises(self):
+        """An explicitly selected missing file must not silently lose credentials."""
+        with pytest.raises(ValueError, match="not found"):
+            load_config("/nonexistent/path.json")
 
-    def test_load_config_invalid_json_returns_empty(self, tmp_path):
-        """load_config returns empty dict for invalid JSON."""
+    def test_load_config_invalid_json_raises(self, tmp_path):
+        """Invalid explicit configuration fails visibly."""
         cfg = tmp_path / "bad.json"
         cfg.write_text("{broken json")
-        assert load_config(str(cfg)) == {}
+        with pytest.raises(ValueError, match="Cannot read"):
+            load_config(str(cfg))
 
     def test_load_config_none_path(self):
         """load_config with None path tries defaults without crashing."""
@@ -906,7 +908,9 @@ class TestSecurityInputValidation:
     def test_sensitive_data_filter_integration(self):
         """SensitiveDataFilter masks JWT tokens in log record messages."""
         flt = SensitiveDataFilter()
-        record = MagicMock()
+        import logging
+
+        record = logging.LogRecord("test", logging.INFO, "", 0, "", (), None)
         record.msg = "Token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
         record.args = None
         flt.filter(record)
@@ -915,12 +919,21 @@ class TestSecurityInputValidation:
     def test_sensitive_data_filter_masks_args(self):
         """SensitiveDataFilter masks sensitive keys in record.args dict."""
         flt = SensitiveDataFilter()
-        record = MagicMock()
-        record.msg = "request params"
-        record.args = {"access_token": "abcdefghijklmnop", "page": "1"}
+        import logging
+
+        record = logging.LogRecord(
+            "test",
+            logging.INFO,
+            "",
+            0,
+            "access_token=%(access_token)s page=%(page)s",
+            ({"access_token": "abcdefghijklmnop", "page": "1"},),
+            None,
+        )
         flt.filter(record)
-        assert "****" in record.args["access_token"]
-        assert record.args["page"] == "1"
+        assert "abcdefghijklmnop" not in record.getMessage()
+        assert "****" in record.getMessage()
+        assert "page=1" in record.getMessage()
 
 
 # ====================================================================
@@ -1208,9 +1221,13 @@ class TestDouDianSigningIntegration:
         from servers.doudian.server import DouDianClient
 
         client = DouDianClient(app_key="dd_key", app_secret="dd_secret", access_token="tok", shop_id="shop")
-        params = {"app_key": "dd_key", "method": "order.list",
-                  "param_json": '{"order_id":"12345","page":0}',
-                  "timestamp": "123", "v": "2"}
+        params = {
+            "app_key": "dd_key",
+            "method": "order.list",
+            "param_json": '{"order_id":"12345","page":0}',
+            "timestamp": "123",
+            "v": "2",
+        }
         sig1 = client._sign(params)
         sig2 = client._sign(dict(reversed(list(params.items()))))
         assert sig1 == sig2
@@ -1238,9 +1255,13 @@ class TestDouDianSigningIntegration:
         assert request.content == b'{"empty":"","none_val":null,"order_id":"12345"}'
         assert request.url.params["method"] == "order.list"
         assert request.url.params["sign_method"] == "hmac-sha256"
-        canonical = ("dd_secretapp_keydd_keymethodorder.listparam_json"
-                     + request.content.decode() + "timestamp" + request.url.params["timestamp"]
-                     + "v2dd_secret")
+        canonical = (
+            "dd_secretapp_keydd_keymethodorder.listparam_json"
+            + request.content.decode()
+            + "timestamp"
+            + request.url.params["timestamp"]
+            + "v2dd_secret"
+        )
         expected = hmac.new(b"dd_secret", canonical.encode(), hashlib.sha256).hexdigest()
         assert request.url.params["sign"] == expected
 

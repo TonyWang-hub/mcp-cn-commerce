@@ -17,7 +17,9 @@ import json
 import os
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from mcp.server.mcpserver import MCPServer
 
@@ -31,6 +33,10 @@ from shared.cn_commerce_base import (
 )
 
 # ── WeChat Store client ───────────────────────────────────────────────────────
+
+
+STATIC_MODE = "static"
+MANAGED_MODE = "managed"
 
 
 class WeixinStoreMCP(CommerceMCPBase):
@@ -49,14 +55,17 @@ class WeixinStoreMCP(CommerceMCPBase):
     sign_method = ""  # No signing for WeChat Store
 
     def __init__(
-        self, app_key: str = "", app_secret: str = "", access_token: str = "",
+        self,
+        app_key: str = "",
+        app_secret: str = "",
+        access_token: str = "",
         token_mode: str | None = None,
     ):
         super().__init__(app_key=app_key, app_secret=app_secret, access_token=access_token)
         self.token_mode = token_mode or ("static" if access_token else "managed")
         if self.token_mode not in {"static", "managed"}:
             raise ValueError("WX_TOKEN_MODE must be static or managed")
-        self._access_token = access_token if self.token_mode == "static" else ""
+        self._access_token = access_token if self.token_mode == STATIC_MODE else ""
         self._token_expires_at = 0.0
         self._token_lock = asyncio.Lock()
 
@@ -68,21 +77,23 @@ class WeixinStoreMCP(CommerceMCPBase):
 
     async def _ensure_token(self) -> str:
         """Use an explicit token unchanged or serialize managed token refreshes."""
-        if self.token_mode == "static":
+        if self.token_mode == STATIC_MODE:
             if not self._access_token:
                 raise ConfigValidationError("WX", ["WX_ACCESS_TOKEN"])
             return self._access_token
-        missing = [name for name, value in (("WX_APP_ID", self.app_key),
-                   ("WX_APP_SECRET", self.app_secret)) if not value]
+        missing = [
+            name for name, value in (("WX_APP_ID", self.app_key), ("WX_APP_SECRET", self.app_secret)) if not value
+        ]
         if missing:
             raise ConfigValidationError("WX", missing)
         async with self._token_lock:
             if self._access_token and time.monotonic() < self._token_expires_at:
                 return self._access_token
             payload = await self._send_request(
-                "GET", f"{self.BASE_URL}/cgi-bin/token", endpoint="/cgi-bin/token",
-                params={"grant_type": "client_credential", "appid": self.app_key,
-                        "secret": self.app_secret},
+                "GET",
+                f"{self.BASE_URL}/cgi-bin/token",
+                endpoint="/cgi-bin/token",
+                params={"grant_type": "client_credential", "appid": self.app_key, "secret": self.app_secret},
                 parse_response=self._parse_response,
             )
             if not payload.get("access_token"):
@@ -95,8 +106,12 @@ class WeixinStoreMCP(CommerceMCPBase):
             return self._access_token
 
     async def _request(
-        self, method: str, path: str, params: dict | None = None,
-        data: dict | None = None, retry_config: RetryConfig | None = DEFAULT_RETRY,
+        self,
+        method: str,
+        path: str,
+        params: dict | None = None,
+        data: dict | None = None,
+        retry_config: RetryConfig | None = DEFAULT_RETRY,
     ) -> dict[str, Any]:
         """Use the shared pool, limits and metrics for read-only store APIs."""
         if self.validate_input:
@@ -106,22 +121,30 @@ class WeixinStoreMCP(CommerceMCPBase):
         query["access_token"] = token
         try:
             return await self._send_request(
-                method, f"{self.BASE_URL}{path}", endpoint=path, params=query,
+                method,
+                f"{self.BASE_URL}{path}",
+                endpoint=path,
+                params=query,
                 json_body=(data or {}) if method.upper() != "GET" else None,
-                retry_config=retry_config, parse_response=self._parse_response,
+                retry_config=retry_config,
+                parse_response=self._parse_response,
             )
         except CommerceAPIError as exc:
             # Only managed tokens can be refreshed automatically. Retry once.
-            if self.token_mode != "managed" or str(exc.code) not in {"40001", "40014", "42001"}:
+            if self.token_mode != MANAGED_MODE or str(exc.code) not in {"40001", "40014", "42001"}:
                 raise
             async with self._token_lock:
                 if self._access_token == token:
                     self._token_expires_at = 0.0
             query["access_token"] = await self._ensure_token()
             return await self._send_request(
-                method, f"{self.BASE_URL}{path}", endpoint=path, params=query,
+                method,
+                f"{self.BASE_URL}{path}",
+                endpoint=path,
+                params=query,
                 json_body=(data or {}) if method.upper() != "GET" else None,
-                retry_config=retry_config, parse_response=self._parse_response,
+                retry_config=retry_config,
+                parse_response=self._parse_response,
             )
 
 
@@ -132,13 +155,14 @@ def _create_weixin_store_client(*, strict: bool = True) -> WeixinStoreMCP:
     """Accept a static token OR app credentials for managed token renewal."""
     token = os.environ.get("WX_ACCESS_TOKEN", "")
     mode = os.environ.get("WX_TOKEN_MODE") or ("static" if token else "managed")
-    required = ["WX_ACCESS_TOKEN"] if mode == "static" else ["WX_APP_ID", "WX_APP_SECRET"]
+    required = ["WX_ACCESS_TOKEN"] if mode == STATIC_MODE else ["WX_APP_ID", "WX_APP_SECRET"]
     missing = [name for name in required if not os.environ.get(name)]
     if strict and missing:
         raise ConfigValidationError("WX", missing)
     return WeixinStoreMCP(
         app_key=os.environ.get("WX_APP_ID", ""),
-        app_secret=os.environ.get("WX_APP_SECRET", ""), access_token=token,
+        app_secret=os.environ.get("WX_APP_SECRET", ""),
+        access_token=token,
         token_mode=mode,
     )
 
@@ -175,27 +199,46 @@ async def get_order_list(
     order_status: str = "",
     page: int = 1,
     page_size: int = 20,
+    next_key: str = "",
+    time_type: str = "create",
 ) -> str:
-    """Query WeChat Store order list by time range and optional status.
+    """Query orders using a seconds-based time range and the returned cursor.
 
     Args:
-        start_time: Order start time, e.g. "2024-01-01 00:00:00"
-        end_time: Order end time, e.g. "2024-01-31 23:59:59"
-        order_status: Status filter. Common values:
-            10 (待付款), 20 (待发货), 30 (已发货), 50 (已完成), 100 (已关闭).
-            Empty string means all statuses.
-        page: Page number, starting from 1.
-        page_size: Number of orders per page (max 100).
+        start_time: ISO date/time (naive values use Asia/Shanghai).
+        end_time: ISO date/time, no more than 7 days after start_time.
+        order_status: Optional official status: 10, 12, 13, 20, 21, 30, 100 or 250.
+        page: Compatibility parameter; only 1 is accepted. Use next_key for subsequent pages.
+        page_size: Number of orders per page, 1 through 100.
+        next_key: Cursor returned by the previous response; empty on the first request.
+        time_type: create or update. Neither is a payment-date completeness guarantee.
     """
+    if page != 1:
+        raise ValueError("WeChat orders use next_key, not page numbers")
+    if not 1 <= page_size <= 100:
+        raise ValueError("page_size must be between 1 and 100")
+    if time_type not in {"create", "update"}:
+        raise ValueError("time_type must be create or update")
+
+    def seconds(value):
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+        return int(parsed.timestamp())
+
+    start, end = seconds(start_time), seconds(end_time)
+    if end < start or end - start > 7 * 86400:
+        raise ValueError("Order time range must be ordered and no more than 7 days")
     data: dict = {
-        "start_create_time": start_time,
-        "end_create_time": end_time,
-        "page": page,
+        f"{time_type}_time_range": {"start_time": start, "end_time": end},
         "page_size": page_size,
+        "next_key": next_key,
     }
     if order_status:
-        data["status"] = int(order_status)
-
+        status = int(order_status)
+        if status not in {10, 12, 13, 20, 21, 30, 100, 250}:
+            raise ValueError("Unknown WeChat order status")
+        data["status"] = status
     result = await _wx._request("POST", "/channels/ec/order/list/get", data=data)
     return json.dumps(result, ensure_ascii=False, indent=2)
 

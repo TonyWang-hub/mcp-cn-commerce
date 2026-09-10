@@ -57,3 +57,9 @@
 ## 数据输出
 
 平台工具保留原始响应契约。使用 build_daily_report 时，应先提取订单/退款列表，完成事件日期窗口内的全部分页，再提交 raw 或 normalized 记录和明确的 coverage。金额、时间、质量错误与日报口径见 [data-contracts.md](data-contracts.md) 和 [template-guide.md](template-guide.md)。
+
+## 本地续验补充（2026-09-10）
+
+- 淘宝 TOP 已使用 `session`、GMT+8 格式 timestamp，签名包含 `sign_method`，官方固定向量通过。系统字段放 query；错误由 MCP 报错传播，避免把请求失败呈现成成功数据。
+- 微信订单列表 `get_order_list` 新增 `next_key` 与 `time_type=create|update`；只保留 `page=1` 兼容参数，后续页必须传原响应游标。时间窗口最多7天，page_size为1–100，时间转换为秒。返回 `order_id_list` 时仍须查询订单详情。订单状态以官方枚举为准，100=完成、250=取消。
+- 京东、拼多多和快手的当前协议仍需确认；已发现的旧官方文档与现实现差异见 [官方证据](official-access-status.md#本地续验2026-09-10)。模拟测试通过不能消除这些接入卡点。

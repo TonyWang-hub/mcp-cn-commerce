@@ -42,7 +42,9 @@ def main() -> None:
             problems.append(f"{filename}: total must be {sum(counts.values())}")
     if problems:
         raise SystemExit("\n".join(problems))
-    print(f"Tool metadata consistent: {len(counts)} platforms, {common} common tools each, {sum(counts.values())} total.")
+    print(
+        f"Tool metadata consistent: {len(counts)} platforms, {common} common tools each, {sum(counts.values())} total."
+    )
 
 
 if __name__ == "__main__":

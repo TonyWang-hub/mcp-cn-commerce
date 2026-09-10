@@ -286,8 +286,10 @@ class MonitoringDashboard:
             webhook_manager: Optional WebhookManager instance.
             cache_max_entries: Maximum cache entries for CacheStatsTracker.
         """
-        if any(not isinstance(capacity, int) or isinstance(capacity, bool) or capacity < 1
-               for capacity in (max_alerts, max_alert_rules)):
+        if any(
+            not isinstance(capacity, int) or isinstance(capacity, bool) or capacity < 1
+            for capacity in (max_alerts, max_alert_rules)
+        ):
             raise ValueError("Alert and rule capacities must be positive integers")
         self._max_alerts = max_alerts
         self._max_alert_rules = max_alert_rules
@@ -403,16 +405,24 @@ class MonitoringDashboard:
                         active.last_seen = now
                         del self._active_alerts[key]
                     continue
-                message = (f"{rule.metric_name} = {value} "
-                           f"{'>' if rule.direction == 'above' else '<'} threshold {rule.threshold}")
+                message = (
+                    f"{rule.metric_name} = {value} "
+                    f"{'>' if rule.direction == 'above' else '<'} threshold {rule.threshold}"
+                )
                 if active is not None:
                     active.metric_value = value
                     active.message = message
                     active.last_seen = now
                     continue
-                alert = DashboardAlert(severity=rule.severity, message=message,
-                                       metric_name=rule.metric_name, metric_value=value,
-                                       threshold=rule.threshold, timestamp=now, last_seen=now)
+                alert = DashboardAlert(
+                    severity=rule.severity,
+                    message=message,
+                    metric_name=rule.metric_name,
+                    metric_value=value,
+                    threshold=rule.threshold,
+                    timestamp=now,
+                    last_seen=now,
+                )
                 self._active_alerts[key] = alert
                 self._alerts.append(alert)
                 if len(self._alerts) > self._max_alerts:

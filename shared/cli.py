@@ -124,12 +124,7 @@ def load_config(config_path: str | None = None) -> dict[str, Any]:
             raise ValueError("Invalid configuration log_level")
         env = config.get("env", {})
         if not isinstance(env, dict) or any(
-            not isinstance(k, str)
-            or not k
-            or "=" in k
-            or "\0" in k
-            or not isinstance(v, str)
-            or "\0" in v
+            not isinstance(k, str) or not k or "=" in k or "\0" in k or not isinstance(v, str) or "\0" in v
             for k, v in env.items()
         ):
             raise ValueError("Configuration env must map variable names to string values")

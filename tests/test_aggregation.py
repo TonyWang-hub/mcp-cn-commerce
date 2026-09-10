@@ -1,4 +1,5 @@
 """Report contract regressions with multi-shop, pagination and partial data."""
+
 import copy
 import unittest
 from dataclasses import asdict
@@ -6,25 +7,45 @@ from dataclasses import asdict
 from shared.aggregation import build_daily_report
 from shared.normalizer import OrderItem, UnifiedOrder, UnifiedRefund
 
-
 TODAY = "2026-09-10"
 YESTERDAY = "2026-09-09"
 
 
 def shop(platform="doudian", shop_id="one"):
-    return {"platform": platform, "shop_id": shop_id, "shop_name": shop_id,
-            "orders": [], "refunds": [],
-            "coverage": {day: {"orders": True, "refunds": True} for day in (TODAY, YESTERDAY)}}
+    return {
+        "platform": platform,
+        "shop_id": shop_id,
+        "shop_name": shop_id,
+        "orders": [],
+        "refunds": [],
+        "coverage": {day: {"orders": True, "refunds": True} for day in (TODAY, YESTERDAY)},
+    }
 
 
 def order(order_id="o1", amount=1999, paid_at="2026-09-10T00:30:00+08:00", platform="doudian"):
-    return asdict(UnifiedOrder(order_id=order_id, platform=platform, status="paid", amount_paid=amount,
-                             paid_at=paid_at, items=[OrderItem(product_id="p1", product_name="Product", price=amount, quantity=1)]))
+    return asdict(
+        UnifiedOrder(
+            order_id=order_id,
+            platform=platform,
+            status="paid",
+            amount_paid=amount,
+            paid_at=paid_at,
+            items=[OrderItem(product_id="p1", product_name="Product", price=amount, quantity=1)],
+        )
+    )
 
 
 def refund(refund_id="r1", order_id="o1", amount=299, completed_at="2026-09-10T12:00:00+08:00"):
-    return asdict(UnifiedRefund(refund_id=refund_id, order_id=order_id, platform="doudian", amount=amount,
-                              status="completed", completed_at=completed_at))
+    return asdict(
+        UnifiedRefund(
+            refund_id=refund_id,
+            order_id=order_id,
+            platform="doudian",
+            amount=amount,
+            status="completed",
+            completed_at=completed_at,
+        )
+    )
 
 
 def report(shops):
@@ -159,8 +180,9 @@ class AggregationTests(unittest.TestCase):
         for identifier in (False, True, {}, [], 1.5, None):
             a = shop()
             a["input_format"] = "raw"
-            a["orders"] = [{"order_id": identifier, "order_status": 2,
-                            "pay_amount": 100, "pay_time": "2026-09-10 12:00:00"}]
+            a["orders"] = [
+                {"order_id": identifier, "order_status": 2, "pay_amount": 100, "pay_time": "2026-09-10 12:00:00"}
+            ]
             result = report([a])
             self.assertFalse(result["complete"])
             self.assertIsNone(result["total_summary"]["gmv"])
@@ -207,9 +229,13 @@ class DoudianProjectionContractTests(unittest.IsolatedAsyncioTestCase):
                 definitions.append(node)
         self.assertEqual(len(definitions), 2)
         client = SimpleNamespace(request=AsyncMock(return_value=copy.deepcopy(response)))
-        namespace = {"Any": Any, "_get_client": lambda: client,
-                     "DouDianAPIError": RuntimeError, "ConfigError": ValueError,
-                     "logger": logging.getLogger(__name__)}
+        namespace = {
+            "Any": Any,
+            "_get_client": lambda: client,
+            "DouDianAPIError": RuntimeError,
+            "ConfigError": ValueError,
+            "logger": logging.getLogger(__name__),
+        }
         exec(compile(ast.Module(body=definitions, type_ignores=[]), str(source_path), "exec"), namespace)
         projected = await namespace[tool_name](**arguments)
         self.assertNotIn("error", projected)
@@ -217,11 +243,18 @@ class DoudianProjectionContractTests(unittest.IsolatedAsyncioTestCase):
         return projected
 
     async def test_actual_order_list_and_detail_projections_feed_daily_report(self):
-        upstream = {"order_id": "projected-order", "order_status": 2,
-                    "pay_amount": 1000, "post_amount": 0, "total_amount": 1000,
-                    "create_time": "2026-09-10 09:00:00", "pay_time": "2026-09-10 09:30:00",
-                    "product_info": {"list": [{"product_id": "projected-product", "product_name": "Projected",
-                                                "price": 500, "combo_num": 2}]}}
+        upstream = {
+            "order_id": "projected-order",
+            "order_status": 2,
+            "pay_amount": 1000,
+            "post_amount": 0,
+            "total_amount": 1000,
+            "create_time": "2026-09-10 09:00:00",
+            "pay_time": "2026-09-10 09:30:00",
+            "product_info": {
+                "list": [{"product_id": "projected-product", "product_name": "Projected", "price": 500, "combo_num": 2}]
+            },
+        }
         listing = await self._project("get_order_list", {"list": [upstream], "total": 1})
         detail = await self._project("get_order_detail", {"detail": upstream}, order_id="projected-order")
         for projected in (listing["orders"][0], detail["order"]):
@@ -237,9 +270,15 @@ class DoudianProjectionContractTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["shops"][0]["top_products"][0]["gross_item_amount"], 1000)
 
     async def test_actual_refund_projection_requires_real_completion_time(self):
-        upstream = {"refund_id": "projected-refund", "order_id": "o1", "status": 3,
-                    "refund_type": "仅退款", "refund_amount": 299,
-                    "create_time": "2026-09-09 10:00:00", "update_time": "2026-09-10 12:00:00"}
+        upstream = {
+            "refund_id": "projected-refund",
+            "order_id": "o1",
+            "status": 3,
+            "refund_type": "仅退款",
+            "refund_amount": 299,
+            "create_time": "2026-09-09 10:00:00",
+            "update_time": "2026-09-10 12:00:00",
+        }
         for completed_field in ("completed_at", "refund_time", "success_time", None):
             source = dict(upstream)
             if completed_field:
@@ -256,4 +295,6 @@ class DoudianProjectionContractTests(unittest.IsolatedAsyncioTestCase):
             else:
                 self.assertFalse(result["complete"])
                 self.assertIsNone(result["total_summary"]["refund_count"])
-                self.assertIn("refund_completed_timestamp_unknown", [error["code"] for error in result["shops"][0]["errors"]])
+                self.assertIn(
+                    "refund_completed_timestamp_unknown", [error["code"] for error in result["shops"][0]["errors"]]
+                )

@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from mcp.server.mcpserver.exceptions import ToolError
 
 # ── Security: Sensitive Data Masking ─────────────────────
 
@@ -45,8 +46,7 @@ _SENSITIVE_KEY_PATTERN = (
 )
 _SENSITIVE_FIELD_PATTERNS = re.compile(_SENSITIVE_KEY_PATTERN, re.IGNORECASE)
 _SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
-    r"(?P<key>[\"']?(?:" + _SENSITIVE_KEY_PATTERN + r")[\"']?\s*[:=]\s*)"
-    r"(?P<value>\"[^\"]*\"|'[^']*'|[^\s&,;}]+)",
+    r"(?P<key>[\"']?(?:" + _SENSITIVE_KEY_PATTERN + r")[\"']?\s*[:=]\s*)" r"(?P<value>\"[^\"]*\"|'[^']*'|[^\s&,;}]+)",
     re.IGNORECASE,
 )
 
@@ -409,7 +409,7 @@ class SignMethod:
     HMAC_MD5: str = "hmac_md5"
 
 
-class ConfigValidationError(Exception):
+class ConfigValidationError(ToolError):
     """Raised when required configuration is missing."""
 
     def __init__(self, platform: str, missing_vars: list[str]) -> None:
@@ -2933,9 +2933,7 @@ class CommerceMCPBase:
         if retry_config and retry_config.max_retries < 0:
             raise ValueError("max_retries cannot be negative")
         attempts = retry_config.max_retries + 1 if retry_config else 1
-        span = self._tracer.start_span(
-            f"{method} {endpoint}", attributes={"method": method, "path": endpoint}
-        )
+        span = self._tracer.start_span(f"{method} {endpoint}", attributes={"method": method, "path": endpoint})
         final_status = "error"
         try:
             for attempt in range(attempts):
@@ -2982,8 +2980,11 @@ class CommerceMCPBase:
                     else:
                         code = 0
                     self.metrics.record_request(
-                        endpoint, (time.monotonic() - started) * 1000,
-                        success=False, error_code=code, error_msg=mask_log_message(str(exc)),
+                        endpoint,
+                        (time.monotonic() - started) * 1000,
+                        success=False,
+                        error_code=code,
+                        error_msg=mask_log_message(str(exc)),
                     )
                     if not retry_config or not retry_config.should_retry_exception(exc) or attempt + 1 == attempts:
                         raise
@@ -3008,7 +3009,11 @@ class CommerceMCPBase:
                         delay = max(delay, required_wait)
                     logger.warning(
                         "Retry %s/%s for %s after %.2fs: %s",
-                        attempt + 1, retry_config.max_retries, endpoint, delay, mask_log_message(str(exc)),
+                        attempt + 1,
+                        retry_config.max_retries,
+                        endpoint,
+                        delay,
+                        mask_log_message(str(exc)),
                     )
                     await asyncio.sleep(delay)
         except asyncio.CancelledError:
@@ -3054,7 +3059,8 @@ class CommerceMCPBase:
                 compressed, compression_headers = self._compressor.compress(body)
                 if compression_headers:
                     return {
-                        "params": signed, "content": compressed,
+                        "params": signed,
+                        "content": compressed,
                         "headers": {**compression_headers, "Content-Type": "application/json"},
                     }
             return {"params": signed, "json": data}
@@ -3068,8 +3074,12 @@ class CommerceMCPBase:
             return payload
 
         return await self._send_request(
-            method, f"{self.BASE_URL}{path}", endpoint=path,
-            retry_config=retry_config, prepare_request=prepare, parse_response=parse,
+            method,
+            f"{self.BASE_URL}{path}",
+            endpoint=path,
+            retry_config=retry_config,
+            prepare_request=prepare,
+            parse_response=parse,
         )
 
     # ── Input validation ──────────────────────────────────
@@ -3551,7 +3561,8 @@ class CommerceMCPBase:
             async with semaphore:
                 if fail_fast and cancelled.is_set():
                     return BatchResultItem(
-                        request_id=item.request_id, success=False,
+                        request_id=item.request_id,
+                        success=False,
                         error=RuntimeError("Skipped because fail_fast stopped pending requests"),
                     )
                 start = time.time()
@@ -5587,19 +5598,21 @@ class RequestRecord:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary."""
-        return mask_dict_sensitive_keys({
-            "record_id": self.record_id,
-            "method": self.method,
-            "path": self.path,
-            "params": self.params,
-            "data": self.data,
-            "response": self.response,
-            "status_code": self.status_code,
-            "latency_ms": round(self.latency_ms, 2),
-            "timestamp": self.timestamp,
-            "platform": self.platform,
-            "tags": self.tags,
-        })
+        return mask_dict_sensitive_keys(
+            {
+                "record_id": self.record_id,
+                "method": self.method,
+                "path": self.path,
+                "params": self.params,
+                "data": self.data,
+                "response": self.response,
+                "status_code": self.status_code,
+                "latency_ms": round(self.latency_ms, 2),
+                "timestamp": self.timestamp,
+                "platform": self.platform,
+                "tags": self.tags,
+            }
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RequestRecord:
@@ -6080,7 +6093,7 @@ class RequestTracer:
 
         with self._lock:
             self._spans.append(span)
-            del self._spans[:-self.max_spans]
+            del self._spans[: -self.max_spans]
             self._active_spans[span.span_id] = span
             if parent is None:
                 self._current_trace_id = span.trace_id

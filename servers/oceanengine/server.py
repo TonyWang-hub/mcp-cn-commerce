@@ -34,8 +34,12 @@ class OceanEngine(CommerceMCPBase):
     sign_method: str = ""
 
     async def _request(
-        self, method: str, path: str, params: dict | None = None,
-        data: dict | None = None, retry_config: RetryConfig | None = DEFAULT_RETRY,
+        self,
+        method: str,
+        path: str,
+        params: dict | None = None,
+        data: dict | None = None,
+        retry_config: RetryConfig | None = DEFAULT_RETRY,
     ) -> dict:
         if not self.access_token:
             raise ConfigValidationError("OCEANENGINE", ["OCEANENGINE_ACCESS_TOKEN"])
@@ -52,8 +56,11 @@ class OceanEngine(CommerceMCPBase):
             return payload
 
         return await self._send_request(
-            method, self.BASE_URL + path.lstrip("/"), endpoint=path,
-            params=query, json_body=data if method.upper() != "GET" else None,
+            method,
+            self.BASE_URL + path.lstrip("/"),
+            endpoint=path,
+            params=query,
+            json_body=data if method.upper() != "GET" else None,
             headers={"Access-Token": self.access_token},
             retry_config=retry_config if method.upper() == "GET" else None,
             parse_response=parse_response,

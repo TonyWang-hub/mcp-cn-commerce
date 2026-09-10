@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Local acceptance repairs
+- Repair the Pydantic/core runtime lock mismatch found by a real dependency installation.
+- Correct TOP seller session, GMT+8 timestamp and MD5 signing against the official fixed vector.
+- Use the official WeChat order seconds window and next_key cursor; reject unsupported page numbers.
+- Fix stale test contracts, typing and formatting; include Excel export dependency in development tests.
+
+
 ### Fixed
 
 - 修复单包 CLI、配置文件优先级、健康检查、Docker/Make 安装路径与 stdio 多平台启动冲突。

@@ -501,8 +501,14 @@ class TestErrorPropagationAutomation:
                     assert result["error"]
                     assert result["code"] == 40001
         else:
-            client_name = {"jd": "jd", "taobao": "taobao", "pinduoduo": "pdd",
-                           "kuaishou": "ks", "xiaohongshu": "xhs", "weixin_store": "_wx"}[platform]
+            client_name = {
+                "jd": "jd",
+                "taobao": "taobao",
+                "pinduoduo": "pdd",
+                "kuaishou": "ks",
+                "xiaohongshu": "xhs",
+                "weixin_store": "_wx",
+            }[platform]
             method = "_request" if platform == "weixin_store" else "_call"
             request = AsyncMock(side_effect=CommerceAPIError(40001, "test API failure"))
             with patch.object(getattr(module, client_name), method, request):

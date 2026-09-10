@@ -141,8 +141,11 @@ class TestBackwardCompatibilityOldResponseFormats:
         client = OceanEngine(access_token="t")
         with pytest.raises(CommerceAPIError) as caught:
             await _parse_http_response(
-                client, {"code": 40001, "message": "Invalid params"},
-                "_request", "GET", "2/advertiser/info/",
+                client,
+                {"code": 40001, "message": "Invalid params"},
+                "_request",
+                "GET",
+                "2/advertiser/info/",
             )
         assert caught.value.code == 40001
         assert "Invalid params" in str(caught.value)
@@ -169,7 +172,10 @@ class TestBackwardCompatibilityOldResponseFormats:
 
         result, _ = await _parse_http_response(
             JDMCP(app_key="k", app_secret="s", access_token="t"),
-            legacy_response, "_call", "jd.pop.order.search", {},
+            legacy_response,
+            "_call",
+            "jd.pop.order.search",
+            {},
         )
         orders = result["jd_pop_order_search_response"]["searchorderinfo_result"]["orderInfoList"]
         assert len(orders) == 1
@@ -191,7 +197,10 @@ class TestBackwardCompatibilityOldResponseFormats:
         with pytest.raises(CommerceAPIError) as caught:
             await _parse_http_response(
                 TaobaoMCP(app_key="k", app_secret="s", access_token="t"),
-                legacy_error, "_call", "taobao.trades.sold.get", {},
+                legacy_error,
+                "_call",
+                "taobao.trades.sold.get",
+                {},
             )
         assert caught.value.code == 7
         assert caught.value.msg == "Invalid app key"
@@ -210,7 +219,10 @@ class TestBackwardCompatibilityOldResponseFormats:
 
         result, _ = await _parse_http_response(
             DouDianClient(app_key="k", app_secret="s", access_token="t", shop_id="shop"),
-            legacy_response, "request", "order/list", {},
+            legacy_response,
+            "request",
+            "order/list",
+            {},
         )
         assert result == {"list": [], "total": 0}
         _compat_results.add(
@@ -234,7 +246,10 @@ class TestBackwardCompatibilityOldResponseFormats:
 
         result, _ = await _parse_http_response(
             PinduoduoMCP(app_key="k", app_secret="s", access_token="t"),
-            legacy_response, "_call", "pdd.order.list.get", {},
+            legacy_response,
+            "_call",
+            "pdd.order.list.get",
+            {},
         )
         assert result["order_list_get_response"]["total_count"] == 1
         _compat_results.add(
@@ -278,7 +293,10 @@ class TestBackwardCompatibilityOldResponseFormats:
 
         result, _ = await _parse_http_response(
             KuaishouMCP(app_key="k", app_secret="s", sign_secret="ss", access_token="t"),
-            legacy_response, "_call", "/open/order/list", {},
+            legacy_response,
+            "_call",
+            "/open/order/list",
+            {},
         )
         assert result["result"] == 1
         assert result["data"]["list"][0]["order_id"] == "KS001"
@@ -301,7 +319,11 @@ class TestBackwardCompatibilityOldResponseFormats:
 
         result, _ = await _parse_http_response(
             XiaohongshuMCP(app_key="k", app_secret="s", access_token="t"),
-            legacy_response, "_call", "GET", "/api/product/list", {"page": "1", "page_size": "20"},
+            legacy_response,
+            "_call",
+            "GET",
+            "/api/product/list",
+            {"page": "1", "page_size": "20"},
         )
         assert result["success"] is True
         assert result["data"] == {"items": [], "total": 0}
@@ -529,13 +551,14 @@ class TestVersionNegotiationCompatibility:
 
         client = TaobaoMCP(app_key="k", app_secret="s", access_token="t")
         _, request = await _parse_http_response(
-            client, {"trades_sold_get_response": {"total_results": 0}},
-            "_call", "taobao.trades.sold.get", {},
+            client,
+            {"trades_sold_get_response": {"total_results": 0}},
+            "_call",
+            "taobao.trades.sold.get",
+            {},
         )
-        from urllib.parse import parse_qs
-
         assert str(request.url).split("?")[0] == "https://eco.taobao.com/router/rest"
-        assert parse_qs(request.content.decode())["v"] == ["2.0"]
+        assert request.url.params["v"] == "2.0"
         _compat_results.add(
             "version_negotiation",
             "taobao_api_version_v2",
@@ -550,7 +573,11 @@ class TestVersionNegotiationCompatibility:
 
         client = JDMCP(app_key="k", app_secret="s", access_token="t")
         _, request = await _parse_http_response(
-            client, {"jd_pop_order_search_response": {}}, "_call", "jd.pop.order.search", {},
+            client,
+            {"jd_pop_order_search_response": {}},
+            "_call",
+            "jd.pop.order.search",
+            {},
         )
         assert request.url.host == "api.jd.com"
         assert request.url.params["v"] == "2.0"
@@ -568,8 +595,11 @@ class TestVersionNegotiationCompatibility:
 
         client = OceanEngine(app_key="k", app_secret="s", access_token="t")
         _, request = await _parse_http_response(
-            client, {"code": 0, "data": {"list": []}},
-            "_request", "GET", "2/advertiser/info/",
+            client,
+            {"code": 0, "data": {"list": []}},
+            "_request",
+            "GET",
+            "2/advertiser/info/",
         )
         assert request.url.host == "api.oceanengine.com"
         assert request.url.path == "/open_api/2/advertiser/info/"
@@ -726,8 +756,9 @@ class TestSigningMethodCompatibility:
         from servers.doudian.server import DouDianClient
 
         client = DouDianClient(app_key="k", app_secret="s", access_token="t")
-        sig = client._sign({"app_key": "k", "method": "order.list",
-                            "param_json": '{"order_id":"123"}', "timestamp": "123", "v": "2"})
+        sig = client._sign(
+            {"app_key": "k", "method": "order.list", "param_json": '{"order_id":"123"}', "timestamp": "123", "v": "2"}
+        )
         assert len(sig) == 64
         assert all(c in "0123456789abcdef" for c in sig)
         _compat_results.add("signing_compat", "doudian_hmac_sha256_format", "doudian", True)

@@ -55,9 +55,15 @@ class JDMCP(CommerceMCPBase):
         system params (method, format, v, plus auth) go in query string;
         business params go in JSON body.
         """
-        missing = [name for name, value in (
-            ("JD_APP_KEY", self.app_key), ("JD_APP_SECRET", self.app_secret),
-            ("JD_ACCESS_TOKEN", self.access_token)) if not value]
+        missing = [
+            name
+            for name, value in (
+                ("JD_APP_KEY", self.app_key),
+                ("JD_APP_SECRET", self.app_secret),
+                ("JD_ACCESS_TOKEN", self.access_token),
+            )
+            if not value
+        ]
         if missing:
             raise ConfigValidationError("JD", missing)
         params = {

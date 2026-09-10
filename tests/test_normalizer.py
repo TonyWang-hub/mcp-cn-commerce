@@ -174,7 +174,9 @@ class TestNormalizeOrderJD:
             "consigneeInfo": {"fullname": "李四", "mobile": "13900139000", "fullAddress": "上海市浦东新区"},
         }
         # This endpoint schema explicitly declares these fields in yuan.
-        normalizer = Normalizer(amount_units={"orderTotalPrice": "yuan", "payment": "yuan", "freightPrice": "yuan", "salePrice": "yuan"})
+        normalizer = Normalizer(
+            amount_units={"orderTotalPrice": "yuan", "payment": "yuan", "freightPrice": "yuan", "salePrice": "yuan"}
+        )
         order = normalizer.normalize_order(raw, "jd")
         assert order.order_id == "123456789012345678"
         assert order.status == "paid"

@@ -177,7 +177,7 @@ async def test_ordinary_request_honors_configured_limit():
 
 def test_csv_union_and_formula_safety_preserve_numeric_values():
     output = DataExporter.export_to_string(
-        [{"id": "001", "title": "=HYPERLINK(\"https://invalid\")", "amount": -12}, {"id": "002", "refund": 4}],
+        [{"id": "001", "title": '=HYPERLINK("https://invalid")', "amount": -12}, {"id": "002", "refund": 4}],
         format=ExportFormat.CSV,
     )
     rows = list(csv.DictReader(io.StringIO(output)))
@@ -382,6 +382,7 @@ async def test_tool_error_outputs_redact_weixin_token_secret():
     async def structured_http_tool() -> dict:
         response = httpx.Response(403, request=httpx.Request("GET", url))
         response.raise_for_status()
+        return response.json()
 
     assert secret not in await text_tool()
     with pytest.raises(CommerceAPIError) as caught:
@@ -433,7 +434,9 @@ async def test_transport_redacts_final_error_without_disrupting_http_retries():
     try:
         with pytest.raises(httpx.HTTPStatusError) as caught:
             await client._send_request(
-                "GET", "https://shop.test/cgi-bin/token", params={"secret": secret},
+                "GET",
+                "https://shop.test/cgi-bin/token",
+                params={"secret": secret},
                 retry_config=RetryConfig(max_retries=1, base_delay=0, jitter=False),
             )
         assert len(calls) == 2

@@ -44,8 +44,10 @@ def _mock_response(data: dict) -> dict:
 
 
 @pytest.fixture
-def mock_request():
+def mock_request(monkeypatch):
     """Patch taobao._request with an AsyncMock, reset after each test."""
+    for name in ("app_key", "app_secret", "access_token"):
+        monkeypatch.setattr(taobao, name, "test-value")
     with patch.object(taobao, "_request", new_callable=AsyncMock) as mock:
         yield mock
 
@@ -1081,46 +1083,27 @@ async def test_pagination_review_list_custom(mock_request, review_list_payload):
 
 
 @pytest.mark.asyncio
-async def test_commerce_api_error_returns_error_response_dict(mock_request):
-    """When _request raises CommerceAPIError, _call catches it and returns error dict."""
+async def test_commerce_api_error_propagates(mock_request):
     mock_request.side_effect = CommerceAPIError(code=15, msg="remote service error")
-
-    result_json = await get_order_detail(tid="999999999999999999")
-    result = json.loads(result_json)
-
-    assert "error_response" in result
-    assert result["error_response"]["code"] == 15
-    assert "remote service error" in result["error_response"]["msg"]
+    with pytest.raises(CommerceAPIError, match="remote service error") as caught:
+        await get_order_detail(tid="999999999999999999")
+    assert caught.value.code == 15
 
 
 @pytest.mark.asyncio
-async def test_timeout_error_returns_error_response_dict(mock_request):
-    """When _request raises TimeoutError, _call catches it and returns error dict."""
+async def test_timeout_error_propagates(mock_request):
     mock_request.side_effect = TimeoutError("Connection timed out")
-
-    result_json = await get_product_list()
-    result = json.loads(result_json)
-
-    assert "error_response" in result
-    assert result["error_response"]["code"] == -1
-    assert "Connection timed out" in result["error_response"]["msg"]
+    with pytest.raises(TimeoutError, match="Connection timed out"):
+        await get_product_list()
 
 
 @pytest.mark.asyncio
-async def test_refund_api_error_returns_error_response_dict(mock_request):
-    """Error from refund tool should return error dict."""
+async def test_refund_api_error_propagates(mock_request):
     mock_request.side_effect = CommerceAPIError(code=27, msg="refund not found")
-
-    result_json = await get_refund_detail(refund_id="RF99999999999")
-    result = json.loads(result_json)
-
-    assert "error_response" in result
-    assert result["error_response"]["code"] == 27
-    assert "refund not found" in result["error_response"]["msg"]
-
-    # Verify _request was called with the correct refund_id
-    _, kwargs = mock_request.call_args
-    params = kwargs["params"]
+    with pytest.raises(CommerceAPIError, match="refund not found") as caught:
+        await get_refund_detail(refund_id="RF99999999999")
+    assert caught.value.code == 27
+    params = mock_request.call_args.kwargs["params"]
     assert params["method"] == "taobao.refund.get"
     assert params["refund_id"] == "RF99999999999"
 

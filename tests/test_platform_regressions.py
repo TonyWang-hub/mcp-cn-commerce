@@ -25,9 +25,13 @@ def module(platform):
 
 def make_client(platform):
     names = {
-        "doudian": "DouDianClient", "jd": "JDMCP", "kuaishou": "KuaishouMCP",
-        "oceanengine": "OceanEngine", "pinduoduo": "PinduoduoMCP",
-        "taobao": "TaobaoMCP", "weixin_store": "WeixinStoreMCP",
+        "doudian": "DouDianClient",
+        "jd": "JDMCP",
+        "kuaishou": "KuaishouMCP",
+        "oceanengine": "OceanEngine",
+        "pinduoduo": "PinduoduoMCP",
+        "taobao": "TaobaoMCP",
+        "weixin_store": "WeixinStoreMCP",
         "xiaohongshu": "XiaohongshuMCP",
     }
     kwargs = dict(app_key="test-key", app_secret="test-secret", access_token="test-token")
@@ -51,8 +55,7 @@ async def read(client, platform, params=None):
     return await client._request("GET", "/test/order/get", params=params)
 
 
-PLATFORMS = ["doudian", "jd", "kuaishou", "oceanengine", "pinduoduo",
-             "taobao", "weixin_store", "xiaohongshu"]
+PLATFORMS = ["doudian", "jd", "kuaishou", "oceanengine", "pinduoduo", "taobao", "weixin_store", "xiaohongshu"]
 
 
 @pytest.mark.asyncio
@@ -63,8 +66,9 @@ async def test_all_adapters_share_transport_metrics_and_trace(platform):
 
     def respond(request):
         requests.append(request)
-        return httpx.Response(200 if len(requests) == 1 else 401,
-                              json={"code": 10000, "data": {}} if platform == "doudian" else {})
+        return httpx.Response(
+            200 if len(requests) == 1 else 401, json={"code": 10000, "data": {}} if platform == "doudian" else {}
+        )
 
     http = httpx.AsyncClient(transport=httpx.MockTransport(respond))
     client._client = http
@@ -85,11 +89,19 @@ async def test_all_adapters_share_transport_metrics_and_trace(platform):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("platform,global_name", [
-    ("doudian", "_client"), ("jd", "jd"), ("kuaishou", "ks"),
-    ("oceanengine", "_client"), ("pinduoduo", "pdd"), ("taobao", "taobao"),
-    ("weixin_store", "_wx"), ("xiaohongshu", "xhs"),
-])
+@pytest.mark.parametrize(
+    "platform,global_name",
+    [
+        ("doudian", "_client"),
+        ("jd", "jd"),
+        ("kuaishou", "ks"),
+        ("oceanengine", "_client"),
+        ("pinduoduo", "pdd"),
+        ("taobao", "taobao"),
+        ("weixin_store", "_wx"),
+        ("xiaohongshu", "xhs"),
+    ],
+)
 async def test_lifespan_closes_pool_on_error(platform, global_name, monkeypatch):
     server_module = module(platform)
     client = make_client(platform)
@@ -103,8 +115,12 @@ async def test_lifespan_closes_pool_on_error(platform, global_name, monkeypatch)
 
 
 def test_kuaishou_factory_keeps_distinct_signing_secret(monkeypatch):
-    for name, value in {"APP_KEY": "key", "APP_SECRET": "secret", "SIGN_SECRET": "signing",
-                        "ACCESS_TOKEN": "token"}.items():
+    for name, value in {
+        "APP_KEY": "key",
+        "APP_SECRET": "secret",
+        "SIGN_SECRET": "signing",
+        "ACCESS_TOKEN": "token",
+    }.items():
         monkeypatch.setenv(f"KUAISHOU_{name}", value)
     client = module("kuaishou")._create_kuaishou_client()
     assert client.sign_secret == "signing"
@@ -153,7 +169,8 @@ async def test_oceanengine_auth_and_array_query_on_the_wire(monkeypatch):
 @pytest.mark.parametrize("with_app", [False, True])
 async def test_weixin_explicit_token_is_static_even_with_app_credentials(with_app):
     client = module("weixin_store").WeixinStoreMCP(
-        app_key="app" if with_app else "", app_secret="secret" if with_app else "",
+        app_key="app" if with_app else "",
+        app_secret="secret" if with_app else "",
         access_token="static-token",
     )
     assert client.token_mode == "static"
@@ -253,8 +270,13 @@ async def test_doudian_official_signing_covers_exact_body_and_common_fields():
         assert query["method"] == "product.list"
         assert query["sign_method"] == "hmac-sha256"
         assert "param_json" not in query
-        raw = ("test-secretapp_keytest-keymethodproduct.listparam_json" + body
-               + "timestamp" + query["timestamp"] + "v2test-secret")
+        raw = (
+            "test-secretapp_keytest-keymethodproduct.listparam_json"
+            + body
+            + "timestamp"
+            + query["timestamp"]
+            + "v2test-secret"
+        )
         assert query["sign"] == hmac.new(b"test-secret", raw.encode(), hashlib.sha256).hexdigest()
     finally:
         await client.close()
@@ -263,23 +285,30 @@ async def test_doudian_official_signing_covers_exact_body_and_common_fields():
 def test_doudian_official_published_example_vector():
     # Published demonstration values from the official article 130 (not live credentials).
     client = module("doudian").DouDianClient(
-        app_key="6844048284663924231", app_secret="749698a6-fcb3-4358-b241-ec1d93cf9c1f",
+        app_key="6844048284663924231",
+        app_secret="749698a6-fcb3-4358-b241-ec1d93cf9c1f",
         access_token="unused",
     )
-    assert client._sign({
-        "app_key": client.app_key, "method": "product.list",
-        "param_json": '{"page":"0","size":"20"}', "timestamp": "2020-07-05 22:33:59", "v": "2",
-    }) == "a84fc5747114e63196565192a19f80d9d78819b8c8f5940eeb282bf78260901d"
+    assert (
+        client._sign(
+            {
+                "app_key": client.app_key,
+                "method": "product.list",
+                "param_json": '{"page":"0","size":"20"}',
+                "timestamp": "2020-07-05 22:33:59",
+                "v": "2",
+            }
+        )
+        == "a84fc5747114e63196565192a19f80d9d78819b8c8f5940eeb282bf78260901d"
+    )
 
 
 def test_xiaohongshu_order_and_refund_time_units_match_official_schemas():
     adapter = module("xiaohongshu").XiaohongshuMCP
-    params = {"start_time": "2024-01-01 00:00:00", "end_time": "2024-01-01 23:59:59",
-              "page": "2", "page_size": "20"}
+    params = {"start_time": "2024-01-01 00:00:00", "end_time": "2024-01-01 23:59:59", "page": "2", "page_size": "20"}
     method, order = adapter._adapt_params("/api/order/list", params)
     assert method == "order.getOrderList"
-    assert order == {"startTime": 1704038400, "endTime": 1704124799,
-                     "timeType": 1, "pageNo": 2, "pageSize": 20}
+    assert order == {"startTime": 1704038400, "endTime": 1704124799, "timeType": 1, "pageNo": 2, "pageSize": 20}
     method, refund = adapter._adapt_params("/api/refund/list", params)
     assert method == "afterSale.listAfterSaleInfos"
     assert refund["startTime"] == 1704038400000
@@ -295,9 +324,13 @@ def test_xiaohongshu_unverified_tools_fail_explicitly(path):
 
 def test_xiaohongshu_creation_time_window_does_not_silently_truncate():
     with pytest.raises(ValueError, match="24 hours"):
-        module("xiaohongshu").XiaohongshuMCP._adapt_params("/api/order/list", {
-            "start_time": "2024-01-01", "end_time": "2024-02-01",
-        })
+        module("xiaohongshu").XiaohongshuMCP._adapt_params(
+            "/api/order/list",
+            {
+                "start_time": "2024-01-01",
+                "end_time": "2024-02-01",
+            },
+        )
 
 
 @pytest.mark.asyncio

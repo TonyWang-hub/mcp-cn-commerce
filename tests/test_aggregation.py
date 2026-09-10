@@ -230,6 +230,7 @@ class DoudianProjectionContractTests(unittest.IsolatedAsyncioTestCase):
             "order_id": "projected-order",
             "order_status": 2,
             "pay_amount": 1000,
+            "promotion_pay_amount": 0,
             "post_amount": 0,
             "total_amount": 1000,
             "create_time": "2026-09-10 09:00:00",

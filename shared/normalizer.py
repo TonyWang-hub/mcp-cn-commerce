@@ -91,6 +91,9 @@ class UnifiedOrder:
     shop_id: str = ""
     warnings: list[dict[str, Any]] = field(default_factory=list)
     source_values: dict[str, Any] = field(default_factory=dict)
+    updated_at: str | None = None
+    amount_platform_payment: int | None = None  # Platform payment definition, separately from buyer cash.
+    amount_merchant_received: int | None = None  # Merchant receipts, separately from buyer cash.
 
 
 @dataclass
@@ -143,6 +146,8 @@ class UnifiedRefund:
     shop_id: str = ""
     warnings: list[dict[str, Any]] = field(default_factory=list)
     source_values: dict[str, Any] = field(default_factory=dict)
+    amount_requested: int | None = None  # Requested refund; never substitute for actual refund.
+    updated_at: str | None = None
 
 
 @dataclass
@@ -317,8 +322,10 @@ _ORDER_STATUS_MAP: dict[str, dict[str | int, str]] = {
         1: "pending",
         2: "paid",
         3: "shipped",
-        4: "completed",
-        5: "cancelled",
+        4: "cancelled",
+        5: "completed",
+        101: "shipped",  # Partially shipped; preserve the native code in status_raw.
+        105: "paid",
     },
     "jd": {
         "WAIT_SELLER_STOCK_OUT": "paid",
@@ -379,7 +386,7 @@ _ORDER_STATUS_MAP: dict[str, dict[str | int, str]] = {
 
 # Refund status mapping per platform → unified status
 _REFUND_STATUS_MAP: dict[str, dict[str | int, str]] = {
-    "doudian": {1: "pending", 2: "processing", 3: "completed", 4: "rejected"},
+    "doudian": {1: "pending", 2: "processing", 3: "completed", 4: "rejected", 5: "reversed"},
     "jd": {
         "WAIT_PROCESS": "pending",
         "PROCESSING": "processing",
@@ -413,7 +420,19 @@ _REFUND_STATUS_MAP: dict[str, dict[str | int, str]] = {
 
 # Refund type mapping
 _REFUND_TYPE_MAP: dict[str, dict[str | int, str]] = {
-    "doudian": {"仅退款": "refund_only", "退货退款": "return_and_refund"},
+    "doudian": {
+        "仅退款": "refund_only",
+        "退货退款": "return_and_refund",
+        "0": "return_and_refund",
+        "1": "refund_only",
+        "2": "refund_only",
+        "3": "exchange",
+        "4": "cancel",
+        "5": "cancel",
+        "6": "price_protection",
+        "7": "reship",
+        "8": "repair",
+    },
     "jd": {"退款": "refund_only", "退换货": "return_and_refund"},
     "pdd": {"1": "refund_only", "2": "return_and_refund"},
     "kuaishou": {"仅退款": "refund_only", "退货退款": "return_and_refund"},
@@ -504,6 +523,10 @@ _MONEY_SCHEMA = {
     "doudian": dict.fromkeys(
         (
             "pay_amount",
+            "promotion_pay_amount",
+            "promotion_amount",
+            "origin_amount",
+            "actual_receive_amount",
             "amount",
             "order_amount",
             "total_amount",
@@ -513,6 +536,8 @@ _MONEY_SCHEMA = {
             "min_price",
             "max_price",
             "refund_amount",
+            "real_refund_amount",
+            "refund_total_amount",
         ),
         "fen",
     ),
@@ -719,6 +744,7 @@ class Normalizer:
                 "paid_at",
             )
             or None,
+            updated_at=r.time(_first(detail, "update_time", "modified", "updated_at"), "updated_at") or None,
             buyer_name=str(
                 _first(buyer, "name", "fullname", "receiver_name", "buyer_name", default=raw.get("receiver_name", ""))
             ),
@@ -753,14 +779,28 @@ class Normalizer:
                 "amount_paid": ("pay_amount", "payment"),
             }
             if platform == "doudian":
-                # Our own get_order_list projects pay_amount as amount (fen).
-                # This alias is scoped to Doudian, never inferred globally.
-                money["amount_total"] = ("order_amount", "total_amount", "pay_amount", "amount")
-                money["amount_paid"] = ("pay_amount", "payment", "amount")
+                money["amount_total"] = ("order_amount", "total_amount")
+                money["amount_discount"] = ("promotion_amount", "discount_amount")
+                # Official FAQ 2019: buyer cash = pay_amount - promotion_pay_amount.
+                # The old projected `amount` aliases platform pay_amount, so it
+                # cannot establish buyer cash if the payment discount is missing.
+                del money["amount_paid"]
         for output, keys in money.items():
             setattr(result, output, r.amount(prices, keys, output))
-        if platform == "doudian" and not any(key in prices for key in ("order_amount", "total_amount")):
-            _warn(r.warnings, "amount_total", "total_uses_paid_amount")
+        if platform == "doudian":
+            result.amount_platform_payment = r.amount(prices, ("pay_amount",), "amount_platform_payment")
+            payment_discount = r.amount(prices, ("promotion_pay_amount",), "amount_payment_promotion")
+            receipt = r.mapping(prices.get("actual_receive_amount_info"), "actual_receive_amount_info")
+            result.amount_merchant_received = r.amount(receipt, ("actual_receive_amount",), "amount_merchant_received")
+            if (
+                result.amount_platform_payment is not None
+                and payment_discount is not None
+                and 0 <= payment_discount <= result.amount_platform_payment
+            ):
+                result.amount_paid = result.amount_platform_payment - payment_discount
+            else:
+                _warn(r.warnings, "amount_paid", "buyer_payment_unknown")
+            r.source_values["amount_paid"] = {"formula": "pay_amount - promotion_pay_amount", "unit": "fen"}
         if platform == "jd":
             items = raw.get("itemInfoList")
         elif platform == "weixin":
@@ -768,7 +808,9 @@ class Normalizer:
         elif platform == "doudian":
             product_info = raw.get("product_info")
             projected_items = product_info if isinstance(product_info, list) else safe_get(raw, "product_info", "list")
-            items = _first(raw, "items", "item_list", "goods_list", "products", default=projected_items)
+            items = _first(
+                raw, "sku_order_list", "items", "item_list", "goods_list", "products", default=projected_items
+            )
         else:
             items = _first(raw, "items", "item_list", "goods_list", default=safe_get(raw, "product_info", "list"))
         for i, value in enumerate(r.array(items, "items")):
@@ -785,9 +827,28 @@ class Normalizer:
                 ),
                 sku_id=r.identifier(_first(value, "sku_id", "outerSkuId"), f"{prefix}.sku_id"),
                 sku_name=str(_first(value, "sku_name", "spec_desc", "spec", default="")),
-                price=r.amount(value, ("price", "sale_price", "item_price", "salePrice", "jdPrice"), f"{prefix}.price"),
-                quantity=r.integer(_first(value, "num", "quantity", "product_cnt", "combo_num"), f"{prefix}.quantity"),
-                image_url=str(_first(value, "image", "thumb_img", "thumb_url", "img", default="")),
+                price=r.amount(
+                    value,
+                    (
+                        ("origin_amount", "price", "sale_price", "item_price", "salePrice", "jdPrice")
+                        if platform == "doudian"
+                        else ("price", "sale_price", "item_price", "salePrice", "jdPrice")
+                    ),
+                    f"{prefix}.price",
+                ),
+                quantity=r.integer(
+                    _first(value, "item_num", "num", "quantity", "product_cnt", "combo_num"), f"{prefix}.quantity"
+                ),
+                image_url=str(
+                    _first(
+                        value,
+                        "image",
+                        "thumb_img",
+                        "thumb_url",
+                        "img",
+                        default=value.get("product_pic", "") if platform == "doudian" else "",
+                    )
+                ),
             )
             result.items.append(item)
         if result.status == "unknown":
@@ -847,6 +908,8 @@ class Normalizer:
     def normalize_refund(self, raw: dict, platform: str) -> UnifiedRefund:
         platform = normalize_platform(platform)
         r = self._record(raw, platform)
+        if platform == "doudian":
+            return self._doudian_refund(raw, r)
         prices = raw if "refund_amount" in raw or "amount" in raw else r.mapping(raw.get("refund_info"), "refund_info")
         result = UnifiedRefund(
             refund_id=r.identifier(_first(raw, "refund_id", "after_sale_order_id", "afsNo", "returnsId"), "refund_id"),
@@ -863,6 +926,48 @@ class Normalizer:
             completed_at=r.time(_first(raw, "completed_at", "refund_time", "success_time"), "completed_at") or None,
         )
         if result.status == "unknown":
+            _warn(r.warnings, "status", "status_unknown")
+        return r.attach(result)
+
+    @staticmethod
+    def _doudian_refund(raw: dict, r: _Record) -> UnifiedRefund:
+        """List amounts are requested; only successful detail contains payout."""
+        is_list = "aftersale_info" in raw or raw.get("detail_required") is True
+        info = safe_get(raw, "process_info", "after_sale_info")
+        if info is None:
+            info = raw.get("aftersale_info", raw)
+        info = r.mapping(info, "after_sale_info")
+        order_info = r.mapping(raw.get("order_info", raw), "order_info")
+        status = normalize_refund_status(_first(info, "refund_status", "status"), "doudian")
+        sale_type = _first(info, "after_sale_type", "aftersale_type")
+        if sale_type is None and not is_list and "process_info" not in raw:
+            # Legacy flattened input accepted descriptive Chinese labels.
+            # The native numeric refund_type is a processing method, not this enum.
+            if info.get("refund_type") in ("仅退款", "退货退款"):
+                sale_type = info["refund_type"]
+        result = UnifiedRefund(
+            refund_id=r.identifier(_first(info, "after_sale_id", "aftersale_id", "refund_id"), "refund_id"),
+            order_id=r.identifier(_first(order_info, "shop_order_id", "order_id"), "order_id"),
+            shop_id=r.identifier(raw.get("shop_id"), "shop_id"),
+            platform="doudian",
+            status=status,
+            type=normalize_refund_type(sale_type, "doudian"),
+            amount_requested=r.amount(info, ("refund_total_amount", "refund_amount"), "amount_requested"),
+            reason=str(_first(info, "reason", "reason_text", default="")),
+            description=str(_first(info, "description", "desc", default="")),
+            evidence=r.array(_first(info, "evidence", "media", "pic_urls", default=[]), "evidence"),
+            applied_at=r.time(_first(info, "apply_time", "create_time"), "applied_at"),
+            updated_at=r.time(info.get("update_time"), "updated_at") or None,
+        )
+        if status == "completed" and not is_list:
+            result.amount = r.amount(info, ("real_refund_amount",), "amount")
+            if result.amount is not None and result.amount < 0:
+                result.amount = None
+                _warn(r.warnings, "amount", "refund_amount_negative")
+            result.completed_at = r.time(info.get("refund_time"), "completed_at") or None
+        if is_list:
+            _warn(r.warnings, "amount", "refund_detail_required")
+        if status == "unknown":
             _warn(r.warnings, "status", "status_unknown")
         return r.attach(result)
 

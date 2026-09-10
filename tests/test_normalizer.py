@@ -135,7 +135,8 @@ class TestNormalizeOrderDoudian:
         raw = {
             "order_id": "7385294610238495621",
             "order_status": 2,
-            "pay_amount": "199.00",
+            "pay_amount": 19900,
+            "promotion_pay_amount": 0,
             "post_amount": "0.00",
             "create_time": "2026-06-09 10:30:00",
             "pay_time": "2026-06-09 10:32:00",
@@ -147,7 +148,7 @@ class TestNormalizeOrderDoudian:
         assert order.order_id == "7385294610238495621"
         assert order.platform == "doudian"
         assert order.status == "paid"
-        assert order.amount_paid == 199
+        assert order.amount_paid == 19900
         assert order.buyer_name == "张三"
         assert len(order.items) == 1
         assert order.items[0].product_name == "T恤"
@@ -332,7 +333,8 @@ class TestNormalizeRefundIntegration:
         refund = normalizer.normalize_refund(raw, "doudian")
         assert refund.status == "pending"
         assert refund.type == "refund_only"
-        assert refund.amount == 99
+        assert refund.amount is None
+        assert refund.amount_requested == 99
 
     def test_weixin_refund(self, normalizer: Normalizer):
         raw = {

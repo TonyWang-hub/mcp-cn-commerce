@@ -1,10 +1,10 @@
 """Unified data normalizer for Chinese e-commerce platform responses.
 
-Converts platform-specific API responses from all 8 supported platforms
+Converts platform-specific API responses from supported platforms
 into a common schema so workflow templates can consume them uniformly.
 
 Supported platforms:
-  oceanengine, doudian, jd, pdd, kuaishou, xiaohongshu, weixin, taobao
+  oceanengine, doudian, jd, pdd, kuaishou, xiaohongshu, weixin, taobao, youzan
 
 Usage::
 
@@ -37,11 +37,12 @@ PLATFORMS = frozenset(
         "xiaohongshu",
         "weixin",
         "taobao",
+        "youzan",
     }
 )
 
 
-PLATFORM_ALIASES = {"pinduoduo": "pdd", "weixin_store": "weixin"}
+PLATFORM_ALIASES = {"pinduoduo": "pdd", "weixin_store": "weixin", "tmall": "taobao"}
 
 
 def normalize_platform(platform: str) -> str:
@@ -376,7 +377,21 @@ _ORDER_STATUS_MAP: dict[str, dict[str | int, str]] = {
         "WAIT_BUYER_CONFIRM_GOODS": "shipped",
         "TRADE_BUYER_SIGNED": "completed",
         "TRADE_FINISHED": "completed",
-        "TRADE_CLOSED": "cancelled",
+        "TRADE_CLOSED": "closed",
+        "TRADE_CLOSED_BY_TAOBAO": "cancelled",
+        "TRADE_NO_CREATE_PAY": "pending",
+        "SELLER_CONSIGNED_PART": "shipped",
+        "PAID_FORBID_CONSIGN": "paid",
+    },
+    "youzan": {
+        "WAIT_BUYER_PAY": "pending",
+        "TRADE_PAID": "paid",
+        "WAIT_CONFIRM": "paid",
+        "WAIT_SELLER_SEND_GOODS": "paid",
+        "WAIT_BUYER_CONFIRM_GOODS": "shipped",
+        "TRADE_SUCCESS": "completed",
+        "TRADE_CLOSED": "closed",
+        "TRADE_REFUND": "refunding",
     },
     "oceanengine": {
         "ADVERTISER_STATUS_ENABLE": "completed",
@@ -413,7 +428,21 @@ _REFUND_STATUS_MAP: dict[str, dict[str | int, str]] = {
         "WAIT_SELLER_AGREE": "pending",
         "SELLER_AGREE_BUYER_RETURN": "processing",
         "WAIT_BUYER_RETURN": "processing",
-        "CLOSED": "rejected",
+        "WAIT_BUYER_RETURN_GOODS": "processing",
+        "WAIT_SELLER_CONFIRM_GOODS": "processing",
+        "SELLER_REFUSE_BUYER": "rejected",
+        "CLOSED": "closed",
+        "SUCCESS": "completed",
+    },
+    "youzan": {
+        "WAIT_SELLER_AGREE": "pending",
+        "WAIT_BUYER_RETURN_GOODS": "processing",
+        "WAIT_SELLER_CONFIRM_GOODS": "processing",
+        "SELLER_RETURN_GOODS": "processing",
+        "SELLER_REFUSE_BUYER": "rejected",
+        "SELLER_REFUSE_BUYER_RETURN_GOODS": "rejected",
+        "CUSTOMER_SERVICE_IN": "processing",
+        "CLOSED": "closed",
         "SUCCESS": "completed",
     },
 }
@@ -438,7 +467,16 @@ _REFUND_TYPE_MAP: dict[str, dict[str | int, str]] = {
     "kuaishou": {"仅退款": "refund_only", "退货退款": "return_and_refund"},
     "xiaohongshu": {"仅退款": "refund_only", "退货退款": "return_and_refund"},
     "weixin": {"REFUND": "refund_only", "RETURN": "return_and_refund"},
-    "taobao": {"仅退款": "refund_only", "退货退款": "return_and_refund"},
+    "taobao": {
+        "仅退款": "refund_only",
+        "退货退款": "return_and_refund",
+        "REFUND": "refund_only",
+        "REFUND_AND_RETURN": "return_and_refund",
+        "TMALL_EXCHANGE": "exchange",
+        "TAOBAO_EXCHANGE": "exchange",
+        "REPAIR": "repair",
+        "RESHIPPING": "reship",
+    },
 }
 
 
@@ -594,6 +632,13 @@ _MONEY_SCHEMA = {
 }
 
 
+# Reviewed route-specific yuan fields; refund fund entries are explicitly fen.
+_MONEY_SCHEMA["taobao"] = dict.fromkeys(
+    ("payment", "received_payment", "total_fee", "discount_fee", "post_fee", "price", "refund_fee"), "yuan"
+)
+_MONEY_SCHEMA["youzan"] = dict.fromkeys(("real_payment", "total_fee", "post_fee", "price", "refund_fee"), "yuan")
+
+
 class _Record:
     """Per-record parse state; never shared across concurrent normalizations."""
 
@@ -713,6 +758,10 @@ class Normalizer:
     def normalize_order(self, raw: dict, platform: str) -> UnifiedOrder:
         platform = normalize_platform(platform)
         r = self._record(raw, platform)
+        if platform == "taobao":
+            return self._taobao_order(raw, r)
+        if platform == "youzan":
+            return self._youzan_order(raw, r)
         info = r.mapping(raw.get("orderInfo", raw), "orderInfo") if platform == "jd" else raw
         detail = r.mapping(raw.get("order_detail", raw), "order_detail") if platform == "weixin" else info
         prices = r.mapping(detail.get("price_info"), "price_info") if platform == "weixin" else info
@@ -910,6 +959,10 @@ class Normalizer:
         r = self._record(raw, platform)
         if platform == "doudian":
             return self._doudian_refund(raw, r)
+        if platform == "taobao":
+            return self._taobao_refund(raw, r)
+        if platform == "youzan":
+            return self._youzan_refund(raw, r)
         prices = raw if "refund_amount" in raw or "amount" in raw else r.mapping(raw.get("refund_info"), "refund_info")
         result = UnifiedRefund(
             refund_id=r.identifier(_first(raw, "refund_id", "after_sale_order_id", "afsNo", "returnsId"), "refund_id"),
@@ -928,6 +981,184 @@ class Normalizer:
         if result.status == "unknown":
             _warn(r.warnings, "status", "status_unknown")
         return r.attach(result)
+
+    @staticmethod
+    def _taobao_order(raw: dict, r: _Record) -> UnifiedOrder:
+        status = _first(raw, "status", "order_status")
+        result = UnifiedOrder(
+            order_id=r.identifier(_first(raw, "tid", "order_id"), "order_id"),
+            shop_id=r.identifier(raw.get("shop_id"), "shop_id"),
+            platform="taobao",
+            status=normalize_order_status(status, "taobao"),
+            status_raw=str(status),
+            created_at=r.time(_first(raw, "created", "create_time"), "created_at"),
+            paid_at=r.time(raw.get("pay_time"), "paid_at") or None,
+            updated_at=r.time(raw.get("modified"), "updated_at") or None,
+            amount_total=r.amount(raw, ("total_fee",), "amount_total"),
+            amount_discount=r.amount(raw, ("discount_fee",), "amount_discount"),
+            amount_shipping=r.amount(raw, ("post_fee",), "amount_shipping"),
+            amount_platform_payment=r.amount(raw, ("payment",), "amount_platform_payment"),
+            amount_merchant_received=r.amount(raw, ("received_payment",), "amount_merchant_received"),
+        )
+        # Official money FAQ: current payment may already reflect a refund.
+        # A current snapshot cannot recover the original buyer cash payment.
+        _warn(r.warnings, "amount_paid", "buyer_payment_unknown")
+        orders = r.mapping(raw.get("orders"), "items")
+        for i, value in enumerate(r.array(orders.get("order"), "items")):
+            if not isinstance(value, dict):
+                _warn(r.warnings, f"items[{i}]", "object_invalid")
+                continue
+            prefix = f"items[{i}]"
+            result.items.append(
+                OrderItem(
+                    product_id=r.identifier(value.get("num_iid"), prefix + ".product_id"),
+                    sku_id=r.identifier(value.get("sku_id"), prefix + ".sku_id"),
+                    price=r.amount(value, ("price",), prefix + ".price"),
+                    quantity=r.integer(value.get("num"), prefix + ".quantity"),
+                )
+            )
+        if result.status == "unknown":
+            _warn(r.warnings, "status", "status_unknown")
+        return r.attach(result)
+
+    @staticmethod
+    def _youzan_order(raw: dict, r: _Record) -> UnifiedOrder:
+        outer = r.mapping(raw.get("data", raw), "order_info")
+        full = r.mapping(outer.get("full_order_info", outer), "order_info")
+        info = r.mapping(full.get("order_info"), "order_info")
+        pay = r.mapping(full.get("pay_info"), "pay_info")
+        status = info.get("status")
+        result = UnifiedOrder(
+            order_id=r.identifier(info.get("tid"), "order_id"),
+            shop_id=r.identifier(info.get("node_kdt_id"), "shop_id"),
+            platform="youzan",
+            status=normalize_order_status(status, "youzan"),
+            status_raw=str(status),
+            created_at=r.time(info.get("created"), "created_at"),
+            paid_at=r.time(info.get("pay_time"), "paid_at") or None,
+            updated_at=r.time(info.get("update_time"), "updated_at") or None,
+            amount_total=r.amount(pay, ("total_fee",), "amount_total"),
+            amount_shipping=r.amount(pay, ("post_fee",), "amount_shipping"),
+            amount_paid=r.amount(pay, ("real_payment",), "amount_paid"),
+        )
+        # `payment` means different things in list and detail. Never substitute it.
+        if result.amount_paid is None:
+            _warn(r.warnings, "amount_paid", "buyer_payment_unknown")
+        for i, value in enumerate(r.array(full.get("orders"), "items")):
+            if not isinstance(value, dict):
+                _warn(r.warnings, f"items[{i}]", "object_invalid")
+                continue
+            prefix = f"items[{i}]"
+            result.items.append(
+                OrderItem(
+                    product_id=r.identifier(value.get("item_id"), prefix + ".product_id"),
+                    sku_id=r.identifier(value.get("sku_id"), prefix + ".sku_id"),
+                    price=r.amount(value, ("price",), prefix + ".price"),
+                    quantity=r.integer(value.get("num"), prefix + ".quantity"),
+                )
+            )
+        if result.status == "unknown":
+            _warn(r.warnings, "status", "status_unknown")
+        return r.attach(result)
+
+    @staticmethod
+    def _taobao_refund(raw: dict, r: _Record) -> UnifiedRefund:
+        result = UnifiedRefund(
+            refund_id=r.identifier(raw.get("refund_id"), "refund_id"),
+            order_id=r.identifier(raw.get("tid"), "order_id"),
+            shop_id=r.identifier(raw.get("shop_id"), "shop_id"),
+            platform="taobao",
+            status=normalize_refund_status(raw.get("status"), "taobao"),
+            type=normalize_refund_type(raw.get("dispute_type"), "taobao"),
+            applied_at=r.time(raw.get("created"), "applied_at"),
+            updated_at=r.time(raw.get("modified"), "updated_at") or None,
+        )
+        if result.status == "completed" and result.type in {"refund_only", "return_and_refund"}:
+            result.amount = r.amount(raw, ("refund_fee",), "amount")
+            if result.amount is not None and result.amount < 0:
+                result.amount = None
+                _warn(r.warnings, "amount", "refund_amount_negative")
+            # This is TOP refund completion, not a verified channel arrival time.
+            result.completed_at = r.time(raw.get("end_time"), "completed_at") or None
+        if result.status == "unknown":
+            _warn(r.warnings, "status", "status_unknown")
+        return r.attach(result)
+
+    @staticmethod
+    def _youzan_refund(raw: dict, r: _Record) -> UnifiedRefund:
+        detail = "data" in raw or "refund_fund_list" in raw or "refund_account_time" in raw
+        info = r.mapping(raw.get("data", raw), "refund_info")
+        kind = "unknown"
+        native_kind = info.get("refund_type")
+        if isinstance(native_kind, str) and native_kind in {"EXCHANGE_GOODS", "OFFLINE_EXCHANGE_GOODS"}:
+            kind = "exchange"
+        elif (
+            not detail
+            and native_kind is None
+            or isinstance(native_kind, str)
+            and native_kind in {"BUYER_APPLY_REFUND", "SELLER_REFUND", "SYSTEM_REFUND"}
+        ):
+            if isinstance(info.get("return_goods"), bool):
+                kind = "return_and_refund" if info["return_goods"] else "refund_only"
+        if kind == "unknown":
+            _warn(r.warnings, "type", "status_unknown")
+        result = UnifiedRefund(
+            refund_id=r.identifier(info.get("refund_id"), "refund_id"),
+            order_id=r.identifier(info.get("tid"), "order_id"),
+            shop_id=r.identifier(info.get("kdt_id"), "shop_id"),
+            platform="youzan",
+            status=normalize_refund_status(info.get("status"), "youzan"),
+            type=kind,
+            applied_at=r.time(info.get("created"), "applied_at"),
+            updated_at=r.time(info.get("modified"), "updated_at") or None,
+        )
+        if not detail:
+            result.amount_requested = r.amount(info, ("refund_fee",), "amount_requested")
+            _warn(r.warnings, "amount", "refund_detail_required")
+        elif result.status == "completed" and kind in {"refund_only", "return_and_refund"}:
+            result.completed_at = r.time(info.get("refund_account_time"), "completed_at") or None
+            Normalizer._youzan_funds(info, result, r)
+        if result.status == "unknown":
+            _warn(r.warnings, "status", "status_unknown")
+        return r.attach(result)
+
+    @staticmethod
+    def _youzan_funds(info: dict, result: UnifiedRefund, r: _Record) -> None:
+        funds = info.get("refund_fund_list")
+        if not isinstance(funds, list) or not funds:
+            _warn(r.warnings, "amount", "refund_funds_incomplete")
+            return
+        seen = set()
+        total = 0
+        for item in funds:
+            if not isinstance(item, dict):
+                _warn(r.warnings, "amount", "refund_funds_incomplete")
+                return
+            identifier = r.identifier(item.get("refund_no"), "amount")
+            amount = item.get("refund_fee")  # Native integer fen, unlike the top-level yuan string.
+            status = item.get("status")
+            valid_status = isinstance(status, int) and not isinstance(status, bool) and status == 2
+            valid_money = isinstance(amount, int) and not isinstance(amount, bool) and 0 <= amount < 2**63
+            if (
+                not identifier
+                or identifier in seen
+                or str(item.get("refund_id")) != result.refund_id
+                or not valid_status
+                or not valid_money
+            ):
+                _warn(r.warnings, "amount", "refund_funds_incomplete")
+                return
+            mode = item.get("refund_mode")
+            if not isinstance(mode, int) or isinstance(mode, bool) or mode != 0:
+                _warn(r.warnings, "amount", "refund_channel_unknown")
+                return
+            seen.add(identifier)
+            total += amount
+        expected = r.amount(info, ("refund_fee",), "amount")
+        if expected is None or expected != total or total >= 2**63:
+            _warn(r.warnings, "amount", "refund_amount_mismatch")
+            return
+        result.amount = total
 
     @staticmethod
     def _doudian_refund(raw: dict, r: _Record) -> UnifiedRefund:

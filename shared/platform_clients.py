@@ -53,19 +53,18 @@ _OPERATIONS = {
         "get_shop_info": Operation("taobao.shop.get", "transport_only"),
     },
     "jd": {
-        name: Operation(
-            endpoint,
-            "partial",
-            supported=False,
-            reason="JD POP read contract migration pending (official method/signing/schema changed); see docs/remaining-platform-contracts.md",
-        )
-        for name, endpoint in {
-            "get_order_list": "jingdong.pop.order.search",
-            "get_order_detail": "jingdong.pop.order.get",
-            "get_refund_list": "jingdong.asc.query.list",
-            "get_refund_detail": "jingdong.asc.query.view",
-            "get_shop_info": "jingdong.vender.shop.query",
-        }.items()
+        "get_order_list": Operation("jingdong.pop.order.search", "documented"),
+        "get_order_detail": Operation("jingdong.pop.order.get", "documented"),
+        "get_shop_info": Operation("jingdong.vender.shop.query", "documented"),
+        **{
+            name: Operation(
+                "",
+                "partial",
+                supported=False,
+                reason="JD POP after-sale service is not a verified completed-refund contract; see docs/jd-contract.md",
+            )
+            for name in ("get_refund_list", "get_refund_detail")
+        },
     },
     "pinduoduo": {
         name: Operation(

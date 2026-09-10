@@ -10,9 +10,7 @@ from shared.platform_clients import create_platform_client, operation_catalog
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "operation", ["get_order_list", "get_order_detail", "get_refund_list", "get_refund_detail", "get_shop_info"]
-)
+@pytest.mark.parametrize("operation", ["get_refund_list", "get_refund_detail"])
 async def test_unmigrated_jd_business_contract_cannot_send_legacy_requests(operation):
     requests = []
     async with httpx.AsyncClient(
@@ -35,7 +33,6 @@ async def test_unmigrated_jd_business_contract_cannot_send_legacy_requests(opera
     [
         ("get_order_list", {"start_time": "2026-09-01", "end_time": "2026-09-02"}),
         ("get_order_detail", {"order_id": "1"}),
-        ("get_shop_info", {}),
         ("get_after_sale_list", {"start_time": "2026-09-01", "end_time": "2026-09-02"}),
         ("get_after_sale_detail", {"after_sale_id": "1"}),
     ],

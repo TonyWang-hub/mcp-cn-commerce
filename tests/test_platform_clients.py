@@ -111,11 +111,8 @@ async def test_closed_external_transport_cannot_fall_back_to_network():
 
 
 OTHER_MAPPINGS = [
-    ("jd", "get_order_list", "jd.pop.order.search"),
-    ("jd", "get_order_detail", "jd.pop.order.get"),
     ("jd", "get_refund_list", "jd.pop.afs.search"),
     ("jd", "get_refund_detail", "jd.pop.afs.get"),
-    ("jd", "get_shop_info", "jd.pop.shop.get"),
     ("kuaishou", "get_order_list", "/open/api/order/list"),
     ("kuaishou", "get_order_detail", "/open/api/order/detail"),
     ("kuaishou", "get_refund_list", "/open/api/refund/list"),
@@ -164,7 +161,7 @@ async def test_remaining_platform_operations_use_existing_wire_contract(platform
     if not sdk().operation_catalog(platform)[operation].supported:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
             client = sdk().create_platform_client(platform, platform_credentials(platform), http_client=http)
-            with pytest.raises(ValueError, match="migration"):
+            with pytest.raises(ValueError, match="migration|JD POP"):
                 await client.call(operation, {})
             assert requests == []
             await client.close()
@@ -355,8 +352,8 @@ async def test_catalogue_is_immutable_and_reports_contract_gaps():
     from dataclasses import FrozenInstanceError
 
     client = sdk().create_platform_client("jd", platform_credentials("jd"))
-    assert client.operations["get_order_list"].contract_status == "partial"
-    assert client.operations["get_order_list"].supported is False
+    assert client.operations["get_refund_list"].contract_status == "partial"
+    assert client.operations["get_refund_list"].supported is False
     with pytest.raises(TypeError):
         client.operations["arbitrary_write"] = client.operations["get_order_list"]
     with pytest.raises(FrozenInstanceError):

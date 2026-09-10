@@ -85,11 +85,11 @@ attempt, including retries. The default is an independent configurable limiter.
 | `doudian` | `app_key`, `app_secret`, `access_token`, `shop_id` | Native business JSON; response is the `data` dictionary unwrapped by the existing adapter |
 | `taobao` | `app_key`, `app_secret`, `access_token` | TOP business fields, including caller-selected `fields`; response retains the TOP method envelope |
 | `youzan` | `access_token`; optional `app_key`, `app_secret` | Native business JSON; returns the `success`/`code`/`data` envelope. SDK only; no environment-backed MCP CLI |
-| `jd` | `app_key`, `app_secret`, `access_token` | Existing JOS business payload and envelope; current protocol unresolved |
-| `pinduoduo` | `app_key`, `app_secret`, `access_token` | App fields hold PDD client ID/secret; existing native business fields and envelope |
-| `kuaishou` | `app_key`, `app_secret`, `access_token`, `sign_secret` | Existing REST business query fields and response |
+| `jd` | `app_key`, `app_secret`, `access_token` | Flat native fields inside a signed JOS form; explicit source_id/optional_fields for orders; [JD contract](jd-contract.md) |
+| `pinduoduo` | `app_key`, `app_secret`, `access_token` | App fields hold PDD client ID/secret; business reads currently unsupported pending official schema access |
+| `kuaishou` | `app_key`, `app_secret`, `access_token`, `sign_secret` | Business reads currently unsupported pending documented signing/cursor migration |
 | `xiaohongshu` | `app_key`, `app_secret`, `access_token` | App fields hold appId/appSecret; existing local alias fields such as `start_time`, `end_time`, `order_id`, `refund_id` are translated by the adapter |
-| `weixin_store` | `access_token`; optional `app_key`, `app_secret` | Native JSON body; order list uses seconds-based `create_time_range`/`update_time_range`, `page_size`, `next_key`; fixed static token mode |
+| `weixin_store` | `access_token`; optional `app_key`, `app_secret` | Native JSON body (shop info uses GET); order list uses seconds-based `create_time_range`/`update_time_range`, `page_size`, `next_key`; fixed static token mode |
 | `oceanengine` | `access_token`; optional `app_key`, `app_secret` | Native Marketing API fields; arrays/dicts in query values are serialized by the adapter |
 
 Unknown credential keys are rejected. Client secrets are strings copied at
@@ -112,6 +112,7 @@ refreshing authorization:
 - `contract_status`: `documented` means the specific official contract was read;
   `transport_only` means authentication/transport was checked but this business
   mapping still needs verification; `unverified` retains an unresolved contract.
+  `partial` marks an identified contract gap; consult `supported` and `reason` before calling.
 - `live_verified`: currently **false for every operation**.
 - `reason`: explains an explicitly unsupported mapping.
 
@@ -120,13 +121,14 @@ refreshing authorization:
 | 抖店 | Orders list/detail, refunds list/detail | Four business contracts documented on 2026-09-10; general shop info explicitly unsupported. Native fields and live gates: [Doudian contract](doudian-contract.md) |
 | 淘宝 | Orders list/detail/increment, refunds list/detail, shop info | Five order/refund contracts documented; shop info transport-only. [TOP contract](taobao-contract.md) records required fields, windows and application permission limits |
 | 有赞 | Orders list/detail, refunds list/detail, shop info | Five documented SDK-only contracts; [Youzan contract](youzan-contract.md) records current API versions and pagination/amount differences |
-| 京东 | Orders list/detail, refunds list/detail, shop info | All unverified: old official MD5/envelope evidence conflicts with current adapter; not promoted by this SDK |
-| 拼多多 | Orders list/detail, refunds list/detail, shop info | All unverified: current signing/time-unit/business contracts pending |
-| 快手 | Orders list/detail, refunds list/detail, shop info | All unverified: current protocol and permissions pending |
+| 京东 | Orders list/detail, shop info | Three documented JOS contracts; refunds explicitly unsupported because after-sale service is not a completed-refund contract. [JD contract](jd-contract.md) |
+| 拼多多 | None | Partial/unsupported: current official business schema was not accessible; see [PDD contract](pinduoduo-contract.md) |
+| 快手 | None | Partial/unsupported: official schema and SDK obtained; signing and cursor migration still required |
 | 小红书 | Orders list/detail, refunds list/detail | Documented contract; shop info explicitly unsupported |
-| 微信小店 | Orders list/detail, refunds list/detail, shop info | Order-list contract documented; remaining listed contracts unverified |
-| 巨量引擎 | Advertiser info, account balance, campaign report, ad detail report, Qianchuan report | Marketing transport documented; business mappings marked transport-only. Merchant orders/refunds/shop-info explicitly unsupported |
+| 微信小店 | Orders list/detail, refunds list/detail, shop info | Five documented contracts; refund cursor and shop GET corrected; real shop authorization still unverified |
+| 巨量引擎 | Advertiser info, account balance | Two documented ad-gateway reads; reports unsupported pending current dataset migration. Merchant orders/refunds/shop-info explicitly unsupported |
 
+See [remaining platform contracts](remaining-platform-contracts.md) for the 2026-09-10 SDK migrations and test-account evidence.
 See [official access status](official-access-status.md) for original official URLs,
 retrieval dates and precise remaining live credential requirements. Adding this
 SDK does not close those gates. Response schema normalization and tenant-level

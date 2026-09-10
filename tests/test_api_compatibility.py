@@ -13,6 +13,7 @@ import json
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -580,7 +581,7 @@ class TestVersionNegotiationCompatibility:
             {},
         )
         assert request.url.host == "api.jd.com"
-        assert request.url.params["v"] == "2.0"
+        assert parse_qs(request.content.decode())["v"] == ["2.0"]
         _compat_results.add(
             "version_negotiation",
             "jd_api_version_v2",
@@ -741,7 +742,7 @@ class TestSigningMethodCompatibility:
         )
 
     def test_jd_hmac_md5_sign_format(self):
-        """JD HMAC-MD5 produces 32-char uppercase hex."""
+        """Current JOS MD5 signatures use 32-character uppercase hex."""
         from servers.jd.server import JDMCP
 
         client = JDMCP(app_key="k", app_secret="s")

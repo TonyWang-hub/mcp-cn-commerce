@@ -2,7 +2,7 @@
 
 Auth via env vars: JD_APP_KEY, JD_APP_SECRET, JD_ACCESS_TOKEN.
 API endpoint: https://api.jd.com/routerjson
-Sign method: HMAC-MD5
+Sign method: MD5 (official JOS form protocol)
 """
 
 from __future__ import annotations
@@ -14,7 +14,8 @@ from contextlib import asynccontextmanager
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from servers.jd.client import JDMCP
+from servers.jd.client import JDMCP as JDMCP  # pylint: disable=useless-import-alias
+from servers.jd.schema import ORDER_DETAIL, ORDER_SEARCH, SHOP_INFO, validate_params
 from shared.cn_commerce_base import (
     ConfigValidationError,
     register_common_tools,
@@ -59,10 +60,7 @@ mcp = MCPServer("mcp-cn-jd", lifespan=_lifespan)
 
 
 def _require_official_read_contract() -> None:
-    raise ToolError(
-        "JD POP read contract migration is pending; legacy method/signing/schema are incompatible. "
-        "See docs/remaining-platform-contracts.md"
-    )
+    raise ToolError("JD POP after-sale service is not a verified completed-refund contract. See docs/jd-contract.md")
 
 
 @mcp.tool()
@@ -72,45 +70,49 @@ async def get_order_list(
     order_status: str = "",
     page: int = 1,
     page_size: int = 20,
+    source_id: str = "",
+    optional_fields: str = "",
+    date_type: int = 0,
+    sort_type: int = 2,
 ) -> str:
-    """Query order list by time range and optional status.
+    """Read POP orders in a fixed window, at most one calendar month.
 
-    Args:
-        start_time: Order start time, e.g. "2024-01-01 00:00:00"
-        end_time: Order end time, e.g. "2024-01-31 23:59:59"
-        order_status: Status filter. Common values:
-            WAIT_SELLER_STOCK_OUT (waiting to ship),
-            WAIT_GOODS_RECEIVE_CONFIRM (shipped, waiting confirm),
-            FINISHED_L (completed),
-            TRADE_CANCELED (cancelled).
-            Empty string means all statuses.
-        page: Page number, starting from 1.
-        page_size: Number of orders per page (max 100).
+    source_id must explicitly select the caller origin (official default: JOS).
+    optional_fields is a comma-separated list of current orderInfo field names.
+    date_type=1 selects creation; other integers select modification. sort_type=1
+    is descending, other integers ascending. Page is one-based, size at most100.
+    Empty order_status selects the documented ALL state.
     """
-    _require_official_read_contract()
     biz_params = {
         "start_date": start_time,
         "end_date": end_time,
         "page": str(page),
         "page_size": str(page_size),
+        "order_state": order_status or "ALL",
+        "source_id": source_id,
+        "optional_fields": optional_fields,
+        "dateType": date_type,
+        "sortType": sort_type,
     }
-    if order_status:
-        biz_params["order_status"] = order_status
-
-    result = await jd._call("jd.pop.order.search", biz_params)
+    try:
+        validate_params(ORDER_SEARCH, biz_params)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from exc
+    result = await jd._call(ORDER_SEARCH, biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 @mcp.tool()
-async def get_order_detail(order_id: str) -> str:
-    """Get full details of a single order.
-
-    Args:
-        order_id: The JD order ID (e.g. "3000000000001").
-    """
-    _require_official_read_contract()
-    biz_params = {"order_id": order_id}
-    result = await jd._call("jd.pop.order.get", biz_params)
+async def get_order_detail(order_id: str, source_id: str = "", optional_fields: str = "") -> str:
+    """Read one POP order, requiring explicit caller origin and selected fields."""
+    try:
+        if not order_id.isascii() or not order_id.isdecimal():
+            raise ValueError("JD POP order_id must be a positive decimal ID")
+        biz_params = {"order_id": int(order_id), "source_id": source_id, "optional_fields": optional_fields}
+        validate_params(ORDER_DETAIL, biz_params)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from exc
+    result = await jd._call(ORDER_DETAIL, biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
@@ -142,17 +144,12 @@ async def get_product_list(
 
 @mcp.tool()
 async def get_shop_info(shop_id: str = "") -> str:
-    """Get shop basic information.
-
-    Args:
-        shop_id: JD shop ID. Leave empty to use the authenticated shop.
-    """
-    _require_official_read_contract()
-    biz_params: dict = {}
+    """Read the token's POP shop; optional shop_id verifies the returned identity."""
+    result = await jd._call(SHOP_INFO, {})
     if shop_id:
-        biz_params["shop_id"] = shop_id
-
-    result = await jd._call("jd.pop.shop.get", biz_params)
+        shop = result.get("jingdong_vender_shop_query_responce", {}).get("shop_jos_result", {})
+        if str(shop.get("shop_id", "")) != shop_id:
+            raise ToolError("JD POP returned a different shop identity")
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 

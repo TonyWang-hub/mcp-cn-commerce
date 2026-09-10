@@ -154,8 +154,9 @@ def product_list_payload() -> dict:
 @pytest.fixture
 def shop_info_payload() -> dict:
     return {
-        "jingdong_pop_shop_get_responce": {
-            "shop_info": {
+        "jingdong_vender_shop_query_responce": {
+            "shop_jos_result": {
+                "vender_id": "12345",
                 "shop_id": "10000001",
                 "shop_name": "XX官方旗舰店",
                 "shop_status": "1",
@@ -633,11 +634,10 @@ async def test_get_product_list_without_ware_status_omits_field(mock_call, produ
 
 @pytest.mark.asyncio
 async def test_get_shop_info_returns_shop_details(mock_call, shop_info_payload):
-    """Legacy fixture cannot prove the current JD POP contract is supported."""
+    """Use the authenticated shop with the official no-parameter method."""
     mock_call.return_value = shop_info_payload
-    with pytest.raises(ToolError, match="JD POP"):
-        await get_shop_info()
-    mock_call.assert_not_awaited()
+    assert json.loads(await get_shop_info()) == shop_info_payload
+    mock_call.assert_awaited_once_with("jingdong.vender.shop.query", {})
 
 
 @pytest.mark.asyncio
@@ -646,7 +646,7 @@ async def test_get_shop_info_with_shop_id(mock_call, shop_info_payload):
     mock_call.return_value = shop_info_payload
     with pytest.raises(ToolError, match="JD POP"):
         await get_shop_info(shop_id="10000002")
-    mock_call.assert_not_awaited()
+    mock_call.assert_awaited_once_with("jingdong.vender.shop.query", {})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

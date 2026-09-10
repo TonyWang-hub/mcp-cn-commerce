@@ -168,7 +168,7 @@ class TestJDFlow:
 
     @pytest.mark.asyncio
     async def test_jd_sign_method_is_hmac_md5(self, jd_client):
-        """Historical JD transport remains isolated; this is not the current POP contract."""
+        """Current JOS MD5 signatures are uppercase hex."""
         sig = jd_client._sign({"app_key": "test", "timestamp": "123"})
         assert isinstance(sig, str)
         assert len(sig) == 32
@@ -788,7 +788,7 @@ class TestSigningIntegration:
         assert client1._sign(params) != client2._sign(params)
 
     def test_jd_hmac_md5_sign_integration(self):
-        """Legacy transport signature regression; SDK POP calls are gated pending migration."""
+        """Current JOS MD5 signatures retain their 32-character representation."""
         from servers.jd.server import JDMCP
 
         client = JDMCP(app_key="jd_key", app_secret="jd_secret")

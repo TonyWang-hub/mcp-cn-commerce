@@ -1,10 +1,13 @@
-"""Explicit platform transport; importing this module does not load credentials."""
+"""Explicit JOS client; imports never read credentials from the environment."""
 
 from __future__ import annotations
 
 import hashlib
-import hmac
+import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
+from servers.jd.schema import READ_METHODS, validate_params, validate_response
 from shared.cn_commerce_base import (
     DEFAULT_RETRY,
     CommerceMCPBase,
@@ -15,33 +18,23 @@ from shared.cn_commerce_base import (
 
 
 class JDMCP(CommerceMCPBase):
-    """JD-specific client that overrides signing for HMAC-MD5."""
+    """JOS form protocol with MD5 signatures and a fixed authorization snapshot."""
 
     PLATFORM = "JD"
     BASE_URL = "https://api.jd.com/routerjson"
-    sign_method = SignMethod.HMAC_MD5
+    sign_method = SignMethod.MD5
 
     def _sign(self, params: dict) -> str:
-        """JD HMAC-MD5 signing.
-
-        Builds: app_secret + sorted_kv_string + app_secret
-        Then HMAC-MD5 with app_secret as key.
-        """
-        to_sign = {k: v for k, v in params.items() if k not in ("sign", "sign_method") and v != ""}
-        sorted_keys = sorted(to_sign.keys())
+        """Sign decoded values before form encoding; only sign itself is excluded."""
         raw = (
             self.app_secret
-            + "".join(f"{k}{canonicalize_sign_value(to_sign[k])}" for k in sorted_keys)
+            + "".join(key + canonicalize_sign_value(value) for key, value in sorted(params.items()) if key != "sign")
             + self.app_secret
         )
-        return hmac.new(self.app_secret.encode(), raw.encode(), hashlib.md5).hexdigest().upper()
+        return hashlib.md5(raw.encode("utf-8")).hexdigest().upper()
 
     async def _call(self, api_method: str, biz_params: dict | None = None) -> dict:
-        """Make a JD API call.
-
-        system params (method, format, v, plus auth) go in query string;
-        business params go in JSON body.
-        """
+        """Send flat business JSON inside 360buy_param_json, as the JOS SDK does."""
         missing = [
             name
             for name, value in (
@@ -53,9 +46,29 @@ class JDMCP(CommerceMCPBase):
         ]
         if missing:
             raise ConfigValidationError("JD", missing)
-        params = {
-            "method": api_method,
-            "format": "json",
-            "v": "2.0",
-        }
-        return await self._request("POST", "", params=params, data=biz_params or {}, retry_config=DEFAULT_RETRY)
+        business = biz_params or {}
+        validate_params(api_method, business)
+        if self.validate_input:
+            self._validate_params(business)
+        encoded = json.dumps(business, ensure_ascii=False, separators=(",", ":"), sort_keys=True, allow_nan=False)
+
+        def prepare():
+            form = {
+                "method": api_method,
+                "app_key": self.app_key,
+                "access_token": self.access_token,
+                "timestamp": datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S"),
+                "v": "2.0",
+                "360buy_param_json": encoded,
+            }
+            form["sign"] = self._sign(form)
+            return {"data": form}
+
+        return await self._send_request(
+            "POST",
+            self.BASE_URL,
+            endpoint=api_method,
+            prepare_request=prepare,
+            parse_response=lambda value: validate_response(api_method, value),
+            retry_config=DEFAULT_RETRY if api_method in READ_METHODS else None,
+        )

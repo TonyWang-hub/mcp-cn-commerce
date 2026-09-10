@@ -155,7 +155,7 @@ async def test_oceanengine_auth_and_array_query_on_the_wire(monkeypatch):
         assert isinstance(result, str)
         assert json.loads(result)["code"] == 0
         request = requests[0]
-        assert request.url.host == "api.oceanengine.com"
+        assert request.url.host == "ad.oceanengine.com"
         assert request.headers["Access-Token"] == "header-token"
         assert request.url.params.get_list("advertiser_ids") == ["[1,2]"]
         assert "access_token" not in request.url.params

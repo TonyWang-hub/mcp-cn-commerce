@@ -601,7 +601,7 @@ class TestVersionNegotiationCompatibility:
             "GET",
             "2/advertiser/info/",
         )
-        assert request.url.host == "api.oceanengine.com"
+        assert request.url.host == "ad.oceanengine.com"
         assert request.url.path == "/open_api/2/advertiser/info/"
         assert request.headers["Access-Token"] == "t"
         _compat_results.add(

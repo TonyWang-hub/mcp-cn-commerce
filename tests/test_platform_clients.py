@@ -161,10 +161,10 @@ async def test_remaining_platform_operations_use_existing_wire_contract(platform
         requests.append(request)
         return httpx.Response(200, json={"data": {"ok": True}})
 
-    if platform == "jd":
+    if not sdk().operation_catalog(platform)[operation].supported:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
             client = sdk().create_platform_client(platform, platform_credentials(platform), http_client=http)
-            with pytest.raises(ValueError, match="JD POP"):
+            with pytest.raises(ValueError, match="migration"):
                 await client.call(operation, {})
             assert requests == []
             await client.close()
@@ -225,7 +225,7 @@ async def test_explicitly_unsupported_operations_have_metadata_and_never_send(pl
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("platform", ["doudian", "taobao", "kuaishou", "xiaohongshu", "weixin_store", "oceanengine"])
+@pytest.mark.parametrize("platform", ["doudian", "taobao", "xiaohongshu", "weixin_store", "oceanengine"])
 async def test_every_platform_keeps_two_authorizations_isolated_on_the_wire(platform):
     import json
     from urllib.parse import parse_qs

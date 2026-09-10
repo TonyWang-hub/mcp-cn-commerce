@@ -84,11 +84,19 @@ _OPERATIONS = {
         }.items()
     },
     "kuaishou": {
-        "get_order_list": Operation("/open/api/order/list"),
-        "get_order_detail": Operation("/open/api/order/detail"),
-        "get_refund_list": Operation("/open/api/refund/list"),
-        "get_refund_detail": Operation("/open/api/refund/detail"),
-        "get_shop_info": Operation("/open/api/shop/info"),
+        name: Operation(
+            endpoint,
+            "partial",
+            supported=False,
+            reason="Kuaishou official signing/cursor contract migration pending; see docs/remaining-platform-contracts.md",
+        )
+        for name, endpoint in {
+            "get_order_list": "open.order.cursor.list",
+            "get_order_detail": "open.order.detail",
+            "get_refund_list": "open.seller.order.refund.pcursor.list",
+            "get_refund_detail": "open.seller.order.refund.detail",
+            "get_shop_info": "open.shop.info.get",
+        }.items()
     },
     "xiaohongshu": {
         "get_order_list": Operation("/api/order/list", "documented"),
@@ -105,11 +113,26 @@ _OPERATIONS = {
         "get_shop_info": Operation("/channels/ec/basics/info/get", "documented"),
     },
     "oceanengine": {
-        "get_advertiser_info": Operation("2/advertiser/info/", "transport_only"),
-        "get_account_balance": Operation("2/advertiser/fund/get/", "transport_only"),
-        "get_campaign_report": Operation("2/report/advertiser/get/", "transport_only"),
-        "get_ad_detail_report": Operation("2/report/ad/get/", "transport_only"),
-        "get_qianchuan_report": Operation("2/qianchuan/report/ad/get/", "transport_only"),
+        "get_advertiser_info": Operation("2/advertiser/info/", "documented"),
+        "get_account_balance": Operation("2/advertiser/fund/get/", "documented"),
+        "get_campaign_report": Operation(
+            "2/report/advertiser/get/",
+            "partial",
+            supported=False,
+            reason="OceanEngine report contract migration pending; see docs/remaining-platform-contracts.md",
+        ),
+        "get_ad_detail_report": Operation(
+            "2/report/ad/get/",
+            "partial",
+            supported=False,
+            reason="OceanEngine report contract migration pending; see docs/remaining-platform-contracts.md",
+        ),
+        "get_qianchuan_report": Operation(
+            "2/qianchuan/report/ad/get/",
+            "partial",
+            supported=False,
+            reason="OceanEngine report contract migration pending; see docs/remaining-platform-contracts.md",
+        ),
         **{
             name: Operation("", supported=False, reason="Advertising API is not a merchant order/shop API")
             for name in ("get_order_list", "get_order_detail", "get_refund_list", "get_refund_detail", "get_shop_info")

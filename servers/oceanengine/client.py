@@ -18,6 +18,7 @@ class OceanEngine(CommerceMCPBase):
     PLATFORM = "OCEANENGINE"
     BASE_URL: str = "https://api.oceanengine.com/open_api/"
     sign_method: str = ""
+    _ADVERTISER_READ_PATHS = frozenset({"2/advertiser/info/", "2/advertiser/fund/get/"})
 
     async def _request(
         self,
@@ -41,9 +42,13 @@ class OceanEngine(CommerceMCPBase):
                 raise CommerceAPIError(code=payload["code"], msg=payload.get("message", "unknown"))
             return payload
 
+        # Current official advertiser/fund docs use the advertising gateway.
+        base_url = (
+            "https://ad.oceanengine.com/open_api/" if path.lstrip("/") in self._ADVERTISER_READ_PATHS else self.BASE_URL
+        )
         return await self._send_request(
             method,
-            self.BASE_URL + path.lstrip("/"),
+            base_url + path.lstrip("/"),
             endpoint=path,
             params=query,
             json_body=data if method.upper() != "GET" else None,

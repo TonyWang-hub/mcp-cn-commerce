@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,8 @@ name = "mcp-cn-commerce"
 dynamic = ["version"]
 description = "Chinese e-commerce platform MCP servers — let AI agents read merchant business data (Ocean Engine, Douyin Shop, JD.com, Taobao, Pinduoduo)"
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{name = "mcp-cn-commerce contributors"}]
 readme = "README.md"
 keywords = [

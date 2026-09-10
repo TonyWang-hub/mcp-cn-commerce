@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 
 from mcp.server.mcpserver import MCPServer
 
-from servers.pinduoduo.client import PinduoduoMCP as PinduoduoMCP
+from servers.pinduoduo.client import PinduoduoMCP
 from shared.cn_commerce_base import (
     ConfigValidationError,
     register_common_tools,

@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 
 from mcp.server.mcpserver import MCPServer
 
-from servers.xiaohongshu.client import XiaohongshuMCP as XiaohongshuMCP
+from servers.xiaohongshu.client import XiaohongshuMCP
 from shared.cn_commerce_base import (
     ConfigValidationError,
     register_common_tools,

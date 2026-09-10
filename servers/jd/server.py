@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 
 from mcp.server.mcpserver import MCPServer
 
-from servers.jd.client import JDMCP as JDMCP
+from servers.jd.client import JDMCP
 from shared.cn_commerce_base import (
     ConfigValidationError,
     register_common_tools,

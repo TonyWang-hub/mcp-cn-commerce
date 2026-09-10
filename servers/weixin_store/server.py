@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 from mcp.server.mcpserver import MCPServer
 
-from servers.weixin_store.client import WeixinStoreMCP as WeixinStoreMCP
+from servers.weixin_store.client import WeixinStoreMCP
 from shared.cn_commerce_base import (
     ConfigValidationError,
     register_common_tools,

@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 
 from mcp.server.mcpserver import MCPServer
 
-from servers.taobao.client import TaobaoMCP as TaobaoMCP
+from servers.taobao.client import TaobaoMCP
 from shared.cn_commerce_base import (
     ConfigValidationError,
     register_common_tools,

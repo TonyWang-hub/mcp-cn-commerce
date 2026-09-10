@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 
 from mcp.server.mcpserver import MCPServer
 
-from servers.kuaishou.client import KuaishouMCP as KuaishouMCP
+from servers.kuaishou.client import KuaishouMCP
 from shared.cn_commerce_base import (
     register_common_tools,
 )

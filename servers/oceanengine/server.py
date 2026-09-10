@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 
 from mcp.server.mcpserver import MCPServer
 
-from servers.oceanengine.client import OceanEngine as OceanEngine
+from servers.oceanengine.client import OceanEngine
 from shared.cn_commerce_base import (
     handle_tool_errors,
     register_common_tools,

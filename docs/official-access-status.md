@@ -109,3 +109,9 @@
 [官方售后列表 schema](https://open.xiaohongshu.com/api/doc/infoNew?gatewayId=165&gatewayVersionId=2804&apiId=30115)（updateTime=2026-09-04T05:31:31Z）明确：3=待商家收货，4=已完成；已修复归一化状态。接通 `returnsId`、`orderId`、`applyTime`。列表只有预期金额 `expectedRefundAmountYuan` 和更新时间 `updatedAt`，二者均不能替代实际退款金额和完成时间；已完成但缺这些字段的退款使日报保持不完整。
 
 [官方订单列表 schema](https://open.xiaohongshu.com/api/doc/infoNew?gatewayId=103&gatewayVersionId=1661&apiId=27241)（updateTime=2026-08-18T07:38:09Z）明确1待付款、2处理、3清关、4待发货、5部分发货、6待收货、7完成、8关闭、9取消、10换货申请；已修复对应状态映射，部分发货在统一枚举中保守归到 paid（尚未全发货）。
+
+### 微信 token 官方正文续验
+
+[获取接口调用凭据](https://developers.weixin.qq.com/doc/store/shop/API/apimgnt/common/api_getaccesstoken.html)已完整读取：GET `/cgi-bin/token`，参数 `appid`、`secret`、`grant_type=client_credential`，`expires_in` 为秒且当前在7200秒以内。微信小店属于明确支持账号类型，各应用类型 token 相互隔离；该 token 获取接口不支持第三方代调用。现有 managed 模式的本店 token 请求和缓存方式据此得到协议确认；真实 AppID、AppSecret 和 IP 白名单仍需账号验证。
+
+[稳定版 token](https://developers.weixin.qq.com/doc/store/shop/API/apimgnt/common/api_getstableaccesstoken.html)使用 POST JSON `/cgi-bin/stable_token`，与旧接口 token 完全隔离；官方推荐该接口。现有代码未切换 stable token，也不实施服务商 authorizer token 的自动刷新。服务商可在外部完成授权/刷新后以 static 模式传入本店 authorizer_access_token。上述页面未显示明确的文档更新时间，本次读取日2026-09-10。

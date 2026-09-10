@@ -65,7 +65,7 @@ async def test_independent_resources_are_used_and_borrowed_transport_is_not_clos
             b = factory("weixin_store", credentials, http_client=http_b)
             assert await a.call("get_shop_info", {}) == {"source": "first"}
             assert await b.call("get_shop_info", {}) == {"source": "second"}
-            assert calls == [("WEIXIN_STORE", "/channels/ec/basicinfo/get")]
+            assert calls == [("WEIXIN_STORE", "/channels/ec/basics/info/get")]
             await a.close()
             assert not http_a.is_closed
             with pytest.raises(RuntimeError, match="closed"):
@@ -129,7 +129,7 @@ OTHER_MAPPINGS = [
     ("weixin_store", "get_order_detail", "/channels/ec/order/get"),
     ("weixin_store", "get_refund_list", "/channels/ec/aftersale/getaftersalelist"),
     ("weixin_store", "get_refund_detail", "/channels/ec/aftersale/getaftersaleorder"),
-    ("weixin_store", "get_shop_info", "/channels/ec/basicinfo/get"),
+    ("weixin_store", "get_shop_info", "/channels/ec/basics/info/get"),
     ("oceanengine", "get_advertiser_info", "/open_api/2/advertiser/info/"),
     ("oceanengine", "get_account_balance", "/open_api/2/advertiser/fund/get/"),
     ("oceanengine", "get_campaign_report", "/open_api/2/report/advertiser/get/"),

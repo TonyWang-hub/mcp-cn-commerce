@@ -91,10 +91,10 @@ _OPERATIONS = {
     },
     "weixin_store": {
         "get_order_list": Operation("/channels/ec/order/list/get", "documented"),
-        "get_order_detail": Operation("/channels/ec/order/get"),
-        "get_refund_list": Operation("/channels/ec/aftersale/getaftersalelist"),
-        "get_refund_detail": Operation("/channels/ec/aftersale/getaftersaleorder"),
-        "get_shop_info": Operation("/channels/ec/basicinfo/get"),
+        "get_order_detail": Operation("/channels/ec/order/get", "documented"),
+        "get_refund_list": Operation("/channels/ec/aftersale/getaftersalelist", "documented"),
+        "get_refund_detail": Operation("/channels/ec/aftersale/getaftersaleorder", "documented"),
+        "get_shop_info": Operation("/channels/ec/basics/info/get", "documented"),
     },
     "oceanengine": {
         "get_advertiser_info": Operation("2/advertiser/info/", "transport_only"),
@@ -214,7 +214,10 @@ class PlatformClient:
         elif self.platform == "xiaohongshu":
             result = await self._adapter._call("GET", endpoint, business)
         elif self.platform == "weixin_store":
-            result = await self._adapter._request("POST", endpoint, data=business)
+            if operation == "get_shop_info":
+                result = await self._adapter._request("GET", endpoint, params=business)
+            else:
+                result = await self._adapter._request("POST", endpoint, data=business)
         elif self.platform == "oceanengine":
             result = await self._adapter._request("GET", endpoint, params=business)
         else:

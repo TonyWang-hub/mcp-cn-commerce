@@ -19,6 +19,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from servers.weixin_store.client import WeixinStoreMCP
 from shared.cn_commerce_base import (
@@ -192,20 +193,37 @@ async def get_refund_list(
     end_time: str,
     page: int = 1,
     page_size: int = 20,
+    next_key: str = "",
+    time_type: str = "create",
 ) -> str:
-    """Query after-sale (售后) record list by time range.
+    """Query after-sale IDs using a time window and the returned cursor.
 
     Args:
-        start_time: Query start time, e.g. "2024-01-01 00:00:00"
-        end_time: Query end time, e.g. "2024-01-31 23:59:59"
-        page: Page number, starting from 1.
-        page_size: Number of records per page (max 100).
+        start_time: ISO date/time; naive values use Asia/Shanghai.
+        end_time: End time, no more than 24 hours after start_time.
+        page: Compatibility argument; only 1 is accepted. Continue using next_key.
+        page_size: Deprecated compatibility argument; this API has no page size.
+        next_key: Exact cursor returned by the previous page, empty initially.
+        time_type: create or update; keep the same window across all pages.
     """
+    if page != 1 or time_type not in {"create", "update"} or not isinstance(next_key, str):
+        raise ToolError("WeChat refunds require create/update time and a next_key cursor, not page numbers")
+    if not isinstance(page_size, int) or isinstance(page_size, bool) or page_size <= 0:
+        raise ToolError("page_size is a deprecated compatibility argument and must be positive")
+    try:
+        dates = [datetime.fromisoformat(value) for value in (start_time, end_time)]
+        start, end = [
+            int((value if value.tzinfo is not None else value.replace(tzinfo=ZoneInfo("Asia/Shanghai"))).timestamp())
+            for value in dates
+        ]
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise ToolError("WeChat refunds require valid ISO start/end times") from exc
+    if end < start or end - start > 86400:
+        raise ToolError("WeChat refund time range must be ordered and no more than 24 hours")
     data = {
-        "begin_create_time": start_time,
-        "end_create_time": end_time,
-        "page": page,
-        "page_size": page_size,
+        f"begin_{time_type}_time": start,
+        f"end_{time_type}_time": end,
+        "next_key": next_key,
     }
     result = await _wx._request("POST", "/channels/ec/aftersale/getaftersalelist", data=data)
     return json.dumps(result, ensure_ascii=False, indent=2)
@@ -248,7 +266,7 @@ async def get_logistics_tracking(order_id: str) -> str:
 @mcp.tool()
 async def get_shop_info() -> str:
     """Get basic shop (店铺) information for the authenticated merchant."""
-    result = await _wx._request("POST", "/channels/ec/basicinfo/get", data={})
+    result = await _wx._request("GET", "/channels/ec/basics/info/get")
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 

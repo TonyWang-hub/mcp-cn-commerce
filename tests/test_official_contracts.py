@@ -88,3 +88,68 @@ def test_weixin_official_order_statuses():
     assert normalize_order_status(100, "weixin") == "completed"
     assert normalize_order_status(250, "weixin") == "cancelled"
     assert normalize_order_status(50, "weixin") == "unknown"
+
+
+def test_xhs_completed_refund_without_actual_time_is_incomplete():
+    from shared.aggregation import build_daily_report
+    from shared.normalizer import Normalizer
+
+    raw = {
+        "returnsId": "r",
+        "orderId": "o",
+        "status": 4,
+        "expectedRefundAmountYuan": 12.5,
+        "applyTime": 1788969600000,
+        "updatedAt": 1788969600000,
+    }
+    refund = Normalizer().normalize_refund(raw, "xiaohongshu")
+    assert refund.refund_id == "r"
+    assert refund.status == "completed"
+    assert refund.amount is None
+    assert refund.completed_at is None
+    report = build_daily_report(
+        "2026-09-10",
+        [
+            {
+                "platform": "xiaohongshu",
+                "shop_id": "s",
+                "input_format": "raw",
+                "orders": [],
+                "refunds": [raw],
+                "coverage": {
+                    "2026-09-10": {"orders": True, "refunds": True},
+                    "2026-09-09": {"orders": True, "refunds": True},
+                },
+            }
+        ],
+        timezone="Asia/Shanghai",
+    )
+    assert report["complete"] is False
+    assert report["total_summary"]["refund_amount"] is None
+
+
+@pytest.mark.asyncio
+async def test_sdk_default_http_logging_redacts_query_credentials(caplog):
+    import logging
+
+    # Importing the actual server configures SDK logging and common tools.
+    client = wx.WeixinStoreMCP(access_token="fixture-query-secret-value")
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={})))
+    try:
+        with caplog.at_level(logging.INFO, logger="httpx"):
+            await client._request("GET", "/channels/ec/order/get")
+        assert "HTTP Request" in caplog.text
+        assert "fixture-query-secret-value" not in caplog.text
+        assert "****" in caplog.text
+    finally:
+        await client.close()
+
+
+def test_xhs_official_order_state_mapping():
+    from shared.normalizer import normalize_order_status
+
+    assert normalize_order_status(1, "xiaohongshu") == "pending"
+    assert normalize_order_status(4, "xiaohongshu") == "paid"
+    assert normalize_order_status(5, "xiaohongshu") == "paid"
+    assert normalize_order_status(7, "xiaohongshu") == "completed"
+    assert normalize_order_status(9, "xiaohongshu") == "cancelled"

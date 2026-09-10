@@ -103,3 +103,9 @@
 | 快手 | 开发者指引 HTML 成功，内容为 JS 应用壳 | 未取得当前签名正文；独立 sign_secret 保留不等于签名算法已认证。须提供开发者控制台当前合同/官方 SDK 与签名向量。 |
 
 淘宝和微信的新增回归覆盖生产适配器与真实 HTTPX MockTransport（合成响应），并非真实平台验收。微信订单列表不会自动按付款时间补齐日报数据，不能把创建/更新时间查询成功直接当作付款日 coverage 完整。
+
+### 小红书状态与退款原始字段续验
+
+[官方售后列表 schema](https://open.xiaohongshu.com/api/doc/infoNew?gatewayId=165&gatewayVersionId=2804&apiId=30115)（updateTime=2026-09-04T05:31:31Z）明确：3=待商家收货，4=已完成；已修复归一化状态。接通 `returnsId`、`orderId`、`applyTime`。列表只有预期金额 `expectedRefundAmountYuan` 和更新时间 `updatedAt`，二者均不能替代实际退款金额和完成时间；已完成但缺这些字段的退款使日报保持不完整。
+
+[官方订单列表 schema](https://open.xiaohongshu.com/api/doc/infoNew?gatewayId=103&gatewayVersionId=1661&apiId=27241)（updateTime=2026-08-18T07:38:09Z）明确1待付款、2处理、3清关、4待发货、5部分发货、6待收货、7完成、8关闭、9取消、10换货申请；已修复对应状态映射，部分发货在统一枚举中保守归到 paid（尚未全发货）。

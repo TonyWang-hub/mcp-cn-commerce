@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Local acceptance repairs
+- Redact default HTTPX request logs at the emitting logger, including SDK-configured logging.
+- Correct Xiaohongshu order/refund states and reject false complete-zero refund reports.
+- Surface missing configuration as an expected MCP SDK tool error.
 - Repair the Pydantic/core runtime lock mismatch found by a real dependency installation.
 - Correct TOP seller session, GMT+8 timestamp and MD5 signing against the official fixed vector.
 - Use the official WeChat order seconds window and next_key cursor; reject unsupported page numbers.

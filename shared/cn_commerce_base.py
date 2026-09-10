@@ -2750,6 +2750,11 @@ class CommerceMCPBase:
         rate_limit_config: RateLimitConfig | None = None,
         validate_input: bool = True,
     ) -> None:
+        # HTTPX emits complete query URLs at INFO, including platform credentials.
+        # Filter at the emitting logger so SDK/root-handler configuration cannot bypass it.
+        http_logger = logging.getLogger("httpx")
+        if not any(isinstance(item, SensitiveDataFilter) for item in http_logger.filters):
+            http_logger.addFilter(SensitiveDataFilter())
         self.app_key = app_key
         self.app_secret = app_secret
         self.access_token = access_token
@@ -7189,8 +7194,7 @@ def register_common_tools(mcp: Any, client: Any) -> None:
     callable returning one (for servers that build their client lazily).
 
     Registered tools: ``get_metrics``, ``get_traces``, ``get_alerts``,
-    ``export_data``, ``build_daily_report``. Uses duck-typed ``mcp.tool()`` so this module stays free
-    of any MCP framework import.
+    ``export_data``, ``build_daily_report``. Uses the server's ``mcp.tool()`` registration API.
 
     Args:
         mcp: An MCPServer instance exposing a ``tool()`` decorator.

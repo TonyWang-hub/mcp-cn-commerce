@@ -342,11 +342,16 @@ _ORDER_STATUS_MAP: dict[str, dict[str | int, str]] = {
         5: "cancelled",
     },
     "xiaohongshu": {
-        1: "paid",
-        2: "shipped",
-        3: "completed",
-        4: "refunding",
-        5: "cancelled",
+        1: "pending",
+        2: "paid",
+        3: "paid",
+        4: "paid",
+        5: "paid",
+        6: "shipped",
+        7: "completed",
+        8: "cancelled",
+        9: "cancelled",
+        10: "refunding",
     },
     "weixin": {
         10: "pending",
@@ -383,7 +388,19 @@ _REFUND_STATUS_MAP: dict[str, dict[str | int, str]] = {
     },
     "pdd": {1: "pending", 2: "processing", 3: "completed", 4: "rejected", 5: "completed"},
     "kuaishou": {1: "pending", 2: "completed", 3: "rejected"},
-    "xiaohongshu": {1: "pending", 2: "processing", 3: "completed", 4: "rejected"},
+    "xiaohongshu": {
+        1: "pending",
+        2: "processing",
+        3: "processing",
+        4: "completed",
+        5: "rejected",
+        6: "rejected",
+        9: "rejected",
+        9001: "rejected",
+        12: "processing",
+        13: "processing",
+        14: "processing",
+    },
     "weixin": {1: "pending", 2: "processing", 3: "completed", 4: "rejected"},
     "taobao": {
         "WAIT_SELLER_AGREE": "pending",
@@ -832,7 +849,7 @@ class Normalizer:
         r = self._record(raw, platform)
         prices = raw if "refund_amount" in raw or "amount" in raw else r.mapping(raw.get("refund_info"), "refund_info")
         result = UnifiedRefund(
-            refund_id=r.identifier(_first(raw, "refund_id", "after_sale_order_id", "afsNo"), "refund_id"),
+            refund_id=r.identifier(_first(raw, "refund_id", "after_sale_order_id", "afsNo", "returnsId"), "refund_id"),
             order_id=r.identifier(_first(raw, "order_id", "order_sn", "orderId"), "order_id"),
             shop_id=r.identifier(_first(raw, "shop_id", "mall_id"), "shop_id"),
             platform=platform,
@@ -842,7 +859,7 @@ class Normalizer:
             reason=str(_first(raw, "reason", "reason_text", "afsReason", default="")),
             description=str(_first(raw, "description", "desc", default="")),
             evidence=r.array(_first(raw, "evidence", "media", "pic_urls", default=[]), "evidence"),
-            applied_at=r.time(_first(raw, "apply_time", "create_at", "afsApplyTime"), "applied_at"),
+            applied_at=r.time(_first(raw, "apply_time", "create_at", "afsApplyTime", "applyTime"), "applied_at"),
             completed_at=r.time(_first(raw, "completed_at", "refund_time", "success_time"), "completed_at") or None,
         )
         if result.status == "unknown":

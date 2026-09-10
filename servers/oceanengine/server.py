@@ -12,59 +12,13 @@ from contextlib import asynccontextmanager
 
 from mcp.server.mcpserver import MCPServer
 
+from servers.oceanengine.client import OceanEngine as OceanEngine
 from shared.cn_commerce_base import (
-    DEFAULT_RETRY,
-    CommerceAPIError,
-    CommerceMCPBase,
-    ConfigValidationError,
-    RetryConfig,
-    canonicalize_sign_value,
     handle_tool_errors,
     register_common_tools,
 )
 
 # ── Ocean Engine API Client ──────────────────────────────
-
-
-class OceanEngine(CommerceMCPBase):
-    """Ocean Engine API client authenticated by the Access-Token header."""
-
-    PLATFORM = "OCEANENGINE"
-    BASE_URL: str = "https://api.oceanengine.com/open_api/"
-    sign_method: str = ""
-
-    async def _request(
-        self,
-        method: str,
-        path: str,
-        params: dict | None = None,
-        data: dict | None = None,
-        retry_config: RetryConfig | None = DEFAULT_RETRY,
-    ) -> dict:
-        if not self.access_token:
-            raise ConfigValidationError("OCEANENGINE", ["OCEANENGINE_ACCESS_TOKEN"])
-        if self.validate_input:
-            self._validate_params(params or {})
-            self._validate_params(data or {})
-        # The official SDK JSON-encodes array/object query values once.
-        values = {**(params or {}), **(data or {})} if method.upper() == "GET" else (params or {})
-        query = {k: canonicalize_sign_value(v) for k, v in values.items() if v is not None}
-
-        def parse_response(payload):
-            if str(payload.get("code", 0)) != "0":
-                raise CommerceAPIError(code=payload["code"], msg=payload.get("message", "unknown"))
-            return payload
-
-        return await self._send_request(
-            method,
-            self.BASE_URL + path.lstrip("/"),
-            endpoint=path,
-            params=query,
-            json_body=data if method.upper() != "GET" else None,
-            headers={"Access-Token": self.access_token},
-            retry_config=retry_config if method.upper() == "GET" else None,
-            parse_response=parse_response,
-        )
 
 
 _client: OceanEngine | None = None

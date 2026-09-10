@@ -60,11 +60,20 @@ _OPERATIONS = {
         "get_shop_info": Operation("jd.pop.shop.get"),
     },
     "pinduoduo": {
-        "get_order_list": Operation("pdd.order.list.get"),
-        "get_order_detail": Operation("pdd.order.information.get"),
-        "get_refund_list": Operation("pdd.refund.list.get"),
-        "get_refund_detail": Operation("pdd.refund.information.get"),
-        "get_shop_info": Operation("pdd.mall.info.get"),
+        name: Operation(
+            endpoint,
+            "partial",
+            supported=False,
+            reason="PDD read schema unavailable (official document HTTP 403); see docs/pinduoduo-contract.md",
+        )
+        for name, endpoint in {
+            "get_order_list": "pdd.order.list.get",
+            "get_increment_orders": "pdd.order.number.list.increment.get",
+            "get_order_detail": "pdd.order.information.get",
+            "get_refund_list": "pdd.refund.list.increment.get",
+            "get_refund_detail": "pdd.refund.information.get",
+            "get_shop_info": "pdd.mall.info.get",
+        }.items()
     },
     "kuaishou": {
         "get_order_list": Operation("/open/api/order/list"),

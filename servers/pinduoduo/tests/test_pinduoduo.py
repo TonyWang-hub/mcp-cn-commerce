@@ -1,4 +1,8 @@
-"""Tests for Pinduoduo MCP server tools."""
+"""Legacy tool fixtures: order/refund/shop reads must now fail explicitly.
+
+These payloads are unverified examples, not evidence of the official API schema.
+The former positive/error tests now prove they cannot bypass that boundary.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +13,7 @@ import os
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 
 os.environ.setdefault("PINDUODUO_CLIENT_ID", "test_client_id")
 os.environ.setdefault("PINDUODUO_CLIENT_SECRET", "test_client_secret")
@@ -424,65 +429,29 @@ def affiliate_goods_payload() -> dict:
 
 @pytest.mark.asyncio
 async def test_get_order_list_returns_orders_with_correct_fields(mock_call, order_list_payload):
-    """get_order_list should return a list of orders with expected fields."""
+    """An unverified fixture or upstream error cannot authorize a read contract."""
     mock_call.return_value = order_list_payload
-
-    result_json = await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-    )
-    result = json.loads(result_json)
-
-    assert "order_list_get_response" in result
-    orders = result["order_list_get_response"]["order_list"]
-    assert len(orders) == 2
-    assert result["order_list_get_response"]["total_count"] == 2
-
-    for order in orders:
-        assert "order_sn" in order
-        assert "order_status" in order
-        assert "order_amount" in order
-        assert "created_at" in order
-
-    mock_call.assert_called_once_with(
-        "pdd.order.list.get",
-        {
-            "start_created_at": "2024-01-01 00:00:00",
-            "end_created_at": "2024-01-31 23:59:59",
-            "page": "1",
-            "page_size": "20",
-        },
-    )
+    with pytest.raises(ToolError, match="schema"):
+        await get_order_list(start_time="2024-01-01 00:00:00", end_time="2024-01-31 23:59:59")
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_get_order_list_with_status_filter(mock_call, order_list_payload):
-    """get_order_list should include order_status in biz params when provided."""
+    """An unverified fixture or upstream error cannot authorize a read contract."""
     mock_call.return_value = order_list_payload
-
-    await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-        order_status="3",
-    )
-
-    _, biz_params = mock_call.call_args[0]
-    assert biz_params["order_status"] == "3"
+    with pytest.raises(ToolError, match="schema"):
+        await get_order_list(start_time="2024-01-01 00:00:00", end_time="2024-01-31 23:59:59", order_status="3")
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_get_order_list_without_status_omits_field(mock_call, order_list_payload):
-    """get_order_list should NOT include order_status when empty."""
+    """An unverified fixture or upstream error cannot authorize a read contract."""
     mock_call.return_value = order_list_payload
-
-    await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-        order_status="",
-    )
-
-    _, biz_params = mock_call.call_args[0]
-    assert "order_status" not in biz_params
+    with pytest.raises(ToolError, match="schema"):
+        await get_order_list(start_time="2024-01-01 00:00:00", end_time="2024-01-31 23:59:59", order_status="")
+    mock_call.assert_not_awaited()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -492,28 +461,11 @@ async def test_get_order_list_without_status_omits_field(mock_call, order_list_p
 
 @pytest.mark.asyncio
 async def test_get_order_detail_returns_single_order_with_all_fields(mock_call, order_detail_payload):
-    """get_order_detail should return a single order with full details."""
+    """An unverified fixture or upstream error cannot authorize a read contract."""
     mock_call.return_value = order_detail_payload
-
-    result_json = await get_order_detail(order_sn="231215-1234567890123")
-    result = json.loads(result_json)
-
-    details = result["order_information_get_response"]["order_info"]
-    assert details["order_sn"] == "231215-1234567890123"
-    assert details["order_status"] == 1
-    assert "order_amount" in details
-    assert "discount_amount" in details
-    assert "shipping_fee" in details
-    assert "pay_amount" in details
-    assert "receiver_name" in details
-    assert "goods_list" in details
-    assert len(details["goods_list"]) == 1
-    assert details["goods_list"][0]["goods_name"] == "无线蓝牙耳机 Pro"
-
-    mock_call.assert_called_once_with(
-        "pdd.order.information.get",
-        {"order_sn": "231215-1234567890123"},
-    )
+    with pytest.raises(ToolError, match="schema"):
+        await get_order_detail(order_sn="231215-1234567890123")
+    mock_call.assert_not_awaited()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -612,35 +564,11 @@ async def test_search_products_returns_matching_results(mock_call, search_produc
 
 @pytest.mark.asyncio
 async def test_get_refund_list_returns_refunds_with_expected_fields(mock_call, refund_list_payload):
-    """get_refund_list should return refund records with correct fields."""
+    """An unverified fixture or upstream error cannot authorize a read contract."""
     mock_call.return_value = refund_list_payload
-
-    result_json = await get_refund_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-    )
-    result = json.loads(result_json)
-
-    refunds = result["refund_list_get_response"]["refund_list"]
-    assert len(refunds) == 2
-
-    for r in refunds:
-        assert "refund_id" in r
-        assert "order_sn" in r
-        assert "refund_status" in r
-        assert "refund_type" in r
-        assert "refund_amount" in r
-        assert "reason" in r
-
-    mock_call.assert_called_once_with(
-        "pdd.refund.list.get",
-        {
-            "start_created_at": "2024-01-01 00:00:00",
-            "end_created_at": "2024-01-31 23:59:59",
-            "page": "1",
-            "page_size": "20",
-        },
-    )
+    with pytest.raises(ToolError, match="schema"):
+        await get_refund_list(start_time="2024-01-01 00:00:00", end_time="2024-01-31 23:59:59")
+    mock_call.assert_not_awaited()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -650,27 +578,11 @@ async def test_get_refund_list_returns_refunds_with_expected_fields(mock_call, r
 
 @pytest.mark.asyncio
 async def test_get_refund_detail_returns_full_refund_record(mock_call, refund_detail_payload):
-    """get_refund_detail should return a single refund record with full details."""
+    """An unverified fixture or upstream error cannot authorize a read contract."""
     mock_call.return_value = refund_detail_payload
-
-    result_json = await get_refund_detail(refund_id="RF123456789")
-    result = json.loads(result_json)
-
-    detail = result["refund_information_get_response"]["refund_info"]
-    assert detail["refund_id"] == "RF123456789"
-    assert detail["order_sn"] == "231215-1234567890123"
-    assert detail["refund_status"] == 1
-    assert "refund_type" in detail
-    assert "refund_amount" in detail
-    assert "reason" in detail
-    assert "description" in detail
-    assert "evidence" in detail
-    assert "goods_info" in detail
-
-    mock_call.assert_called_once_with(
-        "pdd.refund.information.get",
-        {"refund_id": "RF123456789"},
-    )
+    with pytest.raises(ToolError, match="schema"):
+        await get_refund_detail(refund_id="RF123456789")
+    mock_call.assert_not_awaited()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -763,22 +675,11 @@ async def test_get_review_list_returns_reviews_with_expected_fields(mock_call, r
 
 @pytest.mark.asyncio
 async def test_get_shop_info_returns_shop_details(mock_call, shop_info_payload):
-    """get_shop_info should return mall/shop details."""
+    """An unverified fixture or upstream error cannot authorize a read contract."""
     mock_call.return_value = shop_info_payload
-
-    result_json = await get_shop_info()
-    result = json.loads(result_json)
-
-    mall = result["mall_info_get_response"]["mall_info"]
-    assert mall["mall_id"] == "12345"
-    assert mall["mall_name"] == "数码旗舰店"
-    assert mall["mall_type"] == "旗舰店"
-    assert "mall_status" in mall
-    assert "mall_logo" in mall
-    assert "mall_desc" in mall
-    assert "created_at" in mall
-
-    mock_call.assert_called_once_with("pdd.mall.info.get", {})
+    with pytest.raises(ToolError, match="schema"):
+        await get_shop_info()
+    mock_call.assert_not_awaited()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -849,36 +750,21 @@ async def test_search_affiliate_goods_returns_goods_with_commission(mock_call, a
 
 @pytest.mark.asyncio
 async def test_missing_order_sn_returned_in_result(mock_call):
-    """When order_sn is not found, the error response is serialized as JSON."""
-    error_response = {
-        "error_response": {
-            "error_code": 10001,
-            "error_msg": "order_sn not found",
-        },
-    }
+    """An unverified fixture or upstream error cannot authorize a read contract."""
+    error_response = {"error_response": {"error_code": 10001, "error_msg": "order_sn not found"}}
     mock_call.return_value = error_response
-
-    result_json = await get_order_detail(order_sn="999999-9999999999999")
-    result = json.loads(result_json)
-
-    assert "error_response" in result
-    assert result["error_response"]["error_code"] == 10001
-    assert "order_sn not found" in result["error_response"]["error_msg"]
+    with pytest.raises(ToolError, match="schema"):
+        await get_order_detail(order_sn="999999-9999999999999")
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_api_error_propagates(mock_call):
-    """When _call raises CommerceAPIError, it should propagate."""
+    """An unverified fixture or upstream error cannot authorize a read contract."""
     mock_call.side_effect = CommerceAPIError(code=40001, msg="Invalid client_id")
-
-    with pytest.raises(CommerceAPIError) as exc_info:
-        await get_order_list(
-            start_time="2024-01-01 00:00:00",
-            end_time="2024-01-31 23:59:59",
-        )
-
-    assert exc_info.value.code == 40001
-    assert "Invalid client_id" in exc_info.value.msg
+    with pytest.raises(ToolError, match="schema"):
+        await get_order_list(start_time="2024-01-01 00:00:00", end_time="2024-01-31 23:59:59")
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -892,14 +778,11 @@ async def test_timeout_propagates(mock_call):
 
 @pytest.mark.asyncio
 async def test_refund_api_error_propagates(mock_call):
-    """CommerceAPIError from refund tools should propagate."""
+    """An unverified fixture or upstream error cannot authorize a read contract."""
     mock_call.side_effect = CommerceAPIError(code=50001, msg="Refund record not found")
-
-    with pytest.raises(CommerceAPIError) as exc_info:
+    with pytest.raises(ToolError, match="schema"):
         await get_refund_detail(refund_id="RF99999999")
-
-    assert exc_info.value.code == 50001
-    assert "Refund record not found" in exc_info.value.msg
+    mock_call.assert_not_awaited()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -909,56 +792,30 @@ async def test_refund_api_error_propagates(mock_call):
 
 @pytest.mark.asyncio
 async def test_pagination_default_page_and_size(mock_call, order_list_payload):
-    """Default page=1, page_size=20 should be sent as strings."""
+    """An unverified fixture or upstream error cannot authorize a read contract."""
     mock_call.return_value = order_list_payload
-
-    await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-    )
-
-    _, biz_params = mock_call.call_args[0]
-    assert biz_params["page"] == "1"
-    assert biz_params["page_size"] == "20"
+    with pytest.raises(ToolError, match="schema"):
+        await get_order_list(start_time="2024-01-01 00:00:00", end_time="2024-01-31 23:59:59")
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_pagination_custom_page(mock_call, order_list_payload):
-    """Custom page and page_size values should be passed correctly."""
+    """An unverified fixture or upstream error cannot authorize a read contract."""
     mock_call.return_value = order_list_payload
-
-    await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-        page=3,
-        page_size=50,
-    )
-
-    _, biz_params = mock_call.call_args[0]
-    assert biz_params["page"] == "3"
-    assert biz_params["page_size"] == "50"
+    with pytest.raises(ToolError, match="schema"):
+        await get_order_list(start_time="2024-01-01 00:00:00", end_time="2024-01-31 23:59:59", page=3, page_size=50)
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_pagination_empty_result_set(mock_call):
-    """An empty order list should be handled gracefully."""
-    empty_response = {
-        "order_list_get_response": {
-            "order_list": [],
-            "total_count": 0,
-        },
-    }
+    """An unverified fixture or upstream error cannot authorize a read contract."""
+    empty_response = {"order_list_get_response": {"order_list": [], "total_count": 0}}
     mock_call.return_value = empty_response
-
-    result_json = await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-01 00:00:01",
-    )
-    result = json.loads(result_json)
-
-    info = result["order_list_get_response"]
-    assert info["total_count"] == 0
-    assert info["order_list"] == []
+    with pytest.raises(ToolError, match="schema"):
+        await get_order_list(start_time="2024-01-01 00:00:00", end_time="2024-01-01 00:00:01")
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -993,43 +850,29 @@ async def test_pagination_review_list_custom(mock_call, review_list_payload):
 
 @pytest.mark.asyncio
 async def test_output_is_valid_json_string(mock_call, order_list_payload):
-    """All tool return values should be valid JSON strings."""
+    """An unverified fixture or upstream error cannot authorize a read contract."""
     mock_call.return_value = order_list_payload
-
-    result = await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-    )
-
-    assert isinstance(result, str)
-    parsed = json.loads(result)
-    assert isinstance(parsed, dict)
+    with pytest.raises(ToolError, match="schema"):
+        await get_order_list(start_time="2024-01-01 00:00:00", end_time="2024-01-31 23:59:59")
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_refund_output_is_valid_json_string(mock_call, refund_list_payload):
-    """Refund tools should return valid JSON strings."""
+    """An unverified fixture or upstream error cannot authorize a read contract."""
     mock_call.return_value = refund_list_payload
-
-    result = await get_refund_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-    )
-
-    assert isinstance(result, str)
-    parsed = json.loads(result)
-    assert isinstance(parsed, dict)
+    with pytest.raises(ToolError, match="schema"):
+        await get_refund_list(start_time="2024-01-01 00:00:00", end_time="2024-01-31 23:59:59")
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_shop_info_output_is_valid_json_string(mock_call, shop_info_payload):
-    """Shop info should return valid JSON string."""
+    """An unverified fixture or upstream error cannot authorize a read contract."""
     mock_call.return_value = shop_info_payload
-
-    result = await get_shop_info()
-    assert isinstance(result, str)
-    parsed = json.loads(result)
-    assert isinstance(parsed, dict)
+    with pytest.raises(ToolError, match="schema"):
+        await get_shop_info()
+    mock_call.assert_not_awaited()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1039,14 +882,11 @@ async def test_shop_info_output_is_valid_json_string(mock_call, shop_info_payloa
 
 @pytest.mark.asyncio
 async def test_call_passthrough_with_minimal_params(mock_call):
-    """Verify _call receives the expected API type and biz params."""
+    """An unverified fixture or upstream error cannot authorize a read contract."""
     mock_call.return_value = _mock_response({"ok": True})
-
-    await get_order_detail(order_sn="231215-1234567890123")
-
-    api_type, biz_params = mock_call.call_args[0]
-    assert api_type == "pdd.order.information.get"
-    assert biz_params == {"order_sn": "231215-1234567890123"}
+    with pytest.raises(ToolError, match="schema"):
+        await get_order_detail(order_sn="231215-1234567890123")
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio

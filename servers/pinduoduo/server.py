@@ -13,6 +13,7 @@ import os
 from contextlib import asynccontextmanager
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from servers.pinduoduo.client import PinduoduoMCP
 from shared.cn_commerce_base import (
@@ -71,40 +72,22 @@ async def get_order_list(
     page: int = 1,
     page_size: int = 20,
 ) -> str:
-    """Query order list by time range and optional status.
+    """Unavailable until the official PDD read schema can be verified.
 
-    Args:
-        start_time: Order start time, e.g. "2024-01-01 00:00:00"
-        end_time: Order end time, e.g. "2024-01-31 23:59:59"
-        order_status: Status filter. Common values:
-            1 (待发货), 2 (已发货), 3 (已签收), 4 (退款中), 5 (已退款).
-            Empty string means all statuses.
-        page: Page number, starting from 1.
-        page_size: Number of orders per page (max 100).
+    Existing input names are retained for MCP discovery compatibility.
+    See docs/pinduoduo-contract.md for verified sources and missing fields.
     """
-    biz_params: dict = {
-        "start_created_at": start_time,
-        "end_created_at": end_time,
-        "page": str(page),
-        "page_size": str(page_size),
-    }
-    if order_status:
-        biz_params["order_status"] = order_status
-
-    result = await pdd._call("pdd.order.list.get", biz_params)
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    raise ToolError("PDD read schema unavailable; see docs/pinduoduo-contract.md")
 
 
 @mcp.tool()
 async def get_order_detail(order_sn: str) -> str:
-    """Get full details of a single order.
+    """Unavailable until the official PDD read schema can be verified.
 
-    Args:
-        order_sn: The PDD order serial number (e.g. "231215-1234567890123").
+    Existing input names are retained for MCP discovery compatibility.
+    See docs/pinduoduo-contract.md for verified sources and missing fields.
     """
-    biz_params = {"order_sn": order_sn}
-    result = await pdd._call("pdd.order.information.get", biz_params)
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    raise ToolError("PDD read schema unavailable; see docs/pinduoduo-contract.md")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -177,34 +160,22 @@ async def get_refund_list(
     page: int = 1,
     page_size: int = 20,
 ) -> str:
-    """Query refund (after-sale) list by time range.
+    """Unavailable until the official PDD read schema can be verified.
 
-    Args:
-        start_time: Query start time, e.g. "2024-01-01 00:00:00"
-        end_time: Query end time, e.g. "2024-01-31 23:59:59"
-        page: Page number, starting from 1.
-        page_size: Number of records per page (max 100).
+    Existing input names are retained for MCP discovery compatibility.
+    See docs/pinduoduo-contract.md for verified sources and missing fields.
     """
-    biz_params = {
-        "start_created_at": start_time,
-        "end_created_at": end_time,
-        "page": str(page),
-        "page_size": str(page_size),
-    }
-    result = await pdd._call("pdd.refund.list.get", biz_params)
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    raise ToolError("PDD read schema unavailable; see docs/pinduoduo-contract.md")
 
 
 @mcp.tool()
 async def get_refund_detail(refund_id: str) -> str:
-    """Get full details of a single refund record.
+    """Unavailable until the official PDD read schema can be verified.
 
-    Args:
-        refund_id: The refund/after-sale record ID (e.g. "RF123456789").
+    Existing input names are retained for MCP discovery compatibility.
+    See docs/pinduoduo-contract.md for verified sources and missing fields.
     """
-    biz_params = {"refund_id": refund_id}
-    result = await pdd._call("pdd.refund.information.get", biz_params)
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    raise ToolError("PDD read schema unavailable; see docs/pinduoduo-contract.md")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -265,9 +236,12 @@ async def get_review_list(
 
 @mcp.tool()
 async def get_shop_info() -> str:
-    """Get mall/shop basic information for the authenticated merchant."""
-    result = await pdd._call("pdd.mall.info.get", {})
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    """Unavailable until the official PDD read schema can be verified.
+
+    Existing input names are retained for MCP discovery compatibility.
+    See docs/pinduoduo-contract.md for verified sources and missing fields.
+    """
+    raise ToolError("PDD read schema unavailable; see docs/pinduoduo-contract.md")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

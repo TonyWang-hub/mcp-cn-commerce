@@ -515,6 +515,8 @@ class TestErrorPropagationAutomation:
                 with pytest.raises(CommerceAPIError) as caught:
                     if platform == "xiaohongshu":
                         await module.get_order_detail(order_id="test-order")
+                    elif platform == "pinduoduo":
+                        await module.get_product_list()
                     else:
                         await module.get_shop_info()
             assert caught.value.code == 40001

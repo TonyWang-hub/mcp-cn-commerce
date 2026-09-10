@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 
 # Repo root, used by tests that assert on the on-disk project layout.
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -1316,41 +1316,12 @@ class TestPinduoduoFullRequestFlow:
     """Integration: PDD tool → PinduoduoMCP._call → mock HTTP."""
 
     @pytest.mark.asyncio
-    async def test_get_order_list_end_to_end(self):
-        """PDD get_order_list → _call → POST form data → mock HTTP."""
-        # PDD module requires env vars at import time; set them temporarily
-        env = {
-            "PINDUODUO_CLIENT_ID": "pdd_key",
-            "PINDUODUO_CLIENT_SECRET": "pdd_secret",
-            "PINDUODUO_ACCESS_TOKEN": "pdd_tok",
-        }
-        with patch.dict(os.environ, env, clear=False):
-            import importlib
+    async def test_unverified_order_read_is_explicitly_unavailable(self):
+        """An offline fixture cannot make missing business schema verified."""
+        import importlib
 
-            importlib.import_module("servers.pinduoduo.server")
-            pdd_mod = sys.modules["servers.pinduoduo.server"]
-            pinduoduo_cls = pdd_mod.PinduoduoMCP
-
-        client = pinduoduo_cls(app_key="pdd_key", app_secret="pdd_secret", access_token="pdd_tok")
-
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "order_list_get_response": {
-                "order_list": [{"order_sn": "PDD001", "status": 1}],
-                "total_count": 1,
-            }
-        }
-        mock_response.status_code = 200
-
-        mock_http = AsyncMock()
-        mock_http.post.return_value = mock_response
-
-        with patch.object(pdd_mod, "pdd", client):
-            with patch.object(client, "_ensure_client", return_value=mock_http):
-                result = await pdd_mod.get_order_list(
-                    start_time="2024-01-01 00:00:00",
-                    end_time="2024-01-31 23:59:59",
-                )
-
-        data = json.loads(result)
-        assert "order_list_get_response" in data
+        pdd_mod = importlib.import_module("servers.pinduoduo.server")
+        with patch.object(pdd_mod.pdd, "_call", new_callable=AsyncMock) as transport:
+            with pytest.raises(ToolError, match="schema"):
+                await pdd_mod.get_order_list("2026-09-09 00:00:00", "2026-09-10 00:00:00")
+            transport.assert_not_awaited()

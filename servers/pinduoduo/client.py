@@ -46,10 +46,13 @@ class PinduoduoMCP(CommerceMCPBase):
             raise ConfigValidationError("PINDUODUO", missing)
         if self.validate_input:
             self._validate_params(biz_params or {})
+        protected = {"type", "client_id", "client_secret", "access_token", "sign", "timestamp", "data_type", "version"}
+        if protected.intersection(biz_params or {}):
+            raise ValueError("Business parameters cannot override PDD protocol fields")
         params: dict[str, str] = {
             "type": api_type,
             "client_id": self.app_key,
-            "timestamp": str(int(time.time() * 1000)),
+            "timestamp": str(int(time.time())),
             "data_type": "JSON",
         }
         if self.access_token:
@@ -62,13 +65,17 @@ class PinduoduoMCP(CommerceMCPBase):
 
         def prepare_request():
             signed = dict(params)
-            signed["timestamp"] = str(int(time.time() * 1000))
+            signed["timestamp"] = str(int(time.time()))
             signed["sign"] = self._sign(signed)
             return {"data": signed}
 
         def parse_response(result):
+            if not isinstance(result, dict):
+                raise CommerceAPIError(code="invalid_response", msg="PDD response must be an object")
             if "error_response" in result:
                 error = result["error_response"]
+                if not isinstance(error, dict):
+                    raise CommerceAPIError(code="invalid_response", msg="PDD error_response must be an object")
                 raise CommerceAPIError(
                     code=error.get("error_code", error.get("code", -1)),
                     msg=error.get("error_msg", error.get("msg", "unknown")),

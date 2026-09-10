@@ -116,11 +116,6 @@ OTHER_MAPPINGS = [
     ("jd", "get_refund_list", "jd.pop.afs.search"),
     ("jd", "get_refund_detail", "jd.pop.afs.get"),
     ("jd", "get_shop_info", "jd.pop.shop.get"),
-    ("pinduoduo", "get_order_list", "pdd.order.list.get"),
-    ("pinduoduo", "get_order_detail", "pdd.order.information.get"),
-    ("pinduoduo", "get_refund_list", "pdd.refund.list.get"),
-    ("pinduoduo", "get_refund_detail", "pdd.refund.information.get"),
-    ("pinduoduo", "get_shop_info", "pdd.mall.info.get"),
     ("kuaishou", "get_order_list", "/open/api/order/list"),
     ("kuaishou", "get_order_detail", "/open/api/order/detail"),
     ("kuaishou", "get_refund_list", "/open/api/refund/list"),
@@ -223,7 +218,7 @@ async def test_explicitly_unsupported_operations_have_metadata_and_never_send(pl
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "platform", ["doudian", "taobao", "jd", "pinduoduo", "kuaishou", "xiaohongshu", "weixin_store", "oceanengine"]
+    "platform", ["doudian", "taobao", "jd", "kuaishou", "xiaohongshu", "weixin_store", "oceanengine"]
 )
 async def test_every_platform_keeps_two_authorizations_isolated_on_the_wire(platform):
     import json

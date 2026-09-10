@@ -100,7 +100,10 @@ transport or closes it through reconnect/close paths.
 
 ## Catalogue and evidence status
 
-`client.operations` is a read-only mapping to frozen `Operation` records:
+`operation_catalog(platform)` requires no credentials, creates no transport, and
+returns the same read-only mapping of frozen `Operation` records as
+`client.operations`. Services can inspect capabilities before obtaining or
+refreshing authorization:
 
 - `endpoint`: existing low-level adapter route (XHS entries are local aliases).
 - `supported`: whether the SDK has an existing adapter mapping. It is not an
@@ -113,7 +116,7 @@ transport or closes it through reconnect/close paths.
 
 | Platform | Callable operations | Evidence and omissions |
 |---|---|---|
-| 抖店 | Orders list/detail, refunds list, shop info | Transport documented; existing business methods need official/live checks. Refund detail is explicitly unsupported |
+| 抖店 | Orders list/detail, refunds list/detail | Four business contracts documented on 2026-09-10; general shop info explicitly unsupported. Native fields and live gates: [Doudian contract](doudian-contract.md) |
 | 淘宝 | Orders list/detail/increment, refunds list/detail, shop info | Order-list contract documented; other mappings marked transport-only |
 | 京东 | Orders list/detail, refunds list/detail, shop info | All unverified: old official MD5/envelope evidence conflicts with current adapter; not promoted by this SDK |
 | 拼多多 | Orders list/detail, refunds list/detail, shop info | All unverified: current signing/time-unit/business contracts pending |
@@ -143,7 +146,8 @@ input-snapshot isolation, protocol-field override rejection, independent/shared
 transport ownership, explicit credential validation, immutable metadata, and a
 fresh-process check for environment/global-server side effects.
 
-Actual checks on 2026-09-10:
+Initial SDK extraction checks on 2026-09-10 (before the Doudian contract correction;
+see its [validation record](doudian-contract.md) for subsequent results):
 
 - Python 3.12.3: 74 SDK tests passed; complete suite 1660 passed plus 20 subtests.
 - Python 3.14.6: complete suite 1660 passed plus 20 subtests.

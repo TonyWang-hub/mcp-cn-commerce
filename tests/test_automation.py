@@ -374,7 +374,7 @@ class TestFullRequestFlowAutomation:
         mock_http = AsyncMock()
         mock_http_response.json.return_value = {
             "code": 10000,
-            "data": {"list": [{"order_id": "DD001", "order_status": 2}], "total": 1},
+            "data": {"shop_order_list": [{"order_id": "DD001", "order_status": 2}], "total": 1},
         }
         mock_http.post.return_value = mock_http_response
 
@@ -497,7 +497,7 @@ class TestErrorPropagationAutomation:
                     result = json.loads(await module.get_advertiser_info("123"))
                     assert result["error"]["code"] == 40001
                 else:
-                    result = await module.get_shop_info()
+                    result = await module.get_order_detail(order_id="test-order")
                     assert result["error"]
                     assert result["code"] == 40001
         else:

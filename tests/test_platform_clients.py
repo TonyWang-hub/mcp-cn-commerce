@@ -206,7 +206,7 @@ async def test_remaining_platform_operations_use_existing_wire_contract(platform
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "platform, operation",
-    [("xiaohongshu", "get_shop_info"), ("doudian", "get_refund_detail"), ("oceanengine", "get_order_list")],
+    [("xiaohongshu", "get_shop_info"), ("doudian", "get_shop_info"), ("oceanengine", "get_order_list")],
 )
 async def test_explicitly_unsupported_operations_have_metadata_and_never_send(platform, operation):
     def forbidden(request):
@@ -247,19 +247,34 @@ async def test_every_platform_keeps_two_authorizations_isolated_on_the_wire(plat
         if len(tokens) == 2:
             entered.set()
         await asyncio.wait_for(entered.wait(), 1)
-        return httpx.Response(200, json={"data": {"token_used": token}})
+        return httpx.Response(
+            200,
+            json={
+                "data": (
+                    {"shop_order_detail": {"order_id": "order", "token_used": token}}
+                    if platform == "doudian"
+                    else {"token_used": token}
+                )
+            },
+        )
 
     first_credentials = platform_credentials(platform)
     second_credentials = {**first_credentials, "access_token": "second-shop-token"}
     operation = "get_advertiser_info" if platform == "oceanengine" else "get_order_detail"
-    params = {"order_id": "order"} if platform == "xiaohongshu" else {}
+    params = (
+        {"order_id": "order"}
+        if platform == "xiaohongshu"
+        else ({"shop_order_id": "order"} if platform == "doudian" else {})
+    )
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         async with sdk().create_platform_client(platform, first_credentials, http_client=http) as first:
             async with sdk().create_platform_client(platform, second_credentials, http_client=http) as second:
                 first_credentials["access_token"] = "mutated"
                 results = await asyncio.gather(first.call(operation, params), second.call(operation, params))
                 assert set(tokens) == {"shop-token", "second-shop-token"}
-                key_results = results if platform == "doudian" else [r["data"] for r in results]
+                key_results = (
+                    [r["shop_order_detail"] for r in results] if platform == "doudian" else [r["data"] for r in results]
+                )
                 assert [r["token_used"] for r in key_results] == ["shop-token", "second-shop-token"]
 
 
@@ -342,10 +357,10 @@ async def test_catalogue_is_immutable_and_reports_contract_gaps():
 @pytest.mark.parametrize(
     "platform, operation, expected",
     [
-        ("doudian", "get_order_list", "order.list"),
-        ("doudian", "get_order_detail", "order.detail"),
-        ("doudian", "get_refund_list", "refund.listSearch"),
-        ("doudian", "get_shop_info", "shop.basicInfo"),
+        ("doudian", "get_order_list", "order.searchList"),
+        ("doudian", "get_order_detail", "order.orderDetail"),
+        ("doudian", "get_refund_list", "afterSale.List"),
+        ("doudian", "get_refund_detail", "afterSale.Detail"),
         ("taobao", "get_order_list", "taobao.trades.sold.get"),
         ("taobao", "get_increment_orders", "taobao.trades.sold.increment.get"),
         ("taobao", "get_order_detail", "taobao.trade.fullinfo.get"),
@@ -356,15 +371,28 @@ async def test_catalogue_is_immutable_and_reports_contract_gaps():
 )
 async def test_doudian_and_top_read_mappings_use_existing_signed_methods(platform, operation, expected):
     calls = []
+    params = {}
+    response = {"ok": True}
+    if platform == "doudian":
+        if operation == "get_order_list":
+            params, response = {"page": 0, "size": 20}, {"shop_order_list": [], "total": 0}
+        elif operation == "get_order_detail":
+            params, response = {"shop_order_id": "order"}, {"shop_order_detail": {"order_id": "order"}}
+        elif operation == "get_refund_list":
+            params, response = {"page": 0, "size": 20}, {"items": [], "total": 0, "has_more": False}
+        else:
+            params, response = {"after_sale_id": "refund"}, {
+                "process_info": {"after_sale_info": {"after_sale_id": "refund"}}
+            }
 
     def handle(request):
         calls.append(request)
-        return httpx.Response(200, json={"data": {"ok": True}})
+        return httpx.Response(200, json={"data": response})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         async with sdk().create_platform_client(platform, platform_credentials(platform), http_client=http) as client:
-            result = await client.call(operation, {})
-            assert result == ({"ok": True} if platform == "doudian" else {"data": {"ok": True}})
+            result = await client.call(operation, params)
+            assert result == (response if platform == "doudian" else {"data": response})
             assert calls[0].url.params["method"] == expected
             assert calls[0].url.params["sign"]
 

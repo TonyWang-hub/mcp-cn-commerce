@@ -8,6 +8,7 @@ import json
 import time
 from typing import Any
 
+from servers.doudian.schema import validate_read_params, validate_read_response
 from shared.cn_commerce_base import (
     DEFAULT_RETRY,
     CommerceAPIError,
@@ -125,6 +126,7 @@ class DouDianClient(CommerceMCPBase):
         if missing:
             raise ConfigError(f"Missing required environment variables: {', '.join(missing)}")
         params = params or {}
+        validate_read_params(method.strip("/"), params)
         if self.validate_input:
             self._validate_params(params)
         param_json = self._serialize_business(params)
@@ -155,7 +157,9 @@ class DouDianClient(CommerceMCPBase):
                     sub_code=str(result.get("sub_code", "")),
                     sub_msg=result.get("sub_msg", ""),
                 )
-            return result.get("data", result)
+            data = result.get("data", result)
+            validate_read_response(method.strip("/"), data)
+            return data
 
         return await self._send_request(
             "POST",

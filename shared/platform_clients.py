@@ -31,11 +31,11 @@ class Operation:
 
 _OPERATIONS = {
     "doudian": {
-        "get_order_list": Operation("order/list", "transport_only"),
-        "get_order_detail": Operation("order/detail", "transport_only"),
-        "get_refund_list": Operation("refund/listSearch", "transport_only"),
-        "get_shop_info": Operation("shop/basicInfo", "transport_only"),
-        "get_refund_detail": Operation("", supported=False, reason="No existing refund-detail adapter mapping"),
+        "get_order_list": Operation("order/searchList", "documented"),
+        "get_order_detail": Operation("order/orderDetail", "documented"),
+        "get_refund_list": Operation("afterSale/List", "documented"),
+        "get_shop_info": Operation("", supported=False, reason="No verified general Doudian shop-info API"),
+        "get_refund_detail": Operation("afterSale/Detail", "documented"),
     },
     "taobao": {
         "get_order_list": Operation("taobao.trades.sold.get", "documented"),
@@ -149,6 +149,13 @@ _PROTOCOL_FIELDS = frozenset(
 )
 
 
+def operation_catalog(platform: str) -> Mapping[str, Operation]:
+    """Inspect read operations before authentication, without loading any client."""
+    if not isinstance(platform, str) or platform not in _OPERATIONS:
+        raise ValueError("Unsupported platform")
+    return MappingProxyType(dict(_OPERATIONS[platform]))
+
+
 class PlatformClient:
     """One authorization snapshot with an explicit read-only operation catalogue."""
 
@@ -156,7 +163,7 @@ class PlatformClient:
         self._platform = platform
         self._adapter = adapter
         self._closed = False
-        self._operations = MappingProxyType(dict(_OPERATIONS[platform]))
+        self._operations = operation_catalog(platform)
 
     @property
     def platform(self) -> str:

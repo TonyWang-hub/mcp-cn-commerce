@@ -1285,7 +1285,7 @@ class TestDoudianFullRequestFlow:
         mock_response.json.return_value = {
             "code": 10000,
             "data": {
-                "list": [
+                "shop_order_list": [
                     {"order_id": "DD001", "order_status": 2, "pay_amount": 9900},
                 ],
                 "total": 1,

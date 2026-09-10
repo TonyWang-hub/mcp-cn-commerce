@@ -2979,6 +2979,9 @@ class CommerceMCPBase:
                             kwargs[key] = value
                     if prepare_request is not None:
                         kwargs.update(prepare_request())
+                    # The signed platform endpoint is the trust boundary, even
+                    # when a host injects a client configured to follow redirects.
+                    kwargs["follow_redirects"] = False
                     client = await self._ensure_client()
                     send = getattr(client, method.lower(), None)
                     response = await send(url, **kwargs) if send else await client.request(method, url, **kwargs)

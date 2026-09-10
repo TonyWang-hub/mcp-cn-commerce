@@ -12,6 +12,7 @@ import os
 from contextlib import asynccontextmanager
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from servers.jd.client import JDMCP
 from shared.cn_commerce_base import (
@@ -57,6 +58,13 @@ async def _lifespan(_server):
 mcp = MCPServer("mcp-cn-jd", lifespan=_lifespan)
 
 
+def _require_official_read_contract() -> None:
+    raise ToolError(
+        "JD POP read contract migration is pending; legacy method/signing/schema are incompatible. "
+        "See docs/remaining-platform-contracts.md"
+    )
+
+
 @mcp.tool()
 async def get_order_list(
     start_time: str,
@@ -79,6 +87,7 @@ async def get_order_list(
         page: Page number, starting from 1.
         page_size: Number of orders per page (max 100).
     """
+    _require_official_read_contract()
     biz_params = {
         "start_date": start_time,
         "end_date": end_time,
@@ -99,6 +108,7 @@ async def get_order_detail(order_id: str) -> str:
     Args:
         order_id: The JD order ID (e.g. "3000000000001").
     """
+    _require_official_read_contract()
     biz_params = {"order_id": order_id}
     result = await jd._call("jd.pop.order.get", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
@@ -137,6 +147,7 @@ async def get_shop_info(shop_id: str = "") -> str:
     Args:
         shop_id: JD shop ID. Leave empty to use the authenticated shop.
     """
+    _require_official_read_contract()
     biz_params: dict = {}
     if shop_id:
         biz_params["shop_id"] = shop_id
@@ -173,6 +184,7 @@ async def get_after_sale_list(
         page: Page number, starting from 1.
         page_size: Number of records per page (max 100).
     """
+    _require_official_read_contract()
     biz_params = {
         "start_date": start_time,
         "end_date": end_time,
@@ -193,6 +205,7 @@ async def get_after_sale_detail(after_sale_id: str) -> str:
     Args:
         after_sale_id: The after-sale record ID (e.g. "AS00000001").
     """
+    _require_official_read_contract()
     biz_params = {"after_sale_id": after_sale_id}
     result = await jd._call("jd.pop.afs.get", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)

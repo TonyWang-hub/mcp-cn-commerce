@@ -309,34 +309,23 @@ class TestFullRequestFlowAutomation:
 
     @pytest.mark.asyncio
     async def test_jd_full_flow(self, mock_http_response):
-        """JD: tool -> _call -> _request -> mock HTTP -> JSON response."""
-        from servers.jd.server import JDMCP
+        """Known incompatible legacy JD contract must fail before network I/O."""
+        from mcp.server.mcpserver.exceptions import ToolError
+
+        from servers.jd.server import JDMCP, get_order_list
 
         client = JDMCP(app_key="jd_key", app_secret="jd_secret", access_token="jd_tok")
-
         mock_http = AsyncMock()
-        mock_http_response.json.return_value = {
-            "jd_pop_order_search_response": {
-                "searchorderinfo_result": {
-                    "orderInfoList": [{"order_id": "30001"}],
-                    "orderTotal": 1,
-                }
-            }
-        }
-        mock_http.post.return_value = mock_http_response
         mock_http.is_closed = False
-
         with patch("servers.jd.server.jd", client):
             with patch.object(client, "_ensure_client", return_value=mock_http):
-                from servers.jd.server import get_order_list
-
-                result = await get_order_list(
-                    start_time="2024-01-01 00:00:00",
-                    end_time="2024-01-31 23:59:59",
-                )
-
-        data = json.loads(result)
-        assert "jd_pop_order_search_response" in data
+                with pytest.raises(ToolError, match="JD POP"):
+                    await get_order_list(
+                        start_time="2024-01-01 00:00:00",
+                        end_time="2024-01-31 23:59:59",
+                    )
+        mock_http.post.assert_not_awaited()
+        await client.close()
 
     @pytest.mark.asyncio
     async def test_taobao_full_flow(self, mock_http_response):
@@ -515,7 +504,8 @@ class TestErrorPropagationAutomation:
                 with pytest.raises(CommerceAPIError) as caught:
                     if platform == "xiaohongshu":
                         await module.get_order_detail(order_id="test-order")
-                    elif platform == "pinduoduo":
+                    elif platform in {"pinduoduo", "jd"}:
+                        # Read-contract migrations are gated; retain the transport error regression.
                         await module.get_product_list()
                     else:
                         await module.get_shop_info()

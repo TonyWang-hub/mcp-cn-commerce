@@ -53,11 +53,19 @@ _OPERATIONS = {
         "get_shop_info": Operation("taobao.shop.get", "transport_only"),
     },
     "jd": {
-        "get_order_list": Operation("jd.pop.order.search"),
-        "get_order_detail": Operation("jd.pop.order.get"),
-        "get_refund_list": Operation("jd.pop.afs.search"),
-        "get_refund_detail": Operation("jd.pop.afs.get"),
-        "get_shop_info": Operation("jd.pop.shop.get"),
+        name: Operation(
+            endpoint,
+            "partial",
+            supported=False,
+            reason="JD POP read contract migration pending (official method/signing/schema changed); see docs/remaining-platform-contracts.md",
+        )
+        for name, endpoint in {
+            "get_order_list": "jingdong.pop.order.search",
+            "get_order_detail": "jingdong.pop.order.get",
+            "get_refund_list": "jingdong.asc.query.list",
+            "get_refund_detail": "jingdong.asc.query.view",
+            "get_shop_info": "jingdong.vender.shop.query",
+        }.items()
     },
     "pinduoduo": {
         name: Operation(

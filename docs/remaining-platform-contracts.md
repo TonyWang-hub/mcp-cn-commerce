@@ -87,3 +87,46 @@ ISV 需入驻服务市场、上架服务，商家购买后静默授权权限集�
 
 本轮修正 SDK/CLI 店铺信息旧错误路径与 POST 方法，并将 CLI 售后列表改为秒级时间和 `next_key`；兼容保留旧参数，但 page>1 明确拒绝，page_size 不发送给官方。
 9 项新增合同测试先失败后通过；连同原微信工具测试和 SDK 测试共 102 项通过。`documented` 仅表示文档/受控请求合同，所有 `live_verified` 仍为 false。
+
+
+## 京东 POP：官方 schema 已取得，旧读合同已封闭，业务迁移仍待实现
+
+这是 JOS 京东 POP 商家店铺接口，不是京东秒送/即时零售开放平台。
+[新手指南](https://jos.jd.com/commondoc?listId=298)说明开发者注册与应用审核流程；商家、ISV 或个人账号能注册不代表获准使用 POP 商家订单权限。
+应用测试状态每天 500 次调用，上线后按应用规则调整；测试状态是一种应用配额，不是匿名测试店。
+[协议文档](https://jos.jd.com/commondoc?listId=33)目前确实列出正式 `https://api.jd.com/routerjson` 与预发 `https://api-dev.jd.com/routerjson`。
+本轮没有找到可匿名领取 POP 预发 appKey/token/商家数据的入口；京东秒送的沙箱不可作为 POP 的测试资源证明。
+
+[OAuth 文档](https://jos.jd.com/commondoc?listId=32)明确网页授权为 `https://open-oauth.jd.com/oauth2/to_login`，
+`app_key/response_type=code/redirect_uri/state/scope`；换码 `/oauth2/access_token` 使用 `app_key/app_secret/grant_type=authorization_code/code`，
+刷新 `/oauth2/refresh_token` 使用 `grant_type=refresh_token/refresh_token`。
+返回 `access_token/refresh_token/expires_in`，expires_in 为秒，scope 为逗号分隔；`xid`（正文表另写 xId）是用户身份，不等同店铺 ID。
+文档要求到期前 24 小时内刷新、过期后不能刷新，成功后保存新 AT/RT；单月刷新次数也有限制。
+RT 的独立截止时间及用户 xid 与当前店铺 vender_id/shop_id 绑定的完整合同尚未闭合，故没有增加 Pro JD provider。
+
+通过官网当前 JS 中公开的 `https://joshome.jd.com/doc/getChannelInfoListByTreeId?id=...`、`/classification/list?id=...` 与
+`/api/detail?id=...&apiName=...`，**匿名取得完整正文与 schema**，不是登录阻塞。
+订单 API 正文在 2026-08-17/31 更新，优先于旧协议页中的 2012 示例。
+
+| 目标 | 当前官方方法/文档 | 与旧实现的实质差异 |
+| --- | --- | --- |
+| 订单列表 | [jingdong.pop.order.search](https://jos.jd.com/apilistnewdetail.html?apiId=15660) | 必填业务容器 `paramOrderJSFQuery`；其中 `order_state/optional_fields/source_id/page/page_size`，页码/大小是字符串，大小<=100；旧实现的平铺字段和 `jd.*` 方法名不符合该正文 |
+| 订单详情 | [jingdong.pop.order.get](https://jos.jd.com/apilistnewdetail.html?apiId=15661) | 同一请求容器，`order_id` 为 Number，需 `optional_fields/source_id`；字段选择和响应对象为当前 camelCase schema |
+| 售后服务列表 | [jingdong.asc.query.list](https://jos.jd.com/apilistnewdetail.html?apiId=14061) | 请求 `serviceAllQuery`、`pageRequest.pageNumber/pageSize` 及操作人员等业务字段；这是售后服务，不直接证明实际退款资金列表 |
+| 售后服务详情 | [jingdong.asc.query.view](https://jos.jd.com/apilistnewdetail.html?apiId=14043) | 请求 `baseRequest` 等嵌套结构；还要继续核实与退款资金明细 API 的关系，不能将 service 完成一概当作退款完成 |
+| 当前店铺 | [jingdong.vender.shop.query](https://jos.jd.com/apilistnewdetail.html?apiId=12866) | `venderId` 被标为系统字段；返回 `vender_id/shop_id/shop_name`；其授权注入和 xid 绑定还需联调确认 |
+
+列表时间是 `yyyy-MM-dd HH:mm:ss`；创建/更新时间模式由 `dateType` 控制，1 创建，其他/默认更新；
+创建查询近两年，按更新时间的可见范围仅三个月，单窗口最多一个月；排序 `sortType=1` 为降序，其他/默认升序。
+响应外层官方拼写为 `jingdong_pop_order_search_responce`；业务成功须继续检查 `orderInfoResult.apiResult`，不能只看 HTTP 200。
+`venderId/appKey/pin` 等被 schema 标为 SystemValue 的项与普通必填项不能混淆；下一实现轮须严格处理，而不是要求商家任意传主体值。
+
+公共协议是 `method/access_token/app_key/sign/timestamp/v=2.0/360buy_param_json`；时间是格式化日期而非秒。
+签名为 **MD5 大写(secret + 按 key 排序拼 key/value + secret)**，不是旧类中的 HMAC-MD5。
+GET 查询串或 POST 表单，业务 JSON 必须封装成 `360buy_param_json` 字符串，不是旧 POST JSON 平铺。
+本轮先将 SDK 五个读 operation 标 `partial/supported=false`，CLI 保留五个原工具名称并在网络前抛出明确 ToolError。
+没有删除底层其他旧工具；它们仍是历史未验合同，不能用这些 transport 测试声称正式 POP 已支持。
+已拿到的 schema 为下一轮真正实现、逐层错误处理、分页以及订单/退款金额字段核验提供了依据；**本轮没有宣称 JD 业务迁移完成**。
+
+新 10 项合同测试先失败后通过；旧五工具的场景改为验证明确 unsupported 和无网络，保留其他工具的 API 错误传播回归。
+本地证据 `jd-doc-32/33/298.*`、`jd-api-15660/15661/14061/14043.json`、`jd-shop-detail.json`。

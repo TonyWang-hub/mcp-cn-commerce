@@ -9,6 +9,7 @@ import os
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 
 os.environ.setdefault("JD_APP_KEY", "test_key")
 os.environ.setdefault("JD_APP_SECRET", "test_secret")
@@ -522,66 +523,40 @@ def shop_score_payload() -> dict:
 
 @pytest.mark.asyncio
 async def test_get_order_list_returns_orders_with_correct_fields(mock_call, order_payload):
-    """get_order_list should return a list of orders with expected fields."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     mock_call.return_value = order_payload
-
-    result_json = await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-    )
-    result = json.loads(result_json)
-
-    assert "jingdong_pop_order_search_responce" in result
-    info_result = result["jingdong_pop_order_search_responce"]["searchorderinfo_result"]
-    orders = info_result["order_info_list"]["order_info"]
-
-    assert len(orders) == 2
-    assert info_result["order_total"] == 2
-
-    for order in orders:
-        assert "order_id" in order
-        assert "order_state" in order
-        assert "order_create_time" in order
-        assert "order_payment" in order
-        assert "order_total_price" in order
-        assert "consignee_info" in order
-
-    # Verify the correct API method was called with correct params
-    mock_call.assert_called_once_with(
-        "jd.pop.order.search",
-        {"start_date": "2024-01-01 00:00:00", "end_date": "2024-01-31 23:59:59", "page": "1", "page_size": "20"},
-    )
+    with pytest.raises(ToolError, match="JD POP"):
+        await get_order_list(
+            start_time="2024-01-01 00:00:00",
+            end_time="2024-01-31 23:59:59",
+        )
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_get_order_list_with_status_filter(mock_call, order_payload):
-    """get_order_list should include order_status in biz params when provided."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     mock_call.return_value = order_payload
-
-    await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-        order_status="FINISHED_L",
-    )
-
-    mock_call.assert_called_once()
-    _, biz_params = mock_call.call_args[0]
-    assert biz_params["order_status"] == "FINISHED_L"
+    with pytest.raises(ToolError, match="JD POP"):
+        await get_order_list(
+            start_time="2024-01-01 00:00:00",
+            end_time="2024-01-31 23:59:59",
+            order_status="FINISHED_L",
+        )
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_get_order_list_without_status_omits_field(mock_call, order_payload):
-    """get_order_list should NOT include order_status key when status is empty string."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     mock_call.return_value = order_payload
-
-    await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-        order_status="",  # default
-    )
-
-    _, biz_params = mock_call.call_args[0]
-    assert "order_status" not in biz_params
+    with pytest.raises(ToolError, match="JD POP"):
+        await get_order_list(
+            start_time="2024-01-01 00:00:00",
+            end_time="2024-01-31 23:59:59",
+            order_status="",  # default
+        )
+    mock_call.assert_not_awaited()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -591,29 +566,11 @@ async def test_get_order_list_without_status_omits_field(mock_call, order_payloa
 
 @pytest.mark.asyncio
 async def test_get_order_detail_returns_single_order_with_all_fields(mock_call, order_detail_payload):
-    """get_order_detail should return a single order with full details."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     mock_call.return_value = order_detail_payload
-
-    result_json = await get_order_detail(order_id="3000000000001")
-    result = json.loads(result_json)
-
-    details = result["jingdong_pop_order_get_responce"]["orderDetailInfo"]
-
-    assert details["order_id"] == "3000000000001"
-    assert details["order_state"] == "WAIT_SELLER_STOCK_OUT"
-    assert "order_payment" in details
-    assert "order_total_price" in details
-    assert "order_delivery_price" in details
-    assert "consignee_info" in details
-    assert "item_info_list" in details
-    assert len(details["item_info_list"]) == 1
-    assert details["item_info_list"][0]["sku_name"] == "无线蓝牙耳机"
-
-    # Verify correct API method and params
-    mock_call.assert_called_once_with(
-        "jd.pop.order.get",
-        {"order_id": "3000000000001"},
-    )
+    with pytest.raises(ToolError, match="JD POP"):
+        await get_order_detail(order_id="3000000000001")
+    mock_call.assert_not_awaited()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -676,32 +633,20 @@ async def test_get_product_list_without_ware_status_omits_field(mock_call, produ
 
 @pytest.mark.asyncio
 async def test_get_shop_info_returns_shop_details(mock_call, shop_info_payload):
-    """get_shop_info should return shop details."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     mock_call.return_value = shop_info_payload
-
-    result_json = await get_shop_info()
-    result = json.loads(result_json)
-
-    shop = result["jingdong_pop_shop_get_responce"]["shop_info"]
-
-    assert shop["shop_id"] == "10000001"
-    assert shop["shop_name"] == "XX官方旗舰店"
-    assert "shop_status" in shop
-    assert "shop_score" in shop
-    assert "open_time" in shop
-
-    # Verify API method called with NO shop_id (use authenticated shop)
-    mock_call.assert_called_once_with("jd.pop.shop.get", {})
+    with pytest.raises(ToolError, match="JD POP"):
+        await get_shop_info()
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_get_shop_info_with_shop_id(mock_call, shop_info_payload):
-    """get_shop_info should include shop_id when provided."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     mock_call.return_value = shop_info_payload
-
-    await get_shop_info(shop_id="10000002")
-
-    mock_call.assert_called_once_with("jd.pop.shop.get", {"shop_id": "10000002"})
+    with pytest.raises(ToolError, match="JD POP"):
+        await get_shop_info(shop_id="10000002")
+    mock_call.assert_not_awaited()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -711,64 +656,40 @@ async def test_get_shop_info_with_shop_id(mock_call, shop_info_payload):
 
 @pytest.mark.asyncio
 async def test_get_after_sale_list_returns_records_with_expected_fields(mock_call, after_sale_list_payload):
-    """get_after_sale_list should return after-sale records with correct fields."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     mock_call.return_value = after_sale_list_payload
-
-    result_json = await get_after_sale_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-    )
-    result = json.loads(result_json)
-
-    records = result["jingdong_pop_afs_search_responce"]["after_sale_list"]["after_sale_info"]
-
-    assert len(records) == 2
-    assert result["jingdong_pop_afs_search_responce"]["after_sale_list"]["total"] == 2
-
-    for record in records:
-        assert "after_sale_id" in record
-        assert "order_id" in record
-        assert "status" in record
-        assert "type" in record
-        assert "apply_time" in record
-        assert "amount" in record
-        assert "reason" in record
-
-    mock_call.assert_called_once_with(
-        "jd.pop.afs.search",
-        {"start_date": "2024-01-01 00:00:00", "end_date": "2024-01-31 23:59:59", "page": "1", "page_size": "20"},
-    )
+    with pytest.raises(ToolError, match="JD POP"):
+        await get_after_sale_list(
+            start_time="2024-01-01 00:00:00",
+            end_time="2024-01-31 23:59:59",
+        )
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_get_after_sale_list_with_status_filter(mock_call, after_sale_list_payload):
-    """get_after_sale_list should include status in biz params when provided."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     mock_call.return_value = after_sale_list_payload
-
-    await get_after_sale_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-        status="COMPLETE",
-    )
-
-    mock_call.assert_called_once()
-    _, biz_params = mock_call.call_args[0]
-    assert biz_params["status"] == "COMPLETE"
+    with pytest.raises(ToolError, match="JD POP"):
+        await get_after_sale_list(
+            start_time="2024-01-01 00:00:00",
+            end_time="2024-01-31 23:59:59",
+            status="COMPLETE",
+        )
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_get_after_sale_list_without_status_omits_field(mock_call, after_sale_list_payload):
-    """get_after_sale_list should NOT include status key when status is empty string."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     mock_call.return_value = after_sale_list_payload
-
-    await get_after_sale_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-        status="",
-    )
-
-    _, biz_params = mock_call.call_args[0]
-    assert "status" not in biz_params
+    with pytest.raises(ToolError, match="JD POP"):
+        await get_after_sale_list(
+            start_time="2024-01-01 00:00:00",
+            end_time="2024-01-31 23:59:59",
+            status="",
+        )
+    mock_call.assert_not_awaited()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -778,28 +699,11 @@ async def test_get_after_sale_list_without_status_omits_field(mock_call, after_s
 
 @pytest.mark.asyncio
 async def test_get_after_sale_detail_returns_full_record(mock_call, after_sale_detail_payload):
-    """get_after_sale_detail should return a single after-sale record with full details."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     mock_call.return_value = after_sale_detail_payload
-
-    result_json = await get_after_sale_detail(after_sale_id="AS00000001")
-    result = json.loads(result_json)
-
-    detail = result["jingdong_pop_afs_get_responce"]["after_sale_detail"]
-
-    assert detail["after_sale_id"] == "AS00000001"
-    assert detail["order_id"] == "3000000000001"
-    assert detail["status"] == "WAIT_SELLER_AGREE"
-    assert "type" in detail
-    assert "amount" in detail
-    assert "reason" in detail
-    assert "description" in detail
-    assert "evidence" in detail
-    assert "sku_info" in detail
-
-    mock_call.assert_called_once_with(
-        "jd.pop.afs.get",
-        {"after_sale_id": "AS00000001"},
-    )
+    with pytest.raises(ToolError, match="JD POP"):
+        await get_after_sale_detail(after_sale_id="AS00000001")
+    mock_call.assert_not_awaited()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1215,38 +1119,24 @@ async def test_get_shop_score_returns_dsr_ratings(mock_call, shop_score_payload)
 
 @pytest.mark.asyncio
 async def test_missing_order_id_returned_in_result(mock_call):
-    """When order_id is present but API returns an error response, it propagates as JSON."""
-    # This test verifies error information flows through — the server serializes
-    # whatever _call returns (including error responses) as JSON.
-    error_response = {
-        "error_response": {
-            "code": 1001,
-            "msg": "order_id not found",
-        },
-    }
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
+    error_response = {"error_response": {"code": 1001, "msg": "order_id not found"}}
     mock_call.return_value = error_response
-
-    result_json = await get_order_detail(order_id="9999999999999")
-    result = json.loads(result_json)
-
-    assert "error_response" in result
-    assert result["error_response"]["code"] == 1001
-    assert "order_id not found" in result["error_response"]["msg"]
+    with pytest.raises(ToolError, match="JD POP"):
+        await get_order_detail(order_id="9999999999999")
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_api_error_handling_commerce_api_error(mock_call):
-    """When _call raises CommerceAPIError (via _request), it should propagate."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     mock_call.side_effect = CommerceAPIError(code=4003, msg="Invalid access token")
-
-    with pytest.raises(CommerceAPIError) as exc_info:
+    with pytest.raises(ToolError, match="JD POP"):
         await get_order_list(
             start_time="2024-01-01 00:00:00",
             end_time="2024-01-31 23:59:59",
         )
-
-    assert exc_info.value.code == 4003
-    assert "Invalid access token" in exc_info.value.msg
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1260,14 +1150,11 @@ async def test_api_error_handling_timeout(mock_call):
 
 @pytest.mark.asyncio
 async def test_after_sale_api_error_propagates(mock_call):
-    """CommerceAPIError from after-sale tools should propagate."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     mock_call.side_effect = CommerceAPIError(code=5001, msg="After-sale record not found")
-
-    with pytest.raises(CommerceAPIError) as exc_info:
+    with pytest.raises(ToolError, match="JD POP"):
         await get_after_sale_detail(after_sale_id="AS99999999")
-
-    assert exc_info.value.code == 5001
-    assert "After-sale record not found" in exc_info.value.msg
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1310,50 +1197,42 @@ async def test_new_tool_timeout_propagates(mock_call):
 
 @pytest.mark.asyncio
 async def test_pagination_default_page_and_size(mock_call, order_payload):
-    """Default page=1, page_size=20 should be sent as strings."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     mock_call.return_value = order_payload
-
-    await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-    )
-
-    _, biz_params = mock_call.call_args[0]
-    assert biz_params["page"] == "1"
-    assert biz_params["page_size"] == "20"
+    with pytest.raises(ToolError, match="JD POP"):
+        await get_order_list(
+            start_time="2024-01-01 00:00:00",
+            end_time="2024-01-31 23:59:59",
+        )
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_pagination_custom_page(mock_call, order_payload):
-    """Custom page and page_size values should be passed as strings."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     mock_call.return_value = order_payload
-
-    await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-        page=3,
-        page_size=50,
-    )
-
-    _, biz_params = mock_call.call_args[0]
-    assert biz_params["page"] == "3"
-    assert biz_params["page_size"] == "50"
+    with pytest.raises(ToolError, match="JD POP"):
+        await get_order_list(
+            start_time="2024-01-01 00:00:00",
+            end_time="2024-01-31 23:59:59",
+            page=3,
+            page_size=50,
+        )
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_pagination_max_page_size(mock_call, order_payload):
-    """page_size of 100 (the documented max) should work."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     mock_call.return_value = order_payload
-
-    await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-        page=1,
-        page_size=100,
-    )
-
-    _, biz_params = mock_call.call_args[0]
-    assert biz_params["page_size"] == "100"
+    with pytest.raises(ToolError, match="JD POP"):
+        await get_order_list(
+            start_time="2024-01-01 00:00:00",
+            end_time="2024-01-31 23:59:59",
+            page=1,
+            page_size=100,
+        )
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1370,26 +1249,17 @@ async def test_pagination_product_list_defaults(mock_call, product_list_payload)
 
 @pytest.mark.asyncio
 async def test_pagination_empty_result_set(mock_call):
-    """An empty order list should be handled gracefully."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     empty_response = {
-        "jingdong_pop_order_search_responce": {
-            "searchorderinfo_result": {
-                "order_info_list": [],
-                "order_total": 0,
-            },
-        },
+        "jingdong_pop_order_search_responce": {"searchorderinfo_result": {"order_info_list": [], "order_total": 0}}
     }
     mock_call.return_value = empty_response
-
-    result_json = await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-01 00:00:01",  # very narrow window
-    )
-    result = json.loads(result_json)
-
-    info = result["jingdong_pop_order_search_responce"]["searchorderinfo_result"]
-    assert info["order_total"] == 0
-    assert info["order_info_list"] == []
+    with pytest.raises(ToolError, match="JD POP"):
+        await get_order_list(
+            start_time="2024-01-01 00:00:00",
+            end_time="2024-01-01 00:00:01",  # very narrow window
+        )
+    mock_call.assert_not_awaited()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1399,45 +1269,35 @@ async def test_pagination_empty_result_set(mock_call):
 
 @pytest.mark.asyncio
 async def test_output_is_valid_json_string(mock_call, order_payload):
-    """All tool return values should be valid JSON strings."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     mock_call.return_value = order_payload
-
-    result = await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-    )
-
-    assert isinstance(result, str)
-    # Must not raise
-    parsed = json.loads(result)
-    assert isinstance(parsed, dict)
+    with pytest.raises(ToolError, match="JD POP"):
+        await get_order_list(
+            start_time="2024-01-01 00:00:00",
+            end_time="2024-01-31 23:59:59",
+        )
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_new_tools_return_valid_json_strings(mock_call, after_sale_list_payload):
-    """New tools should also return valid JSON strings."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     mock_call.return_value = after_sale_list_payload
-
-    result = await get_after_sale_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-    )
-
-    assert isinstance(result, str)
-    parsed = json.loads(result)
-    assert isinstance(parsed, dict)
+    with pytest.raises(ToolError, match="JD POP"):
+        await get_after_sale_list(
+            start_time="2024-01-01 00:00:00",
+            end_time="2024-01-31 23:59:59",
+        )
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_call_passthrough_with_minimal_params(mock_call):
-    """Verify _call receives the expected API method name and biz params shape."""
+    """Legacy fixture cannot prove the current JD POP contract is supported."""
     mock_call.return_value = _mock_response({"ok": True})
-
-    await get_order_detail(order_id="12345")
-
-    api_method, biz_params = mock_call.call_args[0]
-    assert api_method == "jd.pop.order.get"
-    assert biz_params == {"order_id": "12345"}
+    with pytest.raises(ToolError, match="JD POP"):
+        await get_order_detail(order_id="12345")
+    mock_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio

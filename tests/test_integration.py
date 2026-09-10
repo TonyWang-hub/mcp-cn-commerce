@@ -148,37 +148,27 @@ class TestJDFlow:
 
     @pytest.mark.asyncio
     async def test_get_order_list_end_to_end(self, jd_client):
-        """JD get_order_list → _call → _request → POST with biz params in JSON body."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "jd_pop_order_search_response": {
-                "searchorderinfo_result": {
-                    "orderInfoList": [{"order_id": "30001"}],
-                    "orderTotal": 1,
-                }
-            }
-        }
-        mock_response.status_code = 200
+        """Known incompatible legacy JD contract must fail before network I/O."""
+        from mcp.server.mcpserver.exceptions import ToolError
 
+        from servers.jd.server import JDMCP, get_order_list
+
+        client = JDMCP(app_key="jd_key", app_secret="jd_secret", access_token="jd_tok")
         mock_http = AsyncMock()
-        mock_http.post.return_value = mock_response
         mock_http.is_closed = False
-
-        with patch("servers.jd.server.jd", jd_client):
-            with patch.object(jd_client, "_ensure_client", return_value=mock_http):
-                from servers.jd.server import get_order_list
-
-                result = await get_order_list(
-                    start_time="2024-01-01 00:00:00",
-                    end_time="2024-01-31 23:59:59",
-                )
-
-        data = json.loads(result)
-        assert "jd_pop_order_search_response" in data
+        with patch("servers.jd.server.jd", client):
+            with patch.object(client, "_ensure_client", return_value=mock_http):
+                with pytest.raises(ToolError, match="JD POP"):
+                    await get_order_list(
+                        start_time="2024-01-01 00:00:00",
+                        end_time="2024-01-31 23:59:59",
+                    )
+        mock_http.post.assert_not_awaited()
+        await client.close()
 
     @pytest.mark.asyncio
     async def test_jd_sign_method_is_hmac_md5(self, jd_client):
-        """JD uses HMAC-MD5 signing, producing 32-char hex uppercase."""
+        """Historical JD transport remains isolated; this is not the current POP contract."""
         sig = jd_client._sign({"app_key": "test", "timestamp": "123"})
         assert isinstance(sig, str)
         assert len(sig) == 32
@@ -798,7 +788,7 @@ class TestSigningIntegration:
         assert client1._sign(params) != client2._sign(params)
 
     def test_jd_hmac_md5_sign_integration(self):
-        """JD's HMAC-MD5 signing produces 32-char uppercase hex."""
+        """Legacy transport signature regression; SDK POP calls are gated pending migration."""
         from servers.jd.server import JDMCP
 
         client = JDMCP(app_key="jd_key", app_secret="jd_secret")

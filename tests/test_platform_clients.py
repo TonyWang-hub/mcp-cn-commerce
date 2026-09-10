@@ -161,6 +161,14 @@ async def test_remaining_platform_operations_use_existing_wire_contract(platform
         requests.append(request)
         return httpx.Response(200, json={"data": {"ok": True}})
 
+    if platform == "jd":
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+            client = sdk().create_platform_client(platform, platform_credentials(platform), http_client=http)
+            with pytest.raises(ValueError, match="JD POP"):
+                await client.call(operation, {})
+            assert requests == []
+            await client.close()
+        return
     params = {}
     if platform == "xiaohongshu":
         params = {
@@ -217,9 +225,7 @@ async def test_explicitly_unsupported_operations_have_metadata_and_never_send(pl
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "platform", ["doudian", "taobao", "jd", "kuaishou", "xiaohongshu", "weixin_store", "oceanengine"]
-)
+@pytest.mark.parametrize("platform", ["doudian", "taobao", "kuaishou", "xiaohongshu", "weixin_store", "oceanengine"])
 async def test_every_platform_keeps_two_authorizations_isolated_on_the_wire(platform):
     import json
     from urllib.parse import parse_qs
@@ -349,7 +355,8 @@ async def test_catalogue_is_immutable_and_reports_contract_gaps():
     from dataclasses import FrozenInstanceError
 
     client = sdk().create_platform_client("jd", platform_credentials("jd"))
-    assert client.operations["get_order_list"].contract_status == "unverified"
+    assert client.operations["get_order_list"].contract_status == "partial"
+    assert client.operations["get_order_list"].supported is False
     with pytest.raises(TypeError):
         client.operations["arbitrary_write"] = client.operations["get_order_list"]
     with pytest.raises(FrozenInstanceError):

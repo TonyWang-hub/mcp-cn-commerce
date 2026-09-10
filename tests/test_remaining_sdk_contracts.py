@@ -9,17 +9,11 @@ from shared.platform_clients import create_platform_client, operation_catalog
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "platform,operation",
-    [
-        ("kuaishou", name)
-        for name in ("get_order_list", "get_order_detail", "get_refund_list", "get_refund_detail", "get_shop_info")
-    ]
-    + [("oceanengine", name) for name in ("get_campaign_report", "get_ad_detail_report", "get_qianchuan_report")],
+    [("oceanengine", name) for name in ("get_campaign_report", "get_ad_detail_report", "get_qianchuan_report")],
 )
 async def test_unmigrated_reads_refuse_before_http(platform, operation):
     requests = []
     credentials = {"access_token": "token"}
-    if platform == "kuaishou":
-        credentials.update(app_key="app", app_secret="secret", sign_secret="sign-secret")
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: (requests.append(r), httpx.Response(200, json={}))[1])
     ) as http:

@@ -113,11 +113,6 @@ async def test_closed_external_transport_cannot_fall_back_to_network():
 OTHER_MAPPINGS = [
     ("jd", "get_refund_list", "jd.pop.afs.search"),
     ("jd", "get_refund_detail", "jd.pop.afs.get"),
-    ("kuaishou", "get_order_list", "/open/api/order/list"),
-    ("kuaishou", "get_order_detail", "/open/api/order/detail"),
-    ("kuaishou", "get_refund_list", "/open/api/refund/list"),
-    ("kuaishou", "get_refund_detail", "/open/api/refund/detail"),
-    ("kuaishou", "get_shop_info", "/open/api/shop/info"),
     ("xiaohongshu", "get_order_list", "order.getOrderList"),
     ("xiaohongshu", "get_order_detail", "order.getOrderDetail"),
     ("xiaohongshu", "get_refund_list", "afterSale.listAfterSaleInfos"),

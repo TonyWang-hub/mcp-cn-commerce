@@ -808,7 +808,7 @@ class TestSigningIntegration:
         )
         sig = client._sign({"app_key": "ks_key", "timestamp": "123"})
         assert len(sig) == 32
-        assert sig == sig.upper()
+        assert sig == sig.lower()
 
 
 # ====================================================================

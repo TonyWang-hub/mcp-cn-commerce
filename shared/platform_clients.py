@@ -83,19 +83,11 @@ _OPERATIONS = {
         }.items()
     },
     "kuaishou": {
-        name: Operation(
-            endpoint,
-            "partial",
-            supported=False,
-            reason="Kuaishou official signing/cursor contract migration pending; see docs/remaining-platform-contracts.md",
-        )
-        for name, endpoint in {
-            "get_order_list": "open.order.cursor.list",
-            "get_order_detail": "open.order.detail",
-            "get_refund_list": "open.seller.order.refund.pcursor.list",
-            "get_refund_detail": "open.seller.order.refund.detail",
-            "get_shop_info": "open.shop.info.get",
-        }.items()
+        "get_order_list": Operation("open.order.cursor.list", "documented"),
+        "get_order_detail": Operation("open.order.detail", "documented"),
+        "get_refund_list": Operation("open.seller.order.refund.pcursor.list", "documented"),
+        "get_refund_detail": Operation("open.seller.order.refund.detail", "documented"),
+        "get_shop_info": Operation("open.shop.info.get", "documented"),
     },
     "xiaohongshu": {
         "get_order_list": Operation("/api/order/list", "documented"),
@@ -233,7 +225,7 @@ class PlatformClient:
             raise ValueError("Business parameters must be a dictionary with string keys")
         for key in params:
             normalized = key.replace("_", "").replace("-", "").lower()
-            if normalized == "type" and self.platform in {"taobao", "youzan"}:
+            if normalized == "type" and self.platform in {"taobao", "youzan", "kuaishou"}:
                 continue  # These platforms define type as a business filter, not a route.
             if normalized in _PROTOCOL_FIELDS:
                 raise ValueError(f"Business parameter {key!r} cannot override platform protocol fields")

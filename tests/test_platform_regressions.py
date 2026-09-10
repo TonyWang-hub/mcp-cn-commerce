@@ -124,8 +124,8 @@ def test_kuaishou_factory_keeps_distinct_signing_secret(monkeypatch):
         monkeypatch.setenv(f"KUAISHOU_{name}", value)
     client = module("kuaishou")._create_kuaishou_client()
     assert client.sign_secret == "signing"
-    # Independent fixed MD5 vector for "signinga1signing".
-    assert client._sign({"a": 1}) == "6F7E2EA41D56C9C818A4382A4C75BBC5"
+    # Official SDK canonical vector: "a=1&signSecret=signing".
+    assert client._sign({"a": 1}) == "fc86e42603d78b3822e19fa23c91173c"
 
 
 @pytest.mark.asyncio
@@ -205,7 +205,7 @@ async def test_weixin_concurrent_managed_refresh_fetches_one_token():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("platform", ["kuaishou", "pinduoduo"])
+@pytest.mark.parametrize("platform", ["pinduoduo"])
 async def test_signed_collection_values_are_exactly_the_sent_values(platform):
     client = make_client(platform)
     requests = []

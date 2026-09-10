@@ -378,26 +378,24 @@ class TestFullRequestFlowAutomation:
 
     @pytest.mark.asyncio
     async def test_kuaishou_full_flow(self, mock_http_response):
-        """Kuaishou: tool -> _call -> mock HTTP -> JSON response."""
-        from servers.kuaishou.server import get_order_list, ks
+        """Current Kuaishou CLI reaches the signed GET protocol."""
+        from servers.kuaishou.server import KuaishouMCP, get_order_list
 
+        client = KuaishouMCP(app_key="key", app_secret="secret", sign_secret="sign", access_token="token")
         mock_http_response.json.return_value = {
             "result": 1,
-            "data": {"orderList": [{"order_id": "KS001"}], "totalCount": 1},
+            "data": {"orderList": [{"orderBaseInfo": {"oid": 123}}], "cursor": "nomore"},
         }
-
-        with patch.object(ks, "_call", new_callable=AsyncMock) as mock_call:
-            mock_call.return_value = {
-                "result": 1,
-                "data": {"orderList": [{"order_id": "KS001"}], "totalCount": 1},
-            }
-            result = await get_order_list(
-                start_time="2024-01-01 00:00:00",
-                end_time="2024-01-31 23:59:59",
-            )
-
-        data = json.loads(result)
-        assert "orderList" in data.get("data", data)
+        http = AsyncMock()
+        http.get.return_value = mock_http_response
+        http.is_closed = False
+        with patch("servers.kuaishou.server.ks", client):
+            with patch.object(client, "_ensure_client", return_value=http):
+                result = await get_order_list("2026-09-01 00:00:00", "2026-09-02 00:00:00")
+        assert json.loads(result)["data"]["cursor"] == "nomore"
+        assert http.get.call_args.args == ("https://openapi.kwaixiaodian.com/open/order/cursor/list",)
+        assert http.get.call_args.kwargs["params"]["method"] == "open.order.cursor.list"
+        await client.close()
 
 
 # ====================================================================

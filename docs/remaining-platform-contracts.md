@@ -132,7 +132,7 @@ CLI 保留原工具名称，订单缺 source_id/optional_fields 时明确 ToolEr
 新 10 项合同测试先失败后通过；旧五工具的场景改为验证明确 unsupported 和无网络，保留其他工具的 API 错误传播回归。
 本地证据 `jd-doc-32/33/298.*`、`jd-api-15660/15661/14061/14043.json`、`jd-shop-detail.json`。
 
-## 快手小店：测试用户入口已确认，五个读合同已获得，迁移待实现
+## 快手小店：测试用户入口已确认，五个读合同已实现，Pro主体绑定待核实
 
 [开发者角色说明](https://open.kwaixiaodian.com/zone/docs/dev?pageSign=8291dd5521eb4230e01d789ede994f631635130386865)区分商家自研、第三方服务商和邀约合作伙伴。
 商家开发者需对应店铺主体，ISV 是软件服务企业身份；合作伙伴邀约不是普通商家测试申请通道。
@@ -164,7 +164,8 @@ AT 的 expires_in 是秒；刷新响应的 RT 剩余期限也是秒；轮换后�
 公共参数是 `appkey/timestamp(毫秒)/access_token/version/param/method/signMethod/sign`。
 官方 SDK 签名是按 key 排序拼 `key=value`、`&` 连接、末尾 `&signSecret=...`；MD5 为小写 hex，HMAC_SHA256 为 Base64。
 signSecret 与 OAuth appSecret 不同；旧客户端的 secret+kv+secret、大写 MD5 和旧 `/open/api/...` 路径不符合该合同。
-本轮 SDK 五 operation 标 partial/unsupported，防止将错误旧调用暴露给 Pro；CLI 历史工具仍待同一迁移，不属于可执行商家验收范围。
+R16先将错误旧SDK封闭后，同日继续完成五条native SDK/CLI签名、方法与游标迁移，现为documented/live=false；见 [kuaishou-contract.md](kuaishou-contract.md)。
+其他历史CLI业务方法仍未核实，不属于本轮商家验收范围。
 
 订单查询 queryType=1 创建近90天；2 更新近90天且创建近240天。更新查询仍不等于支付日查询，不能由页闭合推导现金日完整。
 订单视图状态与业务 status 是两套枚举；业务状态 10 待付、30 已付、40 已发、50 签收、70 成功、80 关闭。
@@ -214,7 +215,7 @@ signSecret 与 OAuth appSecret 不同；旧客户端的 secret+kv+secret、大�
 | 小红书 | Pro code/refresh+sellerId 绑定；四个业务 SDK 已有官方映射 | 更新窗口覆盖、退款完成时间单位与真实信封复核 | 开发者应用、订单/售后包；官方共享测试店测试 code 或正式主账号授权 |
 | 微信小店 | 五个只读 SDK；店铺 GET 修正、售后 cursor/时间修正 | 稳定 token 自研或 component/authorizer ISV provider；详情归一化 | 小店自研 AppID/secret，或上架服务+店铺购买授权；必要出口 IP 白名单 |
 | 京东 POP | 三条订单/店铺读 SDK 与 CLI、签名/表单/分页/错误检查已实现 | Pro 授权主体生命周期；售后与退款资金语义、归一化/采集 | JOS 审核应用、POP店铺授权与匹配权限；source_id 官方默认 JOS 可显式选择；预发测试资格需申请 |
-| 快手小店 | 五方法完整正文+官方 SDK 证据，SDK 拒绝旧错误调用 | 签名/方法/游标迁移、open_id 与店铺主体绑定合同 | 审核应用、signSecret、merchant_order/refund 权限和已添加测试用户/正式授权 |
+| 快手小店 | 五条native SDK/CLI、签名和真实游标已实现 | open_id与店铺主体绑定；资金单位/归一化及Pro采集 | 审核应用、signSecret、merchant_order/refund权限和已添加测试用户/正式授权 |
 | 巨量/千川 | 广告账户资料和余额域名修正；不兼容报告 SDK 拒绝 | 广告/店铺节点授权模型；当前报表 topic/metrics 迁移 | 企业开发者、对应产品应用权限、有效授权账户树；无已确认匿名测试账户 |
 
 所有 documented 均仅指官方文档与受控请求合同；所有 live_verified 均 false。

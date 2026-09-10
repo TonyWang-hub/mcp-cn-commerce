@@ -771,7 +771,7 @@ class TestSigningMethodCompatibility:
         client = KuaishouMCP(app_key="k", app_secret="s", sign_secret="ss", access_token="t")
         sig = client._sign({"app_key": "k", "timestamp": "123"})
         assert len(sig) == 32
-        assert sig == sig.upper()
+        assert sig == sig.lower()
         _compat_results.add(
             "signing_compat",
             "kuaishou_sign_secret_used",

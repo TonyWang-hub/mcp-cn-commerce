@@ -7,12 +7,13 @@ import re
 from datetime import datetime
 from typing import Any
 
+from servers.jd import aftersale
 from shared.cn_commerce_base import CommerceAPIError
 
 ORDER_SEARCH = "jingdong.pop.order.search"
 ORDER_DETAIL = "jingdong.pop.order.get"
 SHOP_INFO = "jingdong.vender.shop.query"
-READ_METHODS = frozenset({ORDER_SEARCH, ORDER_DETAIL, SHOP_INFO})
+READ_METHODS = frozenset({ORDER_SEARCH, ORDER_DETAIL, SHOP_INFO}) | aftersale.READ_METHODS
 _ORDER_FIELDS = frozenset({"source_id", "optional_fields", "order_state", "realPin", "open_id_buyer", "xid_buyer"})
 _LIST_FIELDS = _ORDER_FIELDS | {"start_date", "end_date", "page", "page_size", "sortType", "dateType"}
 _STATES = frozenset(
@@ -58,6 +59,9 @@ def _integer_string(value: Any, name: str, maximum: int | None = None) -> int:
 def validate_params(method: str, params: dict) -> None:
     """Validate exposed native reads; no system identity can be overridden."""
     if method not in READ_METHODS:
+        return
+    if method in aftersale.READ_METHODS:
+        aftersale.validate_params(method, params)
         return
     allowed = (
         set() if method == SHOP_INFO else (_LIST_FIELDS if method == ORDER_SEARCH else _ORDER_FIELDS | {"order_id"})
@@ -139,6 +143,9 @@ def validate_response(method: str, payload: Any) -> dict:
     wrapper = _mapping(body.get(method.replace(".", "_") + "_responce"))
     if "code" in wrapper and str(wrapper["code"]) != "0":
         _error(wrapper)
+    if method in aftersale.READ_METHODS:
+        aftersale.validate_response(method, wrapper)
+        return body
     if method == SHOP_INFO:
         shop = _mapping(wrapper.get("shop_jos_result"))
         for key in ("shop_id", "vender_id"):

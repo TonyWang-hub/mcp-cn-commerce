@@ -56,6 +56,8 @@ _OPERATIONS = {
         "get_order_list": Operation("jingdong.pop.order.search", "documented"),
         "get_order_detail": Operation("jingdong.pop.order.get", "documented"),
         "get_shop_info": Operation("jingdong.vender.shop.query", "documented"),
+        "get_aftersale_list": Operation("jingdong.asc.serviceAndRefund.view", "documented"),
+        "get_aftersale_refund_detail": Operation("jingdong.b2c.shop.aftersales.refund.get", "documented"),
         **{
             name: Operation(
                 "",

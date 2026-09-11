@@ -53,11 +53,11 @@ Pro 的 `XiaohongshuProvider` 实现 code/refresh，重复核验 `sellerId`，�
 SDK 已有 `order.getOrderList/getOrderDetail`、`afterSale.listAfterSaleInfos/getAfterSaleInfo` 四个只读映射。
 当前官方目录及正文经公开 `GET /api/doc/second/listNew?apiNavigationId=15|16` 与 `/api/doc/infoNew?gatewayId=...&gatewayVersionId=...&apiId=...` 取得：
 订单正文 ID 27241/27242（gateway 103/1661），新售后 30115/30038（gateway 165/2804）；后两者更新于 2026-09-04。
-订单创建窗口至多 24 小时、更新窗口至多 30 分钟，时间为秒；新售后创建/更新同样为 24 小时/30 分钟，时间是**毫秒**。
+订单创建窗口至多 24 小时、更新窗口至多 30 分钟；`startTime/endTime` 请求字段单位仍未得到正文或官方 SDK 明确证明，早期“秒”的解读已撤回。订单响应 `createdTime/paidTime/updateTime` 明示毫秒，不能据此推定请求单位。新售后创建/更新同样为 24 小时/30 分钟，其查询时间明确是**毫秒**。
 新售后列表 `data.afterSaleBasicInfos`、`totalCount/pageNo/pageSize`；页码起 1、页大小至多 100、`pageNo*pageSize<=50000`。
 列表 `expectedRefundAmountYuan` 是预期申请额，不能记成实际退款。
 详情 `data.afterSaleInfo.refundAmountYuan` 是实际退款总额（元、含定金），`refundStatus=2` 才是退款成功；`refundTime` 表示完成时间，但当前正文没有明确单位，需要官方确认或官方 SDK 补证，禁止推测后直接做日报。
-业务网关外层信封与底层服务 schema 的 `code`/`error_code` 差异须在真实响应中确认。
+四个 SDK 读方法已完成当前官方原生参数、别名与双层成功信封校验；SDK 的 `documented/live=false` 不表示 Pro Source 已支持。`status=4` 可以是完成换货，不能替代 `refundStatus=2`。最新实现状态以 [小红书专门合同](xiaohongshu-contract.md) 为准；字段单位及集中补证清单见 [2026-09-11 补证](platform-gap-evidence-20260911.md)。真实响应仍需商家验收。
 
 ## 微信小店：可调用官方读接口；自研/ISV 身份分别处理
 
@@ -128,6 +128,8 @@ R16 首次提交先将 SDK 五个读 operation 标 partial/unsupported；随后�
 CLI 保留原工具名称，订单缺 source_id/optional_fields 时明确 ToolError，售后两条仍拒绝。
 没有删除底层其他旧工具；它们仍是历史未验合同，不能用这些 transport 测试声称正式 POP 已支持。
 三条实现、官方 SDK 对内部结构的纠正、分页与错误信封测试见 [jd-contract.md](jd-contract.md)。退款资金合同、Pro 授权主体和归一化仍未完成；不宣称京东全部业务已验。
+
+2026-09-11 补充：已找到官方 15040 售后及退款列表、21380 售后退款详情，并新增独立 SDK 读操作 `get_aftersale_list/get_aftersale_refund_detail`。它们供 Pro 只读查询，实际退款额只使用明确元单位的详情字段。取消订单接口 13148/13151 仍是退款审核流程，通用退款操作和 `JdSource` 退款持续采集仍未开放；精确字段、覆盖限制与后续材料见 [补证记录](platform-gap-evidence-20260911.md)。
 
 新 10 项合同测试先失败后通过；旧五工具的场景改为验证明确 unsupported 和无网络，保留其他工具的 API 错误传播回归。
 本地证据 `jd-doc-32/33/298.*`、`jd-api-15660/15661/14061/14043.json`、`jd-shop-detail.json`。

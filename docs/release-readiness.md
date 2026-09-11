@@ -1,72 +1,56 @@
-# Core 候选工程、真店与发布状态
+# Core 工程候选与发布状态
 
-记录日期：2026-09-11。本页将工程验证、商家样本验证、主线合入和正式包发布分别记录。文档校准与主线工作已获授权；是否已经完成某项发布动作，以实际工作流和包证据为准，不将其误记为还需商家账号才能开发。
+更新：2026-09-11。**代码和文档已经在公开 main；0.1.6 工程候选已通过验证，PyPI / 公开稳定 Release 仍为 0.1.5。真实店铺验收尚未执行。** 本页区分源码上传、工程测试、正式发布和商家数据验收。
 
-## 版本与证据边界
+## 版本与公开工程证据
 
-| revision | contract_evidence | engineering_evidence | live_sample_evidence | release_state |
-| --- | --- | --- | --- | --- |
-| Core `6b6a7f9fbe336273e331ec70aa3322f37ae51580` | [当前 SDK 操作表](sdk-integration.md#catalogue-and-evidence-status)及平台专项合同 | [CI 34560300029](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/34560300029) success；2225 tests + 20 subtests | 未执行真实商家验收 | Core 0.1.6 候选包有独立安装证据；该证据本身不证明 PyPI/tag 发布 |
-| 配套 Pro `64dc3f5ac25531d6bc82eaa13cc0c75459e4ada8` | 私有配套包的授权/采集合同；不将 Pro 支持等同全部 MCP 目录 | [私有 CI 34561130526](https://github.com/TonyWang-hub/mcp-cn-commerce-pro/actions/runs/34561130526) success；1330 tests | 未执行真实商家验收 | Pro 0.1.0 私有候选基线；新客户发行分支另绑定实际 SHA/manifest |
-| Core main `f3c7452dd3549d8b13cf9a1398c9a06b986fc087` | PR116 合入上述 Core 修复 | 引用上述修复基线结果；不声称此 merge SHA 的新 CI 已通过 | 未执行真实商家验收 | [PR116](https://github.com/TonyWang-hub/mcp-cn-commerce/pull/116) 已于 2026-09-11 06:49:44 UTC 合并；本轮文档/发行由新候选继续推进 |
-
-2026-09-11 04:09:22 UTC 的私有交付归档 `mcp-cn-commerce-private-20260911T040922Z-64dc3f5a` 保存 `ACCEPTANCE.md`、`manifest.json`、`SHA256SUMS`、`checks.json`、`test-summary.json` 与 `hosted-ci/`。归档当时 PR116/Pro PR1 均为草稿，属于历史状态；PR116 现在已经合并，不能继续引用归档说“尚未合并”。私有 Pro 源码、凭据与安装授权不上传公共仓库。
-
-归档中的四个 wheel/sdist 包完成 16 项构建、安装、依赖和握手检查；Core 有 24 项真实 stdio smoke，Pro 有双租户 20 tools 握手及 HTTP/SSE 工程验证。托管 CI 的多 Python 版本、锁定/最新支持依赖、格式/类型/静态检查及远程容器结果均绑定其具体 SHA。它们是真实进程/安装/传输验证，商家 HTTP 合同测试仍使用受控响应。本机没有执行或探测容器运行时。
-
-本轮只校正文档，没有修改 Python、协议、版本或 CI，因此复用上述产品代码的全量工程证据，仅执行必要元数据、文档链接和 diff 检查。后续构建新包时须记录新 SHA 与新哈希，不能称旧包由新文档提交构建。更新中的 Pro 客户发行候选在其准确提交/manifest/CI 形成后另行记录，不将未绑定版本的结果混入此表。
-
-## 当前可安排的限定 PoC
-
-| 平台 / 数据域 | 已具备 | 尚未具备的真店证据 |
+| 对象 | 精确版本 / 提交 | 实际状态 |
 | --- | --- | --- |
-| 抖店订单/售后 | 四个 SDK 原生查询；配套 Pro 采集、归一化、报告 | 应用/模式/权限、shop_id、两页与实际金额日期、真实刷新/失效；[逐项未执行记录](live-acceptance/doudian.md) |
-| TOP 订单/退款 | 五个 documented SDK 查询；配套 Pro 采集、归一化、报告 | 实际方法/fields 权限、卖家主体、分页、payment 局限、退款日期和生命周期；[逐项未执行记录](live-acceptance/taobao.md) |
-| 其他 documented SDK 操作 | 见[唯一能力表](sdk-integration.md#catalogue-and-evidence-status)，包括 JD 售后专项 | 仍须逐应用、店铺和操作证明；不能凭抖店/TOP 样本签成全平台通过 |
+| 已验证的候选源码 | Core `0.1.6`；[`c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e) | [CI 34572407075](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/34572407075) success |
+| 已合并 main 快照 | [`67c8fc9c0eb0e83cd8f819a686fe8c092f0d9f7c`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/67c8fc9c0eb0e83cd8f819a686fe8c092f0d9f7c) | [CI 34572676414](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/34572676414) success；[PR116](https://github.com/TonyWang-hub/mcp-cn-commerce/pull/116) 和 [PR117](https://github.com/TonyWang-hub/mcp-cn-commerce/pull/117) 已合并 |
+| PyPI / 公开稳定 Release | `0.1.5` | [PyPI](https://pypi.org/project/mcp-cn-commerce/0.1.5/) 与 [Release](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.5) 是历史公开版本，不含本次候选全部修复 |
+| 0.1.6 发布阶段 | 工程候选 / 发布草稿准备 | 尚未正式发布到 PyPI 或 MCP Registry；发布草稿不等于公开稳定包 |
+| 商家 live | 全部 SDK `live_verified=false` | 尚无真实商家授权、业务样本和后台对账的通过记录 |
 
-商家只提供现成 token 不证明其与 app/shop 的绑定，也不完成 Pro 授权和刷新验收。试点只读，使用已有获准样本；平台撤销、Pro 本地 revoke、刷新和重新授权分别记录。没有两页/跨日/到期样本时保留“未执行”。同库两受信身份的跨 tenant 验证与本地独立数据库演示分开。
+本次源码可按 [README 的完整 SHA 安装步骤](../README.md#安装)复现，使用项目虚拟环境。普通 `pip install mcp-cn-commerce` 与 `releases/latest` 当前取到的是旧稳定版，不能作为本次修复验收的安装方式。main 会继续变化，复现候选使用固定 SHA 与配套构建 manifest。
 
-报告汇总已观测记录：`observed_net_fen` 不是银行到账/利润，`amounts_complete` 不等于完整业务覆盖，`business_coverage=unverified` 保留。抖店的近 90 天创建范围、TOP payment 受退款影响等口径不会因成功采一页而消失。
+## 已完成的工程验证
 
-## 合同与代码缺口：集中输入
+- Core 完整回归 **2225 tests + 20 subtests**，JUnit 汇总为 **2245**；候选和合并 main 的上述两次 CI 均成功。
+- Python 版本矩阵、格式/类型/静态检查、锁定与最新支持依赖安装、wheel/sdist、真实 MCP stdio、manifest 校验及托管容器作业均有对应 workflow 证据。真实进程握手不等于商家 HTTP 已联调。
+- 配套私有 Pro `0.1.1b1` 候选的工程回归为 **1432**，独立 Python PartnerClient 为 **203**；配套 Core/Pro/Client 交付完成 **26 项安装/握手检查与 7 项质量检查**。这些是配套交付的验收汇总，不是额外的 Core 测试数，公开用户无需访问私有源码或 CI 才能核对上面的 Core 证据。
+- 商家接口合同测试使用受控响应；当前没有真店通过记录。仅文档同步不重复全量产品测试，不修改产品协议、版本或 CI。
 
-| 缺口 | 精确材料 / 责任边界 | 到齐后可推进的验证 |
+较早的 `6b6a7f9` / Pro `64dc3f5` 等结果保留在[历史验收记录](verification-results.md)中，不替代本页新候选的准确提交。新的包哈希、安装结果和发布状态必须绑定实际发行 manifest；不把旧包说成由新文档提交构建。
+
+## 真店验收与支持边界
+
+| 范围 | 已有工程能力 | 未完成验收 |
 | --- | --- | --- |
-| PDD 商家经营 schema | 账号持有人从目标获批应用取得六个方法的完整官方 schema/生成 SDK：订单列表/增量/详情、退款增量/详情、店铺；记录版本和权限包。方法名与已核公共协议见 [PDD 合同](pinduoduo-contract.md) | 必填/类型、成功/错误信封、分页/total、父单/售后/店铺身份、实际金额/单位、状态、时间单位/时区/边界/历史范围；收到前保持 unsupported |
-| XHS Source | 官方明确订单查询 `startTime/endTime` 单位与包含性、详情 `refundTime` 单位与空/零语义、历史范围 | 固定 UTC 编码、24h/30min 边界、反向分页、跨日完成退款、缺日期拒绝；Long 类型和位数不作证明 |
-| JD 售后资金 | 15040 `refoundAmount` 单位、`completeTime` 时区；持续发现成功退款的更新/完成窗口；21380 与列表同版本、分次/重开唯一键 | 同一退款版本与父单关联、实际/预估互斥、稳定分页、完成日归属；已有专项查询不等于退款 Source |
-| JD 取消退款资金 | 实际完成资金方法/版本/权限包、退款 ID、父单、实际额/单位、成功状态、完成时间与持续扫描 | 取消与售后两类均覆盖；13148/13151 的申请额/审核状态不能代替实际资金 |
-| 快手 Pro 主体 | 官方可验证的授权 open_id 与真实店铺绑定合同 | 安全发布凭证和每次读取主体一致；已有五个 SDK 合同不能替代授权证明 |
-| 巨量/千川 | 当前报表版本/字段/分页、授权账户树、对应产品权限 | 明确 topic/metrics/账户范围后另写协议实现；广告主资料/余额不能代替 ROAS/计划报表 |
-| 微信共享组件跨 tenant | 已知 Pro 委托/回调归属代码边界，由独立 Pro 设计任务处理 | 不能把已有自研和服务市场功能泛称共享组件跨 tenant 已闭合；这是代码边界，不是只差凭据 |
-| 广泛经营数据域 | 商品/库存/物流/评价/营销/广告/账单分别取得当前方法合同与权限 | 独立确定支持范围与验收；155 工具目录不是这些数据域全部已验证 |
+| 抖店订单/售后 | 四个 SDK 原生读查询；配套采集、归一化与报告 | 实际应用模式/权限、shop_id、两页、支付优惠/真实退款/跨日、真实刷新与失效；[当前记录：未执行](live-acceptance/doudian.md) |
+| TOP 订单/退款 | 五个 documented SDK 读查询；配套采集、归一化与报告 | 实际方法/fields 权限、卖家主体、逆序分页、payment 口径与生命周期；[当前记录：未执行](live-acceptance/taobao.md) |
+| 其他 SDK 操作 | 见[逐操作能力表](sdk-integration.md#catalogue-and-evidence-status)，包括 JD 两项售后专项 | 按应用、店铺、操作和样本分别证明；不凭一两个平台的结果签成全部平台通过 |
 
-XHS/JD 完整字段清单、官方来源及已取得 SDK 指纹见[补证记录](platform-gap-evidence-20260911.md)。证据收集只接受官方正文、字段注解或平台书面说明，记录 UTC、版本/权限、URL 与 SHA-256；没有单位的示例数值不生成实现假设。收到完整合同后另写包含具体代码和失败测试的协议计划，不在文档校准中猜 Source 或改金额/时间换算。
+只提供 token 不能证明 app/shop 绑定或 Pro 授权刷新链路。授权、真实刷新、平台撤销、Pro 本地 revoke 和重新授权分别验收；缺两页/跨日/到期样本时保留未执行。同库两受信身份的跨 tenant 验证不能用两套独立数据库演示替代。
 
-账号持有人一次准备：开发者资格、应用类目/权限包、callback/IP 白名单、获准店铺及主体、已有可读样本、生命周期窗口；敏感材料留在部署侧。平台审批/资料等待、合作方身份回调适配和产品代码缺口分别记录，不以“等待账号”统称。
+报告汇总已观测记录：`observed_net_fen` 不是银行到账/利润；`amounts_complete` 不等于完整业务覆盖，`business_coverage=unverified` 保留。抖店近 90 天创建范围、TOP payment 受退款影响等限制不会因成功采一页消失。
 
-## 本轮就绪检查与后续发行
+## 合同与代码缺口
 
-- [x] 当前 operation_catalog 以零网络方式核对；注册/合同/callable/live 分层描述。
-- [x] README、SDK、平台/API 目录和咨询模板校准；保留历史取证时间及免费内测承诺。
-- [x] 抖店/TOP 匿名验收记录已建立，结果全部真实标为未执行。
-- [ ] 实际应用授权、至少两页与金额/日期后台对账、真实生命周期验收；没有输入就不签通过。
-- [ ] 新候选的准确 SHA、包哈希和发行工作流结果由发行负责人归并；本表不预签。
-
-本轮授权包含文档提交和主线推进，不需再次向用户索要实施许可。Core `.github/workflows/publish.yml` 与 `.github/workflows/mcp-registry.yml` 是既有发行链路：版本/tag/`shared.__version__`/`server.json` 一致，质量与安装检查通过后才上传与发布；实际发行由负责人按本轮授权执行。旧基线全绿、PR 合并和 PyPI/Registry 已发布是不同状态。
-
-README 的“**免费使用 Pro 内测版，换取真实场景反馈**”继续有效。本地试用计时不代替该种子用户承诺；OEM/SaaS/再分发等法律授权由正式合作条款约定，不以私有仓库、安装包或工程检查代替。
-
-## 本轮文档检查
-
-2026-09-11 在 Core 文档工作树使用现有项目 Python，`PYTHONPATH` 指向该 Core：
-
-| 检查 | 实际结果 |
+| 缺口 | 当前边界与下一份有效证据 |
 | --- | --- |
-| `scripts/check_tool_metadata.py` | 退出 0；8 平台、每平台 5 公共工具、155 注册工具一致 |
-| 相对 Markdown 目标检查 | 13 个改动文档的本地目标存在；外部官方网页保持既有证据链接，未重新抓取作 live 证明 |
-| 本地标题锚点检查 | 本轮文档中的本地标题链接可定位 |
-| `git diff --check` | 通过 |
-| 产品测试 / 平台调用 | 本轮未重跑全量产品测试，未调用商家平台；产品工程基线见上表 |
+| PDD 商家业务 schema | 六个经营 SDK 操作保持 unsupported；需要目标应用权限下的完整官方 schema/生成 SDK，含响应信封、字段、分页、金额、时间、主体。见 [PDD 合同](pinduoduo-contract.md) |
+| XHS Source | 订单请求 `startTime/endTime` 单位/包含性、退款详情 `refundTime` 单位/空零语义与历史范围仍缺证明；Long 类型和位数不能替代合同 |
+| JD 完整退款 | 已有 15040/21380 售后专项查询；实际金额单位/完成时间、持续发现与同版本关联仍需补证；取消退款 13148/13151 的申请额和审核不能替代实际完成资金 |
+| 快手 Pro 主体 | SDK 五项读合同已有；授权 open_id 与真实店铺绑定的官方证明仍缺失 |
+| 巨量/千川 | 当前 SDK 已核广告主信息/余额；报表版本、topic/metrics、分页和授权账户树需补齐 |
+| 微信同组件跨 tenant | Pro 委托/回调归属还有代码边界；已有自研和服务市场功能不能泛称这一模式已完成 |
+| 广泛经营数据域 | 商品、库存、物流、评价、营销、广告、账单等需逐操作验证；155 工具目录不等于这些域全部当前可用 |
 
-新候选的最终 CI、安装包和发行状态以发行 manifest 绑定的准确提交及实际工作流结果为准；本页旧基线数字不代替新候选结果。
+XHS/JD 的精确字段、来源和 SDK 指纹见[集中补证](platform-gap-evidence-20260911.md)。需要官方正文、字段注解或平台书面说明；没有单位的示例数值不生成实现假设。应用资质/权限、callback/IP 白名单、获准店铺/主体、可读样本与生命周期窗口一次准备；密钥、code、买家资料留在受控部署侧，不进入公开 issue。
+
+## 项目需求与发布说明
+
+公开咨询进展见[项目状态](project-status.md)：咨询或申请试用表示需求意向，不代表已签约、接入或完成真店验收。优先安排 1–2 平台的限定只读 PoC，再按结果确认后续范围。
+
+Core 按 MIT 开源。Pro 继续履行 README 的免费种子用户内测承诺；正式商业集成、OEM/SaaS/再分发权利按相应合作条款确认。公开 Core 仓库不分发私有 Pro 源码、安装凭据或商家原始数据。

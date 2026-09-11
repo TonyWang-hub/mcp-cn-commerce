@@ -272,3 +272,20 @@ async def test_two_authorizations_and_native_pages_keep_distinct_tokens():
     assert {(token, params["pageNumber"]) for token, params in captured} == {
         (token, page) for token in ("one", "two") for page in (1, 2)
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", METHODS)
+@pytest.mark.parametrize("location", ["error_response", "top", "wrapper"])
+async def test_aftersale_gateway_errors_do_not_expose_diagnostics_or_exception_chain(operation, location):
+    detail = {"code": 12345, "msg": "PRIVATE_GATEWAY_DIAGNOSTIC", "errorMessage": "PRIVATE_GATEWAY_DIAGNOSTIC"}
+    if location == "error_response":
+        reply = {"error_response": detail}
+    elif location == "top":
+        reply = detail
+    else:
+        reply = {METHODS[operation].replace(".", "_") + "_responce": detail}
+    with pytest.raises(CommerceAPIError) as exc:
+        await invoke(operation, query(operation), reply)
+    assert "PRIVATE" not in str(exc.value)
+    assert exc.value.__context__ is None and exc.value.__cause__ is None

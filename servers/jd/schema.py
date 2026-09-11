@@ -109,18 +109,22 @@ def validate_params(method: str, params: dict) -> None:
         raise ValueError("JD POP order window must be positive and no more than one calendar month")
 
 
-def _error(error: dict, code_key: str = "code", text_key: str = "errorMessage") -> None:
+def _error(error: dict, code_key: str = "code", text_key: str = "errorMessage", *, sanitize: bool = False) -> None:
     code = error.get(code_key, -1)
     try:
         number = int(code)
     except (ValueError, TypeError):
         number = -1
     message = (
-        error.get(text_key)
-        or error.get("msg")
-        or error.get("zh_desc")
-        or error.get("englishErrCode")
-        or "JD POP API failure"
+        "JD aftersale API failure"
+        if sanitize
+        else (
+            error.get(text_key)
+            or error.get("msg")
+            or error.get("zh_desc")
+            or error.get("englishErrCode")
+            or "JD POP API failure"
+        )
     )
     raise CommerceAPIError(number, str(message))
 
@@ -134,15 +138,16 @@ def _mapping(value: Any) -> dict:
 def validate_response(method: str, payload: Any) -> dict:
     """Check gateway errors and exact method envelopes before counting success."""
     body = _mapping(payload)
+    sanitize = method in aftersale.READ_METHODS
     if "error_response" in body:
-        _error(_mapping(body["error_response"]), text_key="msg")
+        _error(_mapping(body["error_response"]), text_key="msg", sanitize=sanitize)
     if "code" in body and str(body["code"]) != "0":
-        _error(body)
+        _error(body, sanitize=sanitize)
     if method not in READ_METHODS:
         return body
     wrapper = _mapping(body.get(method.replace(".", "_") + "_responce"))
     if "code" in wrapper and str(wrapper["code"]) != "0":
-        _error(wrapper)
+        _error(wrapper, sanitize=sanitize)
     if method in aftersale.READ_METHODS:
         aftersale.validate_response(method, wrapper)
         return body

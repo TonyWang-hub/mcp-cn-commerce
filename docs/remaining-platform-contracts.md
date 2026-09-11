@@ -80,7 +80,7 @@ ISV 需入驻服务市场、上架服务，商家购买后静默授权权限集�
 列表分页须固定同一时间窗口和过滤器，原样回传 `next_key`；不能将页码换算成 cursor。订单错误 606006 表示本次参数与上一页不一致，31042 要求缩小时间窗口。
 没有 total；结束条件是 `has_more=false`，ID 列表成功不代表详情完整或支付日期覆盖完整。
 
-订单平台实付字段是 `order.order_detail.price_info.order_price`（用户实付，分），支付时间 `payment_info.pay_time` 为秒。
+订单平台实付字段是 `order.order_detail.price_info.order_price`（用户实付，分），支付时间 `order.order_detail.pay_info.pay_time` 为秒，当前归一化口径见[微信小店归一化](weixin-store-normalization.md)。
 但 `payment_method=2` 的 pay_time 是先用后付确认时间；3 抽奖零元和 4 积分兑换未发生实际支付，pay_time 是下单时间，不能无条件归入日现金收入。
 售后 `status` 是字符串：`MERCHANT_REFUND_SUCCESS`、`MERCHANT_RETURN_SUCCESS` 表示成功退款，`MERCHANT_EXCHANGE_SUCCESS` 仅换货；`refund_info.amount` 的单位为分。
 这是 R16 合同阶段的资金说明；后续共享归一化与 Pro 微信自研订单/退款 Source 已完成。不能把更新时间当退款完成时间，普通支付之外的特殊付款情形仍保留金额/日期未知；真实后台对账未执行。

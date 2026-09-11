@@ -148,10 +148,13 @@ async def test_remaining_platform_operations_use_existing_wire_contract(platform
     from urllib.parse import parse_qs
 
     requests = []
+    response = {"data": {"ok": True}}
+    if platform == "xiaohongshu":
+        response.update({"success": True, "error_code": 0})
 
     def handle(request):
         requests.append(request)
-        return httpx.Response(200, json={"data": {"ok": True}})
+        return httpx.Response(200, json=response)
 
     if not sdk().operation_catalog(platform)[operation].supported:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
@@ -163,17 +166,16 @@ async def test_remaining_platform_operations_use_existing_wire_contract(platform
         return
     params = {}
     if platform == "xiaohongshu":
-        params = {
-            "start_time": "2026-09-09 00:00:00",
-            "end_time": "2026-09-10 00:00:00",
-            "order_id": "order-1",
-            "refund_id": "refund-1",
-        }
+        params = (
+            {"startTime": 1788969600000, "endTime": 1788971400000, "timeType": 2}
+            if operation.endswith("list")
+            else ({"orderId": "order-1"} if operation == "get_order_detail" else {"returnsId": "refund-1"})
+        )
     elif platform == "weixin_store" and operation == "get_order_list":
         params = {"create_time_range": {"start_time": 1788883200, "end_time": 1788969600}, "page_size": 20}
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         client = sdk().create_platform_client(platform, platform_credentials(platform), http_client=http)
-        assert await client.call(operation, params) == {"data": {"ok": True}}
+        assert await client.call(operation, params) == response
         assert len(requests) == 1
         request = requests[0]
         if platform == "pinduoduo":
@@ -244,6 +246,8 @@ async def test_every_platform_keeps_two_authorizations_isolated_on_the_wire(plat
             return httpx.Response(
                 200, json={"trade_fullinfo_get_response": {"trade": {"tid": 123, "token_used": token}}}
             )
+        if platform == "xiaohongshu":
+            return httpx.Response(200, json={"success": True, "error_code": 0, "data": {"token_used": token}})
         return httpx.Response(
             200,
             json={

@@ -70,24 +70,31 @@ async def get_order_list(
     order_status: str = "",
     page: int = 1,
     page_size: int = 20,
+    time_type: int = 1,
 ) -> str:
-    """Query orders by creation time (maximum 24-hour range, Asia/Shanghai).
+    """Query one order page using native integer query times.
+
+    Query time units require platform confirmation; date strings are rejected.
+    Official windows are 24 hours for creation and 30 minutes for update.
+    For update scans use maxPageNo and read from the last page to the first.
 
     Args:
-        start_time: Order start time, e.g. "2024-01-01 00:00:00"
-        end_time: Order end time, e.g. "2024-01-31 23:59:59"
+        start_time: Platform-confirmed native integer start time, as a string.
+        end_time: Platform-confirmed native integer end time, as a string.
         order_status: Status filter. Common values:
             1 (待付款), 2 (处理中), 3 (清关中), 4 (待发货), 5 (部分发货),
             6 (待收货), 7 (已完成), 8 (已关闭), 9 (已取消), 10 (换货申请中).
             Empty string means all statuses.
         page: Page number, starting from 1.
         page_size: Number of orders per page (max 100).
+        time_type: 1 for creation time; 2 for update time.
     """
     biz_params: dict = {
         "start_time": start_time,
         "end_time": end_time,
         "page": str(page),
         "page_size": str(page_size),
+        "time_type": time_type,
     }
     if order_status:
         biz_params["order_status"] = str(order_status)
@@ -156,24 +163,29 @@ async def get_refund_list(
     refund_status: str = "",
     page: int = 1,
     page_size: int = 20,
+    time_type: int = 1,
 ) -> str:
-    """Query after-sales by creation time (maximum 24-hour range, Asia/Shanghai).
+    """Query one after-sale page with inclusive millisecond time boundaries.
+
+    Maximum window: 24 hours for creation, 30 minutes for update.
 
     Args:
-        start_time: Query start time, e.g. "2024-01-01 00:00:00"
-        end_time: Query end time, e.g. "2024-01-31 23:59:59"
+        start_time: Native milliseconds or ISO time including a timezone.
+        end_time: Native milliseconds or ISO time including a timezone.
         refund_status: Status filter. Common values:
             1 (待审核), 2 (待寄回), 3 (待收货), 4 (已完成), 5 (已取消),
             6 (已关闭), 9 (审核拒绝); comma-separated official status codes are accepted.
             Empty string means all statuses.
         page: Page number, starting from 1.
         page_size: Number of records per page (max 100).
+        time_type: 1 for creation time; 2 for update time.
     """
     biz_params = {
         "start_time": start_time,
         "end_time": end_time,
         "page": str(page),
         "page_size": str(page_size),
+        "time_type": time_type,
     }
     if refund_status:
         biz_params["refund_status"] = str(refund_status)

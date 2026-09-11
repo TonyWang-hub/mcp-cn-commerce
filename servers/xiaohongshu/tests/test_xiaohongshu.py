@@ -486,7 +486,13 @@ async def test_get_order_list_returns_orders_with_correct_fields(mock_call, orde
     mock_call.assert_called_once_with(
         "GET",
         "/api/order/list",
-        {"start_time": "2024-01-01 00:00:00", "end_time": "2024-01-01 23:59:59", "page": "1", "page_size": "20"},
+        {
+            "start_time": "2024-01-01 00:00:00",
+            "end_time": "2024-01-01 23:59:59",
+            "page": "1",
+            "page_size": "20",
+            "time_type": 1,
+        },
     )
 
 
@@ -645,7 +651,13 @@ async def test_get_refund_list_returns_refunds_with_expected_fields(mock_call, r
     mock_call.assert_called_once_with(
         "GET",
         "/api/refund/list",
-        {"start_time": "2024-01-01 00:00:00", "end_time": "2024-01-01 23:59:59", "page": "1", "page_size": "20"},
+        {
+            "start_time": "2024-01-01 00:00:00",
+            "end_time": "2024-01-01 23:59:59",
+            "page": "1",
+            "page_size": "20",
+            "time_type": 1,
+        },
     )
 
 

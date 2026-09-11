@@ -42,7 +42,7 @@
 
 新售后 `expectedRefundAmountYuan` 是申请/预期额，`refundAmountYuan` 是实际已退元、含定金；只有 `refundStatus=2` 证明退款成功。流程 `status=4` 可以是已完成换货，不能等同资金退款。`refundTime` 当前仅描述完成时间，未明示单位；不从位数、更新时间、消息投递时间或本机时间替代它。
 
-订单详情 `sellerId` 的商家 ID 可与授权 `shopId` 校验；[授权指南 341](https://open.xiaohongshu.com/document/developer/file/341) 描述 `shopId` 为 24 位十六进制字符串。售后详情没有足够的独立店铺归属字段，未来采集需按其 `orderId` 读取父订单、验证 ID 关联与 `sellerId`，再归属商店；不得仅相信本地凭证标签。
+订单详情原生店铺字段是 `shopId`，授权 token 返回的对应字段是 `sellerId`；[授权指南 341](https://open.xiaohongshu.com/document/developer/file/341) 明确说明授权时的店铺 ID 即 `sellerId`。未来采集应比较 `order_detail.shopId` 与授权 `token.sellerId`。售后详情没有足够的独立店铺归属字段，需按其 `orderId` 读取父订单、验证父子 ID 关联与店铺归属，再归属商店；不得仅相信本地凭证标签，也不把示例 ID 的长度当官方格式要求。
 
 必须另行确认订单查询起止单位及边界、退款完成时间单位、历史可查询范围。官方未承诺分页快照；固定总数、逐页指纹、唯一 ID 与 list/detail 版本检查仍不等于支付日期覆盖证明。外币 `curreny/totalPayCurrencyAmount` 的币种关系、换货补发和预售历史支付也需单独核对，不能并入单币种全覆盖声明。
 

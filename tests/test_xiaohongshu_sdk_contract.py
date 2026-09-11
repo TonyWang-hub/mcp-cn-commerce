@@ -167,7 +167,7 @@ async def test_refund_lookup_by_parent_order_does_not_invent_a_time_range():
         (
             "get_order_detail",
             {"orderId": "order-1"},
-            {"success": True, "error_code": 0, "data": {"orderId": "order-1", "sellerId": "a" * 24}},
+            {"success": True, "error_code": 0, "data": {"orderId": "order-1", "shopId": "a" * 24}},
         ),
         (
             "get_refund_detail",

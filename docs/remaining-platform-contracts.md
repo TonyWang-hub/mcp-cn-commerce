@@ -1,6 +1,6 @@
 # 其余平台官方合同与接入矩阵（R16）
 
-核查日期：2026-09-10。范围：京东 POP、快手小店、小红书商家、微信小店、巨量引擎/千川。
+初始核查日期：2026-09-10（R16）；2026-09-11 状态按 Core `6b6a7f9` / Pro `64dc3f5` 校准。范围：京东 POP、快手小店、小红书商家、微信小店、巨量引擎/千川。历史测试数量和“本轮”描述保留对应阶段，当前 SDK 状态以[逐操作目录](sdk-integration.md#catalogue-and-evidence-status)为准，最新工程/真店/主线合入分开见[发布就绪记录](release-readiness.md)。
 
 ## 本轮规格
 
@@ -83,13 +83,13 @@ ISV 需入驻服务市场、上架服务，商家购买后静默授权权限集�
 订单平台实付字段是 `order.order_detail.price_info.order_price`（用户实付，分），支付时间 `payment_info.pay_time` 为秒。
 但 `payment_method=2` 的 pay_time 是先用后付确认时间；3 抽奖零元和 4 积分兑换未发生实际支付，pay_time 是下单时间，不能无条件归入日现金收入。
 售后 `status` 是字符串：`MERCHANT_REFUND_SUCCESS`、`MERCHANT_RETURN_SUCCESS` 表示成功退款，`MERCHANT_EXCHANGE_SUCCESS` 仅换货；`refund_info.amount` 的单位为分。
-各详情字段是否足以确定实际退款完成日期，留给归一化阶段严格核验，不把更新时间当作退款完成时间。
+这是 R16 合同阶段的资金说明；后续共享归一化与 Pro 微信自研订单/退款 Source 已完成。不能把更新时间当退款完成时间，普通支付之外的特殊付款情形仍保留金额/日期未知；真实后台对账未执行。
 
 本轮修正 SDK/CLI 店铺信息旧错误路径与 POST 方法，并将 CLI 售后列表改为秒级时间和 `next_key`；兼容保留旧参数，但 page>1 明确拒绝，page_size 不发送给官方。
 9 项新增合同测试先失败后通过；连同原微信工具测试和 SDK 测试共 102 项通过。`documented` 仅表示文档/受控请求合同，所有 `live_verified` 仍为 false。
 
 
-## 京东 POP：三条读合同已迁移；真实店铺验收与退款资金仍待完成
+## 京东 POP：订单、店铺与售后专项已核；完整退款采集仍有缺口
 
 这是 JOS 京东 POP 商家店铺接口，不是京东秒送/即时零售开放平台。
 [新手指南](https://jos.jd.com/commondoc?listId=298)说明开发者注册与应用审核流程；商家、ISV 或个人账号能注册不代表获准使用 POP 商家订单权限。
@@ -102,7 +102,7 @@ ISV 需入驻服务市场、上架服务，商家购买后静默授权权限集�
 刷新 `/oauth2/refresh_token` 使用 `grant_type=refresh_token/refresh_token`。
 返回 `access_token/refresh_token/expires_in`，expires_in 为秒，scope 为逗号分隔；`xid`（正文表另写 xId）是用户身份，不等同店铺 ID。
 文档要求到期前 24 小时内刷新、过期后不能刷新，成功后保存新 AT/RT；单月刷新次数也有限制。
-RT 的独立截止时间及用户 xid 与当前店铺 vender_id/shop_id 绑定的完整合同尚未闭合，故没有增加 Pro JD provider。
+初查时 RT 独立截止时间和主体绑定不足，尚无 Pro JD provider。后续 Pro 已按返回 expires_in 管理有效期，并在换码/刷新后查询店铺信息核验 shop_id/vender_id 才保存凭证；已实现 JD provider 和订单 Source。不能据此设定未给出的永久 RT 有效期或宣称真实生命周期已验。
 
 通过官网当前 JS 中公开的 `https://joshome.jd.com/doc/getChannelInfoListByTreeId?id=...`、`/classification/list?id=...` 与
 `/api/detail?id=...&apiName=...`，**匿名取得完整正文与 schema**，不是登录阻塞。
@@ -119,7 +119,7 @@ RT 的独立截止时间及用户 xid 与当前店铺 vender_id/shop_id 绑定�
 列表时间是 `yyyy-MM-dd HH:mm:ss`；创建/更新时间模式由 `dateType` 控制，1 创建，其他/默认更新；
 创建查询近两年，按更新时间的可见范围仅三个月，单窗口最多一个月；排序 `sortType=1` 为降序，其他/默认升序。
 响应外层官方拼写为 `jingdong_pop_order_search_responce`；业务成功须继续检查 `searchorderinfo_result.apiResult`，不能只看 HTTP 200。
-`venderId/appKey/pin` 等被 schema 标为 SystemValue 的项与普通必填项不能混淆；下一实现轮须严格处理，而不是要求商家任意传主体值。
+`venderId/appKey/pin` 等 SystemValue 与普通必填项不能混淆；后续实现已禁止调用方覆盖系统主体字段，不要求商家任意填入。
 
 公共协议是 `method/access_token/app_key/sign/timestamp/v=2.0/360buy_param_json`；时间是格式化日期而非秒。
 签名为 **MD5 大写(secret + 按 key 排序拼 key/value + secret)**，不是旧类中的 HMAC-MD5。
@@ -127,7 +127,7 @@ GET 查询串或 POST 表单，业务 JSON 必须封装成 `360buy_param_json` �
 R16 首次提交先将 SDK 五个读 operation 标 partial/unsupported；随后按同日授权继续实现订单列表、详情与店铺三条，现为 documented/live=false。
 CLI 保留原工具名称，订单缺 source_id/optional_fields 时明确 ToolError，售后两条仍拒绝。
 没有删除底层其他旧工具；它们仍是历史未验合同，不能用这些 transport 测试声称正式 POP 已支持。
-三条实现、官方 SDK 对内部结构的纠正、分页与错误信封测试见 [jd-contract.md](jd-contract.md)。退款资金合同、Pro 授权主体和归一化仍未完成；不宣称京东全部业务已验。
+最初三条读实现、官方 SDK 对内部结构的纠正、分页与错误信封测试见 [jd-contract.md](jd-contract.md)。后续 Pro 授权主体校验、订单归一化/采集已完成；完整退款 Source 和真实商家验收仍未完成，不宣称京东全部业务已验。
 
 2026-09-11 补充：已找到官方 15040 售后及退款列表、21380 售后退款详情，并新增独立 SDK 读操作 `get_aftersale_list/get_aftersale_refund_detail`。它们供 Pro 只读查询，实际退款额只使用明确元单位的详情字段。取消订单接口 13148/13151 仍是退款审核流程，通用退款操作和 `JdSource` 退款持续采集仍未开放；精确字段、覆盖限制与后续材料见 [补证记录](platform-gap-evidence-20260911.md)。
 
@@ -210,13 +210,13 @@ R16先将错误旧SDK封闭后，同日继续完成五条native SDK/CLI签名、
 本轮仅将两条已核实的读请求改用官方 ad 域名，其他历史 CLI 仍待独立迁移；没有执行广告账户生产请求。
 原始证据 `oe-doc-*.json/.txt`、`qc-doc-*.json/.txt`；公开文档 API `/skiff/api/doc/client/node/get/` 当前匿名成功，routing identify_key 来自官网公共页面。
 
-## 本轮可执行支持与外部事项
+## 当前可执行支持与外部事项（2026-09-11）
 
 | 平台 | 本轮实现/可受控验证 | 已知代码待办 | 真实验收需要 |
 | --- | --- | --- | --- |
-| 小红书 | Pro code/refresh+sellerId 绑定；四个业务 SDK 已有官方映射 | 更新窗口覆盖、退款完成时间单位与真实信封复核 | 开发者应用、订单/售后包；官方共享测试店测试 code 或正式主账号授权 |
-| 微信小店 | 五个只读 SDK；店铺 GET 修正、售后 cursor/时间修正 | 稳定 token 自研或 component/authorizer ISV provider；详情归一化 | 小店自研 AppID/secret，或上架服务+店铺购买授权；必要出口 IP 白名单 |
-| 京东 POP | 三条订单/店铺读 SDK 与 CLI、签名/表单/分页/错误检查已实现 | Pro 授权主体生命周期；售后与退款资金语义、归一化/采集 | JOS 审核应用、POP店铺授权与匹配权限；source_id 官方默认 JOS 可显式选择；预发测试资格需申请 |
+| 小红书 | Pro code/refresh+sellerId 绑定；四个业务 SDK 已有官方映射 | Source 缺订单请求时间单位/边界、退款完成时间单位与历史范围；真实信封未验 | 开发者应用、订单/售后包；官方共享测试店测试 code 或正式主账号授权 |
+| 微信小店 | 五个 SDK；Pro 自研 token、订单/退款 Source，以及服务市场票据/已购买账号导入/刷新/撤销已实现 | 同一 component 跨 tenant 委托仍是代码边界；真实授权/资金样本未验 | 小店自研 AppID/secret，或上架服务+店铺购买授权；必要出口 IP 白名单 |
+| 京东 POP | 三条订单/店铺查询及两条 SDK 售后专项；Pro 授权主体校验、订单 Source 已实现 | 取消与售后两类完整资金合同、退款 Source；真实生命周期未验 | JOS 审核应用、POP 店铺授权；15040/21380 按目标应用实际权限包确认，不能默认 ERP 类目都有权限 |
 | 快手小店 | 五条native SDK/CLI、签名和真实游标已实现 | open_id与店铺主体绑定；资金单位/归一化及Pro采集 | 审核应用、signSecret、merchant_order/refund权限和已添加测试用户/正式授权 |
 | 巨量/千川 | 广告账户资料和余额域名修正；不兼容报告 SDK 拒绝 | 广告/店铺节点授权模型；当前报表 topic/metrics 迁移 | 企业开发者、对应产品应用权限、有效授权账户树；无已确认匿名测试账户 |
 
@@ -224,6 +224,6 @@ R16先将错误旧SDK封闭后，同日继续完成五条native SDK/CLI签名、
 本轮不把已取得 schema 但未实现的工作转写成“需要商家凭据才能完成”，代码迁移与账号卡点分别列明。
 
 
-R16 收束实跑：新增 KS/OE 合同 10 项先失败后通过，相关 SDK/协议/OE 工具 254 项通过；
+历史 R16 收束实跑（不是最终 Core 6b6a7f9 的测试总数）：新增 KS/OE 合同 10 项先失败后通过，相关 SDK/协议/OE 工具 254 项通过；
 CORE 完整套件 **1976 passed、20 subtests passed**（2026-09-10），未运行生产接口。
 Black/Ruff/mypy 通过，本轮 JD/OE/SDK 模块 Pylint 10.00。无 Pro 全量或 Docker 验收声明。

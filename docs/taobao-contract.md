@@ -2,7 +2,7 @@
 
 核查2026-09-10。SDD范围：在既有5个只读operation与MCP工具中补必填fields、分页/日期验证、
 响应信封验证；先以官方形状建立RED再实现，保持TOP MD5/HTTPS/session协议。
-不自动切换CRM应用的simple接口，不改变归一化/采集器。所有live_verified仍false。
+本合同迁移阶段未自动切换CRM应用的simple接口或改变采集器；后续已有共享归一化及Pro采集。所有live_verified仍false。
 
 ## 官方来源与调用合同
 
@@ -64,3 +64,7 @@ wheel、sdist构建及twine check通过；wheel安装到独立Python3.12环境�
 
 日志`/private/tmp/taobao-youzan-*.log`及`/private/tmp/mcp-taobao-youzan-*.log`；
 构建物`/private/tmp/mcp-taobao-youzan-dist-20260910/`。没有启动本机容器。
+
+## 当前真店验收状态（2026-09-11）
+
+[TOP匿名验收记录](live-acceptance/taobao.md)已建立，真实调用未执行。先确认目标应用实际拥有本页五个方法与字段权限、卖家taobao_user_id、正式网关及已登记回调；仅有simple或沙箱资格时另取完整合同，不静默替换方法/环境。至少两页、父子单、跨日/部分退款和payment受售后影响的样本仍待提供；刷新/撤销按真实窗口分别验收。工程与发布状态见[候选记录](release-readiness.md)。

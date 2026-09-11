@@ -1,6 +1,14 @@
 # 修复与实际验收记录
 
-日期：2026-09-10。工程验收通过；真实商家联调尚未执行，京东/拼多多/快手的当前协议仍有未闭合项。本记录不使用前一环境离线检查作为本轮通过证据。
+## 当前候选证据（2026-09-11）
+
+Core `6b6a7f9fbe336273e331ec70aa3322f37ae51580` 的 [CI 34560300029](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/34560300029) 已通过，完整回归为 **2225 tests + 20 subtests**。配套 Pro `64dc3f5ac25531d6bc82eaa13cc0c75459e4ada8` 的 [CI 34561130526](https://github.com/TonyWang-hub/mcp-cn-commerce-pro/actions/runs/34561130526) 已通过，完整回归为 **1330 tests**；Pro 证据属于私有配套交付。
+
+上述基线的独立包安装、MCP stdio/HTTP/SSE 等工程结果见[候选验收状态](release-readiness.md)。商家 live 尚未执行：[抖店记录](live-acceptance/doudian.md)、[TOP 记录](live-acceptance/taobao.md)。后续仅文档校准不重复全量测试，也不将旧包说成由新文档提交构建。
+
+## 历史验收快照：ea946dd（2026-09-10）
+
+以下从“分支与补丁接收”到文末均保留该次验收的命令、数量和结论。其京东/快手未闭合描述已被后续专项合同更新，不能当作当前矩阵；当前能力以 [SDK 表](sdk-integration.md#catalogue-and-evidence-status)为准。本记录不把历史检查冒充新提交通过。
 
 ## 分支与补丁接收
 
@@ -70,6 +78,6 @@
 | 拼多多 | 商家经营/ERP应用和店铺授权；`PINDUODUO_CLIENT_ID`、`PINDUODUO_CLIENT_SECRET`、`PINDUODUO_ACCESS_TOKEN` | **协议未闭合**：本次仅拿到JS壳，当前网关/商家方法、timestamp单位、时间窗、分页和签名向量待官方正文确认；多多进宝授权不等于商家订单权限 |
 | 快手 | 商家自用或第三方电商应用及授权；`KUAISHOU_APP_KEY`、`KUAISHOU_APP_SECRET`、`KUAISHOU_SIGN_SECRET`、`KUAISHOU_ACCESS_TOKEN` | **协议未闭合**：当前网关/参数名/签名算法及订单schema待官方SDK或控制台文档；保留独立签名密钥不代表算法已获证实 |
 
-当前进程检查未发现以上任何商家环境变量，独立 worktree 无 `.env`，未搜寻其他项目或凭证存储。凭证应在本地环境或 MCP 客户端中配置，不通过聊天传递。
+当时进程检查未发现以上任何商家环境变量，独立 worktree 无 `.env`，未搜寻其他项目或凭证存储。凭证应在本地环境或 MCP 客户端中配置，不通过聊天传递。
 
 只读联调步骤：选定获批应用和单一店铺 → 配置对应环境变量 → `mcp-cn-commerce start <platform>` → 查询一个受支持的小时间窗口和至少两页 → 保存脱敏响应结构、实际时间/金额单位、游标终止条件 → 逐单详情与后台核对。日报必须另证付款日与真实退款完成日覆盖；只按创建/更新时间查询不能直接声明 coverage=true。京东/拼多多/快手先完成上述官方合同问题，再执行平台业务请求。

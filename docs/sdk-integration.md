@@ -101,6 +101,11 @@ transport or closes it through reconnect/close paths.
 
 ## Catalogue and evidence status
 
+Current catalogue checked against Core `6b6a7f9fbe336273e331ec70aa3322f37ae51580` on
+2026-09-11. This table describes explicit SDK operations, not every historical MCP
+tool. Registration, documented contract, callable SDK mapping and merchant live
+acceptance are separate states. See [release readiness](release-readiness.md).
+
 `operation_catalog(platform)` requires no credentials, creates no transport, and
 returns the same read-only mapping of frozen `Operation` records as
 `client.operations`. Services can inspect capabilities before obtaining or
@@ -121,10 +126,10 @@ refreshing authorization:
 | 抖店 | Orders list/detail, refunds list/detail | Four business contracts documented on 2026-09-10; general shop info explicitly unsupported. Native fields and live gates: [Doudian contract](doudian-contract.md) |
 | 淘宝 | Orders list/detail/increment, refunds list/detail, shop info | Five order/refund contracts documented; shop info transport-only. [TOP contract](taobao-contract.md) records required fields, windows and application permission limits |
 | 有赞 | Orders list/detail, refunds list/detail, shop info | Five documented SDK-only contracts; [Youzan contract](youzan-contract.md) records current API versions and pagination/amount differences |
-| 京东 | Orders list/detail, shop info | Three documented JOS contracts; refunds explicitly unsupported because after-sale service is not a completed-refund contract. [JD contract](jd-contract.md) |
+| 京东 | Orders list/detail, shop info, `get_aftersale_list`, `get_aftersale_refund_detail` | Five documented JOS contracts. The two after-sale reads do not provide all completed refunds; generic `get_refund_list/get_refund_detail` remain unsupported and Pro refund collection remains unavailable. [JD contract](jd-contract.md), [funds evidence and gaps](platform-gap-evidence-20260911.md) |
 | 拼多多 | None | Partial/unsupported: current official business schema was not accessible; see [PDD contract](pinduoduo-contract.md) |
 | 快手 | Orders list/detail, refunds list/detail, shop info | Five documented SDK/CLI contracts; shop info has no shop ID, so Pro OAuth binding remains pending |
-| 小红书 | Orders list/detail, refunds list/detail | Documented contract; shop info explicitly unsupported |
+| 小红书 | Orders list/detail, refunds list/detail | Four documented native queries; shop info unsupported. Order-query `startTime/endTime` and refund-detail `refundTime` units remain unresolved, so Pro Source is blocked. [XHS contract](xiaohongshu-contract.md), [precise field gaps](platform-gap-evidence-20260911.md) |
 | 微信小店 | Orders list/detail, refunds list/detail, shop info | Five documented contracts; refund cursor and shop GET corrected; real shop authorization still unverified |
 | 巨量引擎 | Advertiser info, account balance | Two documented ad-gateway reads; reports unsupported pending current dataset migration. Merchant orders/refunds/shop-info explicitly unsupported |
 
@@ -144,8 +149,8 @@ and environment-backed startup cannot participate in credential selection.
 The implementation began with 8 failing SDK tests, followed by the two-platform
 GREEN checks and 114 unchanged 抖店/TOP tests. The remaining platform routing and
 unsupported metadata tests then failed before their implementations were added.
-Wire tests use real HTTPX `MockTransport`, not live merchant endpoints. They cover
-all 39 callable mappings, two simultaneous authorizations on each of 8 platforms,
+Wire tests use real HTTPX `MockTransport`, not live merchant endpoints. The initial extraction snapshot covered
+39 then-callable mappings (historical count, before subsequent contract restrictions), two simultaneous authorizations on each of 8 platforms,
 input-snapshot isolation, protocol-field override rejection, independent/shared
 transport ownership, explicit credential validation, immutable metadata, and a
 fresh-process check for environment/global-server side effects.
@@ -167,6 +172,7 @@ see its [validation record](doudian-contract.md) for subsequent results):
 - AST comparison confirmed all extracted non-constructor platform methods
   exactly match the baseline; constructor changes only forward resource injection.
 
-Merchant APIs were not called. No local container runtime was started. Python
-3.11/3.13 and remote Docker validation remain part of the integration/release
-pipeline rather than an assertion made by these local results.
+These initial checks did not call merchant APIs or start a local container runtime.
+Subsequent exact-SHA CI and package checks are recorded in [release readiness](release-readiness.md),
+including the newer Python matrix and remote container results. They do not
+retroactively turn the historical extraction snapshot into merchant live evidence.

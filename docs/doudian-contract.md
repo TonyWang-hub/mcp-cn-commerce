@@ -94,7 +94,7 @@ SDK的业务参数是原生字段。MCP工具继续接受原有 `start_time`/`en
 
 当前SDK保留原生完整data。`servers.doudian.schema.project_order`仅增添命名清楚的便利字段，
 原始支付字段仍保留；`project_refund`明确保留申请金额与缺少详情的事实。
-跨平台归一化和日报最终金额口径由Pro后续接入，不在本轮悄悄更换共享normalizer。
+此处原记录属于早期合同迁移阶段；后续 Core `shared/normalizer.py` 已完成相应归一化，配套 Pro 已有抖店采集和报告。实际店铺金额/日期仍未核对，不能以实现代替 live。
 
 ## 鉴权与尚未核实事项
 
@@ -130,3 +130,7 @@ malformed-200 RED，以及官方售后详情int64 ID回归。最终结果：
 完整测试与构建日志位于`/private/tmp/doudian-contract-*-final.log`及
 `/private/tmp/mcp-doudian-contract-*-final.log`；安装包位于
 `/private/tmp/mcp-doudian-contract-dist-final-20260910/`。未启动本机容器。
+
+## 当前真店验收状态（2026-09-11）
+
+[抖店匿名验收记录](live-acceptance/doudian.md)已建立，状态为输入未提供、真实调用未执行。应用模式/权限包、授权 shop_id、两页及支付优惠/部分退款/跨日样本、实际 expires_in 含义和生命周期均按记录逐项验证。自用或控制台测试 code 通过不证明服务市场订购与浏览器授权通过。工程与发布状态见[候选记录](release-readiness.md)。

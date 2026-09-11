@@ -2749,6 +2749,9 @@ class CommerceMCPBase:
         compression_config: CompressionConfig | None = None,
         rate_limit_config: RateLimitConfig | None = None,
         validate_input: bool = True,
+        *,
+        http_client: httpx.AsyncClient | None = None,
+        rate_limiter: ConfigurableRateLimiter | None = None,
     ) -> None:
         # HTTPX emits complete query URLs at INFO, including platform credentials.
         # Filter at the emitting logger so SDK/root-handler configuration cannot bypass it.
@@ -2759,6 +2762,8 @@ class CommerceMCPBase:
         self.app_secret = app_secret
         self.access_token = access_token
         self.validate_input = validate_input
+        self._client = http_client
+        self._owns_http_client = http_client is None
         self.rate_limiter = RateLimiter()
         self._default_rate_limiter = self.rate_limiter
         self.metrics = MetricsCollector()
@@ -2766,7 +2771,9 @@ class CommerceMCPBase:
         self._health_cache = HealthCheckCache(ttl_seconds=30.0)
         self.cache_warmer = CacheWarmer()
         self._compressor = RequestCompressor(compression_config)
-        self._configurable_limiter = ConfigurableRateLimiter(rate_limit_config)
+        self._configurable_limiter = (
+            rate_limiter if rate_limiter is not None else ConfigurableRateLimiter(rate_limit_config)
+        )
         self._priority_scheduler = PriorityScheduler()  # Transport applies limits once.
         self._alert_manager = AlertManager()
         # Live request observability: every _request is traced and metered.
@@ -2782,6 +2789,10 @@ class CommerceMCPBase:
 
         If the client has been closed or is ``None``, a new one is created.
         """
+        if not self._owns_http_client:
+            if self._client is None or self._client.is_closed:
+                raise RuntimeError("The externally supplied HTTP client is closed")
+            return self._client
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 timeout=30,
@@ -2803,6 +2814,8 @@ class CommerceMCPBase:
         Returns:
             A usable ``httpx.AsyncClient``.
         """
+        if not self._owns_http_client:
+            return self._get_client()
         cfg = self._reconnect_config
 
         # Fast path: existing healthy client
@@ -2857,6 +2870,8 @@ class CommerceMCPBase:
         Returns:
             A fresh ``httpx.AsyncClient``.
         """
+        if not self._owns_http_client:
+            return self._get_client()
         if self._client and not self._client.is_closed:
             await self._client.aclose()
         self._client = None
@@ -2964,6 +2979,9 @@ class CommerceMCPBase:
                             kwargs[key] = value
                     if prepare_request is not None:
                         kwargs.update(prepare_request())
+                    # The signed platform endpoint is the trust boundary, even
+                    # when a host injects a client configured to follow redirects.
+                    kwargs["follow_redirects"] = False
                     client = await self._ensure_client()
                     send = getattr(client, method.lower(), None)
                     response = await send(url, **kwargs) if send else await client.request(method, url, **kwargs)
@@ -3171,7 +3189,7 @@ class CommerceMCPBase:
 
     async def close(self) -> None:
         """Close the HTTP client."""
-        if self._client and not self._client.is_closed:
+        if self._owns_http_client and self._client and not self._client.is_closed:
             await self._client.aclose()
             self._client = None
 

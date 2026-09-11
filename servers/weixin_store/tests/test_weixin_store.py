@@ -238,27 +238,9 @@ def refund_list_payload() -> dict:
     return {
         "errcode": 0,
         "errmsg": "ok",
-        "after_sale_orders": [
-            {
-                "after_sale_order_id": "3705115058471207123",
-                "order_id": "3705115058471207123",
-                "status": 1,
-                "type": "RETURN",
-                "refund_info": {"amount": 9900},
-                "apply_time": "2024-01-20 10:00:00",
-                "reason_text": "商品质量问题",
-            },
-            {
-                "after_sale_order_id": "3705115058471207456",
-                "order_id": "3705115058471207456",
-                "status": 3,
-                "type": "REFUND",
-                "refund_info": {"amount": 29900},
-                "apply_time": "2024-01-25 15:30:00",
-                "reason_text": "未收到货",
-            },
-        ],
-        "total_num": 2,
+        "after_sale_order_id_list": ["3705115058471207123", "3705115058471207456"],
+        "has_more": False,
+        "next_key": "",
     }
 
 
@@ -318,14 +300,12 @@ def shop_info_payload() -> dict:
     return {
         "errcode": 0,
         "errmsg": "ok",
-        "shop_info": {
-            "shop_id": "test_shop_id_001",
-            "shop_name": "数码旗舰店",
-            "shop_type": 1,
-            "shop_logo": "https://wximg.com/logo.png",
-            "shop_desc": "专注数码产品，正品保障",
-            "status": 1,
-            "created_at": "2020-01-01",
+        "info": {
+            "username": "gh_test_shop",
+            "nickname": "数码旗舰店",
+            "subject_type": "企业",
+            "status": "open_finished",
+            "open_timestamp": 1704067200,
         },
     }
 
@@ -621,36 +601,15 @@ async def test_get_product_detail_returns_full_product_info(mock_request, produc
 
 @pytest.mark.asyncio
 async def test_get_refund_list_returns_refunds_with_expected_fields(mock_request, refund_list_payload):
-    """get_refund_list should return after-sale records with correct fields."""
+    """Official list returns IDs; callers fetch details separately."""
     mock_request.return_value = refund_list_payload
-
-    result_json = await get_refund_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-    )
-    result = json.loads(result_json)
-
-    assert result["errcode"] == 0
-    refunds = result["after_sale_orders"]
-    assert len(refunds) == 2
-
-    for r in refunds:
-        assert "after_sale_order_id" in r
-        assert "order_id" in r
-        assert "status" in r
-        assert "type" in r
-        assert "refund_info" in r
-        assert "reason_text" in r
-
+    result = json.loads(await get_refund_list(start_time="2024-01-01 00:00:00", end_time="2024-01-02 00:00:00"))
+    assert result == refund_list_payload
+    assert len(result["after_sale_order_id_list"]) == 2 and not result["has_more"]
     mock_request.assert_called_once_with(
         "POST",
         "/channels/ec/aftersale/getaftersalelist",
-        data={
-            "begin_create_time": "2024-01-01 00:00:00",
-            "end_create_time": "2024-01-31 23:59:59",
-            "page": 1,
-            "page_size": 20,
-        },
+        data={"begin_create_time": 1704038400, "end_create_time": 1704124800, "next_key": ""},
     )
 
 
@@ -723,27 +682,12 @@ async def test_get_logistics_tracking_returns_tracking_nodes(mock_request, logis
 
 @pytest.mark.asyncio
 async def test_get_shop_info_returns_shop_details(mock_request, shop_info_payload):
-    """get_shop_info should return shop details."""
+    """Get the original store ID, not an invented shop_id field."""
     mock_request.return_value = shop_info_payload
-
-    result_json = await get_shop_info()
-    result = json.loads(result_json)
-
-    assert result["errcode"] == 0
-    shop = result["shop_info"]
-    assert shop["shop_id"] == "test_shop_id_001"
-    assert shop["shop_name"] == "数码旗舰店"
-    assert shop["shop_type"] == 1
-    assert "shop_logo" in shop
-    assert "shop_desc" in shop
-    assert "status" in shop
-    assert "created_at" in shop
-
-    mock_request.assert_called_once_with(
-        "POST",
-        "/channels/ec/basicinfo/get",
-        data={},
-    )
+    result = json.loads(await get_shop_info())
+    assert result == shop_info_payload
+    assert result["info"]["username"] == "gh_test_shop"
+    mock_request.assert_called_once_with("GET", "/channels/ec/basics/info/get")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -962,7 +906,7 @@ async def test_refund_output_is_valid_json_string(mock_request, refund_list_payl
 
     result = await get_refund_list(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
+        end_time="2024-01-02 00:00:00",
     )
 
     assert isinstance(result, str)

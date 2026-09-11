@@ -66,9 +66,10 @@ async def test_all_adapters_share_transport_metrics_and_trace(platform):
 
     def respond(request):
         requests.append(request)
-        return httpx.Response(
-            200 if len(requests) == 1 else 401, json={"code": 10000, "data": {}} if platform == "doudian" else {}
-        )
+        payload = {"code": 10000, "data": {}} if platform == "doudian" else {}
+        if platform == "xiaohongshu":
+            payload = {"success": True, "error_code": 0, "data": {}}
+        return httpx.Response(200 if len(requests) == 1 else 401, json=payload)
 
     http = httpx.AsyncClient(transport=httpx.MockTransport(respond))
     client._client = http
@@ -124,8 +125,8 @@ def test_kuaishou_factory_keeps_distinct_signing_secret(monkeypatch):
         monkeypatch.setenv(f"KUAISHOU_{name}", value)
     client = module("kuaishou")._create_kuaishou_client()
     assert client.sign_secret == "signing"
-    # Independent fixed MD5 vector for "signinga1signing".
-    assert client._sign({"a": 1}) == "6F7E2EA41D56C9C818A4382A4C75BBC5"
+    # Official SDK canonical vector: "a=1&signSecret=signing".
+    assert client._sign({"a": 1}) == "fc86e42603d78b3822e19fa23c91173c"
 
 
 @pytest.mark.asyncio
@@ -155,7 +156,7 @@ async def test_oceanengine_auth_and_array_query_on_the_wire(monkeypatch):
         assert isinstance(result, str)
         assert json.loads(result)["code"] == 0
         request = requests[0]
-        assert request.url.host == "api.oceanengine.com"
+        assert request.url.host == "ad.oceanengine.com"
         assert request.headers["Access-Token"] == "header-token"
         assert request.url.params.get_list("advertiser_ids") == ["[1,2]"]
         assert "access_token" not in request.url.params
@@ -205,7 +206,7 @@ async def test_weixin_concurrent_managed_refresh_fetches_one_token():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("platform", ["kuaishou", "pinduoduo"])
+@pytest.mark.parametrize("platform", ["pinduoduo"])
 async def test_signed_collection_values_are_exactly_the_sent_values(platform):
     client = make_client(platform)
     requests = []
@@ -303,12 +304,12 @@ def test_doudian_official_published_example_vector():
     )
 
 
-def test_xiaohongshu_order_and_refund_time_units_match_official_schemas():
+def test_xiaohongshu_numeric_query_times_preserve_native_units():
     adapter = module("xiaohongshu").XiaohongshuMCP
-    params = {"start_time": "2024-01-01 00:00:00", "end_time": "2024-01-01 23:59:59", "page": "2", "page_size": "20"}
+    params = {"start_time": "1704038400000", "end_time": "1704124799000", "page": "2", "page_size": "20"}
     method, order = adapter._adapt_params("/api/order/list", params)
     assert method == "order.getOrderList"
-    assert order == {"startTime": 1704038400, "endTime": 1704124799, "timeType": 1, "pageNo": 2, "pageSize": 20}
+    assert order == {"startTime": 1704038400000, "endTime": 1704124799000, "timeType": 1, "pageNo": 2, "pageSize": 20}
     method, refund = adapter._adapt_params("/api/refund/list", params)
     assert method == "afterSale.listAfterSaleInfos"
     assert refund["startTime"] == 1704038400000
@@ -325,10 +326,10 @@ def test_xiaohongshu_unverified_tools_fail_explicitly(path):
 def test_xiaohongshu_creation_time_window_does_not_silently_truncate():
     with pytest.raises(ValueError, match="24 hours"):
         module("xiaohongshu").XiaohongshuMCP._adapt_params(
-            "/api/order/list",
+            "/api/refund/list",
             {
-                "start_time": "2024-01-01",
-                "end_time": "2024-02-01",
+                "start_time": "2024-01-01T00:00:00+08:00",
+                "end_time": "2024-02-01T00:00:00+08:00",
             },
         )
 

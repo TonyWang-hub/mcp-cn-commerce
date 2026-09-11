@@ -7,107 +7,20 @@ Sign method: MD5 (secret + sorted_kv_string + secret → MD5 → uppercase)
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
 from mcp.server.mcpserver import MCPServer
 
+from servers.taobao.client import TaobaoMCP
+from servers.taobao.schema import ORDER_DETAIL_FIELDS, ORDER_FIELDS, REFUND_DETAIL_FIELDS, REFUND_FIELDS
 from shared.cn_commerce_base import (
-    DEFAULT_RETRY,
-    CommerceAPIError,
-    CommerceMCPBase,
     ConfigValidationError,
-    SignMethod,
-    canonicalize_sign_value,
     register_common_tools,
 )
 
 # ── Taobao client ───────────────────────────────────────────────────────────────
-
-
-class TaobaoMCP(CommerceMCPBase):
-    """Taobao Open Platform (TOP) client.
-
-    Signs with MD5 (not HMAC-MD5). All parameters (system + business) go
-    together as query-string params in a POST to the single router endpoint.
-    """
-
-    PLATFORM = "TAOBAO"
-    BASE_URL = "https://eco.taobao.com/router/rest"
-    sign_method = SignMethod.MD5
-
-    async def _call(self, api_method: str, biz_params: dict | None = None) -> dict:
-        """Make a Taobao API call.
-
-        Merges system params (method, format, v) with business params and
-        sends everything through _request as query-string parameters.
-
-        Returns the API response dict, or an error_response dict on failure.
-        """
-        missing = [
-            name
-            for name, value in (
-                ("TAOBAO_APP_KEY", self.app_key),
-                ("TAOBAO_APP_SECRET", self.app_secret),
-                ("TAOBAO_ACCESS_TOKEN", self.access_token),
-            )
-            if not value
-        ]
-        if missing:
-            raise ConfigValidationError("TAOBAO", missing)
-        params = {"method": api_method, "format": "json", "v": "2.0", **(biz_params or {})}
-        return await self._request("POST", "", params=params, retry_config=DEFAULT_RETRY)
-
-    def _sign(self, params: dict) -> str:
-        """TOP signs all nonempty fields except sign, including sign_method."""
-        raw = (
-            self.app_secret
-            + "".join(
-                key + canonicalize_sign_value(value)
-                for key, value in sorted(params.items())
-                if key != "sign" and value != ""
-            )
-            + self.app_secret
-        )
-        return hashlib.md5(raw.encode("utf-8")).hexdigest().upper()
-
-    async def _request(self, method, path, params=None, data=None, retry_config=None):
-        """TOP uses seller session and GMT+8 timestamps, not generic auth."""
-        business = {**(params or {}), **(data or {})}
-        if self.validate_input:
-            self._validate_params(business)
-
-        def prepare():
-            signed = {key: canonicalize_sign_value(value) for key, value in business.items()}
-            signed.update(
-                app_key=self.app_key,
-                session=self.access_token,
-                timestamp=datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S"),
-                sign_method="md5",
-            )
-            signed["sign"] = self._sign(signed)
-            return {"params": signed}
-
-        def parse(payload):
-            if not isinstance(payload, dict):
-                raise ValueError("Expected a JSON object from TOP")
-            if "error_response" in payload:
-                error = payload["error_response"]
-                raise CommerceAPIError(error.get("code", -1), error.get("msg", "unknown"))
-            return payload
-
-        return await self._send_request(
-            method,
-            self.BASE_URL + path,
-            endpoint=business.get("method", path),
-            prepare_request=prepare,
-            parse_response=parse,
-            retry_config=retry_config,
-        )
 
 
 # ── Instantiate client from env ────────────────────────────────────────────────
@@ -158,7 +71,7 @@ async def get_order_list(
     page: int = 1,
     page_size: int = 20,
 ) -> str:
-    """Query order list by time range and optional status.
+    """Query orders created within the last three months; one page is not a complete report.
 
     Args:
         start_time: Order start time, e.g. "2024-01-01 00:00:00"
@@ -175,6 +88,7 @@ async def get_order_list(
     """
     biz_params: dict[str, str] = {
         "start_created": start_time,
+        "fields": ORDER_FIELDS,
         "end_created": end_time,
         "page_no": str(page),
         "page_size": str(page_size),
@@ -193,7 +107,7 @@ async def get_order_detail(tid: str) -> str:
     Args:
         tid: The Taobao trade ID (e.g. "123456789012345678").
     """
-    biz_params = {"tid": tid}
+    biz_params = {"tid": tid, "fields": ORDER_DETAIL_FIELDS}
     result = await taobao._call("taobao.trade.fullinfo.get", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -207,16 +121,19 @@ async def get_increment_orders(
 ) -> str:
     """Query incrementally modified orders by time range.
 
-    Useful for syncing order changes (status updates, modifications).
+    Only trades within three months are visible. Each window must be at most one
+    day; the platform recommends 30 minutes. Results are modified-time descending;
+    collect from the last page backwards to reduce missed changes.
 
     Args:
         start_time: Modification start time, e.g. "2024-01-01 00:00:00"
-        end_time: Modification end time, e.g. "2024-01-31 23:59:59"
+        end_time: Modification end time, e.g. "2024-01-01 23:59:59"
         page: Page number, starting from 1.
         page_size: Number of orders per page (max 100).
     """
     biz_params: dict[str, str] = {
         "start_modified": start_time,
+        "fields": ORDER_FIELDS,
         "end_modified": end_time,
         "page_no": str(page),
         "page_size": str(page_size),
@@ -305,6 +222,7 @@ async def get_refund_list(
     if status:
         biz_params["status"] = status
 
+    biz_params["fields"] = REFUND_FIELDS
     result = await taobao._call("taobao.refunds.receive.get", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -314,9 +232,9 @@ async def get_refund_detail(refund_id: str) -> str:
     """Get full details of a single refund/return record.
 
     Args:
-        refund_id: The refund record ID (e.g. "RF12345678901").
+        refund_id: The refund record ID (e.g. "12345678901").
     """
-    biz_params = {"refund_id": refund_id}
+    biz_params = {"refund_id": refund_id, "fields": REFUND_DETAIL_FIELDS}
     result = await taobao._call("taobao.refund.get", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
 

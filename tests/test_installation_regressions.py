@@ -6,10 +6,12 @@ these tests cover local configuration without requiring merchant access.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import io
 import json
 import os
+import runpy
 import subprocess
 import sys
 import tempfile
@@ -24,6 +26,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class InstallationRegressions(unittest.TestCase):
+    def test_jd_smoke_reaches_missing_credentials_after_business_validation(self):
+        exercise = runpy.run_path(str(ROOT / "scripts/smoke_install.py"))["exercise"]
+        asyncio.run(exercise([sys.executable, "-m", "servers.jd.server"], "jd", missing_credentials=True))
+
     def test_each_platform_launches_actual_module_without_src_directory(self):
         for platform, info in cli.SERVER_REGISTRY.items():
             with self.subTest(platform=platform), patch.object(cli.subprocess, "run") as run:

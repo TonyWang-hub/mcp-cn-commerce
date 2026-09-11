@@ -24,6 +24,7 @@ class MoneyAndTimeRegressionTests(unittest.TestCase):
                 "order_id": "order",
                 "order_status": 2,
                 "pay_amount": "1999",
+                "promotion_pay_amount": 0,
                 "product_info": {"list": [None, {"product_id": "P", "price": 1999, "combo_num": "bad"}]},
                 "buyer_info": ["invalid object"],
             },
@@ -32,12 +33,14 @@ class MoneyAndTimeRegressionTests(unittest.TestCase):
         self.assertEqual(order.amount_paid, 1999)
         self.assertIsNone(order.amount_shipping)
         self.assertIsNone(order.items[0].quantity)
-        self.assertEqual(order.source_values["amount_paid"]["value"], "1999")
+        self.assertEqual(order.source_values["amount_platform_payment"]["value"], "1999")
+        self.assertEqual(order.source_values["amount_paid"]["formula"], "pay_amount - promotion_pay_amount")
         self.assertIn({"field": "items[1].quantity", "code": "integer_invalid"}, order.warnings)
 
     def test_malformed_status_isolated_from_money(self):
         result = Normalizer().normalize_order(
-            {"order_id": "o", "order_status": {"bad": "status"}, "pay_amount": 1299}, "doudian"
+            {"order_id": "o", "order_status": {"bad": "status"}, "pay_amount": 1299, "promotion_pay_amount": 0},
+            "doudian",
         )
         self.assertEqual(result.amount_paid, 1299)
         self.assertEqual(result.status, "unknown")
@@ -78,14 +81,14 @@ class MoneyAndTimeRegressionTests(unittest.TestCase):
         n = Normalizer()
         product = n.normalize_product({"min_price": 1200, "stock": "bad", "skus": [None]}, "weixin")
         self.assertEqual(product.price_min, 1200)
-        refund = n.normalize_refund({"refund_amount": 1200, "evidence": None}, "doudian")
+        refund = n.normalize_refund({"refund_status": 3, "real_refund_amount": 1200, "evidence": None}, "doudian")
         self.assertEqual(refund.amount, 1200)
 
-    def test_doudian_tool_amount_alias_is_fen_and_platform_scoped(self):
+    def test_legacy_amount_alias_cannot_establish_buyer_cash(self):
         n = Normalizer()
         projected = {"order_id": "o", "status": 2, "amount": 1999}
         order = n.normalize_order(projected, "doudian")
-        self.assertEqual(order.amount_paid, 1999)
+        self.assertIsNone(order.amount_paid)
         self.assertEqual(order.source_values["amount_paid"]["unit"], "fen")
         self.assertIsNone(n.normalize_order(projected, "pdd").amount_paid)
 

@@ -15,22 +15,24 @@ Usage:
 
 from __future__ import annotations
 
-import hashlib
-import hmac
-import json
 import logging
 import os
-import time
 from contextlib import asynccontextmanager
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
+from servers.doudian.client import ConfigError, DouDianAPIError, DouDianClient
+from servers.doudian.schema import (
+    ORDER_DETAIL,
+    ORDER_LIST,
+    REFUND_LIST,
+    list_params,
+    project_order,
+    project_refund,
+    validate_read_response,
+)
 from shared.cn_commerce_base import (
-    DEFAULT_RETRY,
-    CommerceAPIError,
-    CommerceMCPBase,
-    ConfigValidationError,
     SensitiveDataFilter,
     register_common_tools,
 )
@@ -54,153 +56,7 @@ server = MCPServer("mcp-cn-doudian", lifespan=_lifespan)
 # ── Exceptions ──────────────────────────────────────────────
 
 
-class DouDianAPIError(CommerceAPIError):
-    """Normalized API error for Douyin shop.
-
-    Subclasses the shared :class:`CommerceAPIError` so the base class's
-    error handling (and ``handle_tool_errors``) recognises it, while still
-    carrying Doudian's ``sub_code``/``sub_msg`` detail.
-    """
-
-    def __init__(self, code: int, msg: str, sub_code: str = "", sub_msg: str = ""):
-        self.sub_code = sub_code
-        self.sub_msg = sub_msg
-        super().__init__(code=code, msg=msg)
-        # Enrich the rendered message with sub-error detail when present.
-        if sub_code:
-            self.args = (f"[{code}] {msg} (sub: [{sub_code}] {sub_msg})",)
-
-
-class ConfigError(ConfigValidationError):
-    """Missing required configuration.
-
-    Kept as a thin alias over the shared :class:`ConfigValidationError` so
-    existing callers/tests that expect a plain message string continue to work.
-    """
-
-    def __init__(self, message: str):  # pylint: disable=super-init-not-called
-        # The parent's __init__(platform, missing_vars) signature is intentionally
-        # bypassed: ConfigError is a message-based alias for backward compatibility.
-        Exception.__init__(self, message)  # pylint: disable=non-parent-init-called
-        self.platform = "DOUDIAN"
-        self.missing_vars = []
-
-
 # ── HTTP Client ─────────────────────────────────────────────
-
-
-class DouDianClient(CommerceMCPBase):
-    """Doudian HMAC-SHA256 adapter using the official API calling guide.
-
-    Protocol source: https://op.jinritemai.com/docs/guide-docs/10/23
-    Business JSON is recursively sorted and signed in its exact wire form.
-    """
-
-    PLATFORM = "DOUDIAN"
-    BASE_URL = "https://openapi-fxg.jinritemai.com/"
-    sign_method = "hmac-sha256"
-
-    def __init__(
-        self,
-        app_key: str,
-        app_secret: str,
-        access_token: str,
-        shop_id: str = "",
-    ):
-        super().__init__(
-            app_key=app_key,
-            app_secret=app_secret,
-            access_token=access_token,
-        )
-        self.shop_id = shop_id
-
-    # ── Signing ─────────────────────────────────────────
-
-    @staticmethod
-    def _serialize_business(params: dict[str, Any]) -> str:
-        # Official examples require integral floats as integers and preserve
-        # native nested values, Unicode and HTML punctuation.
-        def normalize(value):
-            if isinstance(value, dict):
-                return {k: normalize(v) for k, v in value.items()}
-            if isinstance(value, (list, tuple)):
-                return [normalize(v) for v in value]
-            if isinstance(value, float) and value.is_integer():
-                return int(value)
-            return value
-
-        return json.dumps(normalize(params), sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-
-    def _sign(self, params: dict[str, Any]) -> str:
-        """Sign app_key, method, param_json, timestamp and v in that order."""
-        raw = (
-            self.app_secret
-            + "".join(f"{key}{params[key]}" for key in ("app_key", "method", "param_json", "timestamp", "v"))
-            + self.app_secret
-        )
-        return hmac.new(self.app_secret.encode(), raw.encode(), hashlib.sha256).hexdigest()
-
-    # ── Request ─────────────────────────────────────────
-
-    async def request(
-        self,
-        method: str,
-        params: dict | None = None,
-    ) -> dict[str, Any]:
-        """POST canonical business JSON with OAuth and signed public query fields."""
-        missing = [
-            name
-            for name, value in (
-                ("DOUDIAN_APP_KEY", self.app_key),
-                ("DOUDIAN_APP_SECRET", self.app_secret),
-                ("DOUDIAN_ACCESS_TOKEN", self.access_token),
-                ("DOUDIAN_SHOP_ID", self.shop_id),
-            )
-            if not value
-        ]
-        if missing:
-            raise ConfigError(f"Missing required environment variables: {', '.join(missing)}")
-        params = params or {}
-        if self.validate_input:
-            self._validate_params(params)
-        param_json = self._serialize_business(params)
-        api_method = method.strip("/").replace("/", ".")
-
-        def prepare_request():
-            common = {
-                "app_key": self.app_key,
-                "method": api_method,
-                "timestamp": str(int(time.time())),
-                "v": "2",
-                "sign_method": self.sign_method,
-                "access_token": self.access_token,
-            }
-            common["sign"] = self._sign({**common, "param_json": param_json})
-            return {
-                "params": common,
-                "content": param_json.encode("utf-8"),
-                "headers": {"Content-Type": "application/json"},
-            }
-
-        def parse_response(result):
-            error_code = result.get("code", 10000)
-            if str(error_code) != "10000":
-                raise DouDianAPIError(
-                    code=error_code,
-                    msg=result.get("msg", "unknown error"),
-                    sub_code=str(result.get("sub_code", "")),
-                    sub_msg=result.get("sub_msg", ""),
-                )
-            return result.get("data", result)
-
-        return await self._send_request(
-            "POST",
-            f"{self.BASE_URL.rstrip('/')}/{method.lstrip('/')}",
-            endpoint=method,
-            prepare_request=prepare_request,
-            retry_config=DEFAULT_RETRY,
-            parse_response=parse_response,
-        )
 
 
 # ── Client singleton ────────────────────────────────────────
@@ -253,194 +109,54 @@ async def get_order_list(
     order_status: str = "",
     page: int = 0,
     page_size: int = 10,
+    time_type: str = "create",
 ) -> dict:
-    """获取抖店订单列表。
+    """按创建或更新时间查询近90天创建的店铺订单。
 
-    Args:
-        start_time: 订单开始时间，格式如 '2024-01-01 00:00:00'
-        end_time: 订单结束时间
-        order_status: 订单状态筛选 (1:待确认, 2:备货中, 3:已发货, 4:已收货, 5:已完成, 101:已取消)
-        page: 页码，从 0 开始
-        page_size: 每页数量，默认10，最大100
-
-    Returns:
-        包含订单列表的字典，每个订单含 order_id, status, amount, product_info, buyer_info
+    日期使用北京时间或秒时间戳；page从0起、page_size为1至100。状态：1待支付、105已支付、
+    2备货中、101部分发货、3已发货、4取消、5完成。amount为平台支付金额（分，含支付优惠），
+    buyer_paid_amount另行扣除支付优惠；缺少优惠字段时保持未知。单页不是完整日报。
     """
     try:
-        client = _get_client()
-
-        params: dict[str, Any] = {
-            "page": str(page),
-            "size": str(page_size),
-        }
-        if start_time:
-            params["start_time"] = start_time
-        if end_time:
-            params["end_time"] = end_time
+        params = list_params(ORDER_LIST, start_time, end_time, page, page_size, time_type=time_type)
         if order_status:
-            params["order_status"] = str(order_status)
-
-        data = await client.request("order/list", params)
-
-        raw_orders = data.get("list", data.get("data", []))
-        if not isinstance(raw_orders, list):
-            raw_orders = []
-
-        orders = [
-            {
-                "order_id": _safe_get(o, "order_id"),
-                "shop_order_id": _safe_get(o, "shop_order_id"),
-                "status": _safe_get(o, "order_status"),
-                "status_desc": _safe_get(o, "order_status_desc"),
-                "amount": _safe_get(o, "pay_amount"),
-                "post_amount": _safe_get(o, "post_amount"),
-                "create_time": _safe_get(o, "create_time"),
-                "pay_time": _safe_get(o, "pay_time"),
-                "product_info": [
-                    {
-                        "product_id": _safe_get(p, "product_id"),
-                        "product_name": _safe_get(p, "product_name"),
-                        "price": _safe_get(p, "price"),
-                        "quantity": _safe_get(p, "combo_num"),
-                        "spec_desc": _safe_get(p, "spec_desc"),
-                    }
-                    for p in _safe_get(o, "product_info", "list", default=[])
-                ],
-                "buyer_info": {
-                    "buyer_name": _safe_get(o, "buyer_info", "name"),
-                    "buyer_phone": _safe_get(o, "buyer_info", "phone"),
-                    "buyer_words": _safe_get(o, "buyer_words"),
-                },
-            }
-            for o in raw_orders
-        ]
-
+            codes = [int(value.strip()) for value in order_status.split(",")]
+            if any(value not in {1, 105, 2, 101, 3, 4, 5} for value in codes):
+                raise ValueError("Unsupported official order_status")
+            params["combine_status"] = [{"order_status": ",".join(str(code) for code in codes)}]
+        data = await _get_client().request(ORDER_LIST, params)
+        validate_read_response(ORDER_LIST, data)
+        orders = [project_order(item) for item in data["shop_order_list"]]
         return {
-            "total": data.get("total", sum(data.get(k, 0) for k in ("total", "total_count", "count"))),
+            "total": data["total"],
             "page": page,
             "page_size": page_size,
             "orders": orders,
+            "has_more": (page + 1) * page_size < data["total"],
+            "time_type": time_type,
+            "history_scope": "orders_created_within_last_90_days",
         }
-
-    except DouDianAPIError as e:
-        return {"error": str(e), "code": e.code, "orders": []}
-    except ConfigError as e:
-        return {"error": str(e), "orders": []}
-    except Exception as e:
-        logger.exception("Unexpected error in get_order_list")
-        return {"error": f"Unexpected error: {e}", "orders": []}
+    except DouDianAPIError as exc:
+        return {"error": str(exc), "code": exc.code, "orders": []}
+    except (ConfigError, ValueError) as exc:
+        return {"error": str(exc), "orders": []}
 
 
 @server.tool()
-async def get_order_detail(
-    order_id: str = "",
-    shop_order_id: str = "",
-) -> dict:
-    """获取抖店单个订单详情。
-
-    包括物流信息、售后/退款状态、商品详情、买家信息等完整字段。
-
-    Args:
-        order_id: 订单号 (与 shop_order_id 二选一)
-        shop_order_id: 商户订单号 (与 order_id 二选一)
-
-    Returns:
-        包含订单完整信息的字典
-    """
+async def get_order_detail(order_id: str = "", shop_order_id: str = "") -> dict:
+    """查询抖店店铺父订单详情；order_id为shop_order_id的兼容别名，二者不能冲突。"""
     try:
-        client = _get_client()
-
         if not order_id and not shop_order_id:
-            return {
-                "error": "Please provide either order_id or shop_order_id",
-                "order": None,
-            }
-
-        params: dict[str, Any] = {}
-        if order_id:
-            params["order_id"] = order_id
-        if shop_order_id:
-            params["shop_order_id"] = shop_order_id
-
-        data = await client.request("order/detail", params)
-
-        raw = data.get("detail", data.get("order_info", data))
-
-        order = {
-            # Basic info
-            "order_id": _safe_get(raw, "order_id"),
-            "shop_order_id": _safe_get(raw, "shop_order_id"),
-            "status": _safe_get(raw, "order_status"),
-            "status_desc": _safe_get(raw, "order_status_desc"),
-            "create_time": _safe_get(raw, "create_time"),
-            "pay_time": _safe_get(raw, "pay_time"),
-            "pay_type": _safe_get(raw, "pay_type"),
-            "pay_amount": _safe_get(raw, "pay_amount"),
-            "post_amount": _safe_get(raw, "post_amount"),
-            "post_insurance_amount": _safe_get(raw, "post_insurance_amount"),
-            "coupon_amount": _safe_get(raw, "coupon_amount"),
-            "shop_coupon_amount": _safe_get(raw, "shop_coupon_amount"),
-            "total_amount": _safe_get(raw, "total_amount"),
-            "cancel_reason": _safe_get(raw, "cancel_reason"),
-            "buyer_words": _safe_get(raw, "buyer_words"),
-            "seller_words": _safe_get(raw, "seller_words"),
-            "is_comment": _safe_get(raw, "is_comment"),
-            # Logistics
-            "logistics": {
-                "company": _safe_get(raw, "logistics_info", "company"),
-                "code": _safe_get(raw, "logistics_info", "code"),
-                "receiver_name": _safe_get(raw, "logistics_info", "receiver_name"),
-                "receiver_phone": _safe_get(raw, "logistics_info", "receiver_phone"),
-                "receiver_address": _safe_get(raw, "logistics_info", "receiver_address"),
-                "ship_time": _safe_get(raw, "logistics_info", "ship_time"),
-                "delivery_time": _safe_get(raw, "logistics_info", "delivery_time"),
-            },
-            # Refund / after-sale
-            "refund_status": _safe_get(raw, "refund_status"),
-            "refund_amount": _safe_get(raw, "refund_amount"),
-            "refund_type": _safe_get(raw, "refund_type"),
-            "after_sale_id": _safe_get(raw, "after_sale_id"),
-            # Products
-            "products": [
-                {
-                    "product_id": _safe_get(p, "product_id"),
-                    "product_name": _safe_get(p, "product_name"),
-                    "price": _safe_get(p, "price"),
-                    "quantity": _safe_get(p, "combo_num"),
-                    "spec_desc": _safe_get(p, "spec_desc"),
-                    "outer_sku_id": _safe_get(p, "outer_sku_id"),
-                    "sku_id": _safe_get(p, "sku_id"),
-                }
-                for p in _safe_get(raw, "product_info", "list", default=[])
-            ],
-            # Buyer
-            "buyer": {
-                "name": _safe_get(raw, "buyer_info", "name"),
-                "phone": _safe_get(raw, "buyer_info", "phone"),
-                "post_addr": _safe_get(raw, "buyer_info", "post_addr"),
-                "post_code": _safe_get(raw, "buyer_info", "post_code"),
-                "province": _safe_get(raw, "buyer_info", "province", "name"),
-                "city": _safe_get(raw, "buyer_info", "city", "name"),
-                "town": _safe_get(raw, "buyer_info", "town", "name"),
-                "street": _safe_get(raw, "buyer_info", "street", "name"),
-            },
-            # Additional
-            "order_tags": _safe_get(raw, "order_tags"),
-            "appointment_delivery_time": _safe_get(raw, "appointment_delivery_time"),
-            "main_status": _safe_get(raw, "main_status"),
-            "main_status_desc": _safe_get(raw, "main_status_desc"),
-            "shop_id": _safe_get(raw, "shop_id"),
-        }
-
-        return {"order": order}
-
-    except DouDianAPIError as e:
-        return {"error": str(e), "code": e.code, "order": None}
-    except ConfigError as e:
-        return {"error": str(e), "order": None}
-    except Exception as e:
-        logger.exception("Unexpected error in get_order_detail")
-        return {"error": f"Unexpected error: {e}", "order": None}
+            raise ValueError("Please provide either order_id or shop_order_id")
+        if order_id and shop_order_id and order_id != shop_order_id:
+            raise ValueError("order_id and shop_order_id must identify the same platform shop order")
+        data = await _get_client().request(ORDER_DETAIL, {"shop_order_id": shop_order_id or order_id})
+        validate_read_response(ORDER_DETAIL, data)
+        return {"order": project_order(data["shop_order_detail"])}
+    except DouDianAPIError as exc:
+        return {"error": str(exc), "code": exc.code, "order": None}
+    except (ConfigError, ValueError) as exc:
+        return {"error": str(exc), "order": None}
 
 
 @server.tool()
@@ -525,130 +241,44 @@ async def get_refund_list(
     refund_type: str = "",
     page: int = 0,
     page_size: int = 10,
+    time_type: str = "create",
 ) -> dict:
-    """获取抖店售后/退款单列表。
+    """按申请/更新时间查询售后列表，0页起，每页最多100条，最多翻页至page*size=50000。
 
-    Args:
-        start_time: 开始时间，格式如 '2024-01-01 00:00:00'
-        end_time: 结束时间
-        refund_type: 售后类型 (0:仅退款, 1:退货退款, 2:换货, 3:维修)
-        page: 页码，从 0 开始
-        page_size: 每页数量，默认10，最大100
-
-    Returns:
-        包含退款单列表的字典，每个退款单含 refund_id, order_id, amount, status, reason 等
+    refund_type为售后类型：0退货退款、1已发货退款、2未发货退款、3换货、6价保、7补寄、8维修。
+    列表只返回申请金额；实际退款金额和成功时间必须通过SDK get_refund_detail查询，不能用更新时间替代。
     """
     try:
-        client = _get_client()
-
-        params: dict[str, Any] = {
-            "page": str(page),
-            "size": str(page_size),
-        }
-        if start_time:
-            params["start_time"] = start_time
-        if end_time:
-            params["end_time"] = end_time
+        params = list_params(REFUND_LIST, start_time, end_time, page, page_size, time_type=time_type)
         if refund_type:
-            params["type"] = refund_type
-
-        data = await client.request("refund/listSearch", params)
-
-        raw_refunds = data.get("list", data.get("data", []))
-        if not isinstance(raw_refunds, list):
-            raw_refunds = []
-
-        refunds = [
-            {
-                "refund_id": _safe_get(r, "refund_id"),
-                "order_id": _safe_get(r, "order_id"),
-                "refund_type": _safe_get(r, "refund_type"),
-                "refund_type_desc": _safe_get(r, "refund_type_desc"),
-                "amount": _safe_get(r, "refund_amount"),
-                "status": _safe_get(r, "status"),
-                "status_desc": _safe_get(r, "status_desc"),
-                "reason": _safe_get(r, "reason"),
-                "reason_desc": _safe_get(r, "reason_desc"),
-                "create_time": _safe_get(r, "create_time"),
-                "update_time": _safe_get(r, "update_time"),
-                "refund_phase": _safe_get(r, "refund_phase"),
-                "pay_amount": _safe_get(r, "pay_amount"),
-                "logistics_code": _safe_get(r, "logistics_code"),
-                "logistics_company": _safe_get(r, "logistics_company"),
-                "product_name": _safe_get(r, "product_name"),
-                "product_id": _safe_get(r, "product_id"),
-                "buyer_name": _safe_get(r, "buyer_name"),
-                "arbitrate_status": _safe_get(r, "arbitrate_status"),
-                # Preserve source completion timestamps; update_time is not a
-                # substitute for the date on which money was refunded.
-                **{key: r[key] for key in ("completed_at", "refund_time", "success_time") if key in r},
-            }
-            for r in raw_refunds
-        ]
-
-        total = data.get("total", data.get("total_count", 0))
-
+            kind = int(refund_type)
+            if kind not in {0, 1, 2, 3, 6, 7, 8}:
+                raise ValueError("Unsupported official aftersale_type")
+            params["aftersale_type"] = kind
+        data = await _get_client().request(REFUND_LIST, params)
+        validate_read_response(REFUND_LIST, data)
         return {
-            "total": total,
+            "total": data["total"],
             "page": page,
             "page_size": page_size,
-            "refunds": refunds,
+            "refunds": [project_refund(item) for item in data["items"]],
+            "has_more": data["has_more"],
+            "time_type": time_type,
         }
-
-    except DouDianAPIError as e:
-        return {"error": str(e), "code": e.code, "refunds": []}
-    except ConfigError as e:
-        return {"error": str(e), "refunds": []}
-    except Exception as e:
-        logger.exception("Unexpected error in get_refund_list")
-        return {"error": f"Unexpected error: {e}", "refunds": []}
+    except DouDianAPIError as exc:
+        return {"error": str(exc), "code": exc.code, "refunds": []}
+    except (ConfigError, ValueError) as exc:
+        return {"error": str(exc), "refunds": []}
 
 
 @server.tool()
 async def get_shop_info() -> dict:
-    """获取抖店基本信息。
-
-    返回店铺名称、Logo、评分、状态、认证信息等。
-
-    Returns:
-        包含店铺基本信息的字典
-    """
-    try:
-        client = _get_client()
-
-        data = await client.request("shop/basicInfo", {})
-
-        raw = data.get("shop", data.get("shop_info", data))
-
-        shop = {
-            "shop_id": _safe_get(raw, "shop_id"),
-            "shop_name": _safe_get(raw, "shop_name"),
-            "logo": _safe_get(raw, "logo", default=_safe_get(raw, "shop_logo")),
-            "rating": _safe_get(raw, "shop_score", default=_safe_get(raw, "rating")),
-            "status": _safe_get(raw, "status", default=_safe_get(raw, "shop_status")),
-            "status_desc": _safe_get(raw, "status_desc"),
-            "shop_type": _safe_get(raw, "shop_type"),
-            "main_product": _safe_get(raw, "main_product"),
-            "open_time": _safe_get(raw, "open_time"),
-            "province": _safe_get(raw, "province", "name"),
-            "city": _safe_get(raw, "city", "name"),
-            "certification_status": _safe_get(raw, "certification_status"),
-            "brand_info": _safe_get(raw, "brand_info"),
-            "goods_count": _safe_get(raw, "goods_count"),
-            "order_count_30d": _safe_get(raw, "order_count_30d"),
-            "refund_rate": _safe_get(raw, "refund_rate"),
-            "dispute_rate": _safe_get(raw, "dispute_rate"),
-        }
-
-        return {"shop": shop}
-
-    except DouDianAPIError as e:
-        return {"error": str(e), "code": e.code, "shop": None}
-    except ConfigError as e:
-        return {"error": str(e), "shop": None}
-    except Exception as e:
-        logger.exception("Unexpected error in get_shop_info")
-        return {"error": f"Unexpected error: {e}", "shop": None}
+    """暂不支持：当前官方目录没有已核实的通用抖店基础信息接口。"""
+    return {
+        "supported": False,
+        "shop": None,
+        "error": "Unsupported: no verified general Doudian shop-info API; no request was sent",
+    }
 
 
 # ── 物流 (logistics) ────────────────────────────────────────────

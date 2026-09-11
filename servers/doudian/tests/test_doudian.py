@@ -67,259 +67,92 @@ def patch_environ() -> dict[str, str]:
 
 
 class TestGetOrderList:
-    """Tests for the get_order_list tool."""
-
     @pytest.mark.asyncio
     async def test_returns_orders_with_correct_fields(self):
-        """When the API returns order data, every order has the expected keys."""
-        mock_data = {
-            "total": 2,
-            "list": [
-                {
-                    "order_id": "001",
-                    "shop_order_id": "SO-001",
-                    "order_status": "2",
-                    "order_status_desc": "备货中",
-                    "pay_amount": "99.00",
-                    "post_amount": "5.00",
-                    "create_time": "2025-01-01 12:00:00",
-                    "pay_time": "2025-01-01 12:05:00",
-                    "product_info": {
-                        "list": [
-                            {
-                                "product_id": "P1",
-                                "product_name": "Test Product A",
-                                "price": "49.50",
-                                "combo_num": "2",
-                                "spec_desc": "红色",
-                            }
-                        ]
-                    },
-                    "buyer_info": {"name": "张三", "phone": "138****0000"},
-                    "buyer_words": "请尽快发货",
-                },
-                {
-                    "order_id": "002",
-                    "shop_order_id": "SO-002",
-                    "order_status": "4",
-                    "order_status_desc": "已收货",
-                    "pay_amount": "150.00",
-                    "post_amount": "0.00",
-                    "create_time": "2025-01-02 10:00:00",
-                    "pay_time": "2025-01-02 10:03:00",
-                    "product_info": {"list": []},
-                    "buyer_info": {},
-                    "buyer_words": "",
-                },
-            ],
+        raw = {
+            "order_id": "001",
+            "order_status": 2,
+            "pay_amount": 9900,
+            "promotion_pay_amount": 100,
+            "sku_order_list": [{"product_id": "P1", "item_num": 2, "price": 4950}],
         }
-
-        mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
-            result = await get_order_list(page=0, page_size=10)
-
-        assert result["page"] == 0
-        assert result["page_size"] == 10
-        assert result["total"] == 2
-        assert len(result["orders"]) == 2
-
-        order = result["orders"][0]
-        assert order["order_id"] == "001"
-        assert order["shop_order_id"] == "SO-001"
-        assert order["status"] == "2"
-        assert order["status_desc"] == "备货中"
-        assert order["amount"] == "99.00"
-        assert order["post_amount"] == "5.00"
-        assert order["create_time"] == "2025-01-01 12:00:00"
-        assert order["pay_time"] == "2025-01-01 12:05:00"
-
-        # product_info
-        products = order["product_info"]
-        assert isinstance(products, list)
-        assert len(products) == 1
-        assert products[0]["product_id"] == "P1"
-        assert products[0]["product_name"] == "Test Product A"
-        assert products[0]["price"] == "49.50"
-        assert products[0]["quantity"] == "2"
-
-        # buyer_info
-        buyer = order["buyer_info"]
-        assert buyer["buyer_name"] == "张三"
-        assert buyer["buyer_phone"] == "138****0000"
-        assert buyer["buyer_words"] == "请尽快发货"
+        client = make_mock_client({"shop_order_list": [raw], "total": 1})
+        with patch.object(_srv, "_get_client", return_value=client):
+            result = await get_order_list()
+        assert result["orders"][0]["order_id"] == "001"
+        assert result["orders"][0]["shop_order_id"] == "001"
+        assert result["orders"][0]["amount"] == 9900
+        assert result["orders"][0]["buyer_paid_amount"] == 9800
+        assert result["orders"][0]["product_info"][0]["quantity"] == 2
+        assert result["total"] == 1 and not result["has_more"]
 
     @pytest.mark.asyncio
     async def test_filters_passed_to_api(self):
-        """Time and status filters are forwarded as API params."""
-        mock_data = {"total": 0, "list": []}
-        mock_client = make_mock_client(mock_data)
-
-        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
-            await get_order_list(
-                start_time="2025-03-01 00:00:00",
-                end_time="2025-03-31 23:59:59",
-                order_status="3",
-                page=2,
-                page_size=50,
-            )
-
-        mock_client.request.assert_called_once()
-        call_args = mock_client.request.call_args
-        # First positional arg (after self) is the method name
-        assert call_args[0][0] == "order/list"
-        # Second positional arg is the params dict (passed positionally)
-        params = call_args[0][1]
-        assert params["start_time"] == "2025-03-01 00:00:00"
-        assert params["end_time"] == "2025-03-31 23:59:59"
-        assert params["order_status"] == "3"
-        assert params["page"] == "2"
-        assert params["size"] == "50"
+        client = make_mock_client({"shop_order_list": [], "total": 0})
+        with patch.object(_srv, "_get_client", return_value=client):
+            await get_order_list("2026-09-10 00:00:00", "2026-09-10 01:00:00", "3", 2, 50)
+        client.request.assert_called_once_with(
+            "order/searchList",
+            {
+                "page": 2,
+                "size": 50,
+                "create_time_start": 1788969600,
+                "create_time_end": 1788973200,
+                "combine_status": [{"order_status": "3"}],
+            },
+        )
 
     @pytest.mark.asyncio
     async def test_empty_list_when_no_orders(self):
-        """An empty list from the API yields an empty orders list."""
-        mock_data: dict[str, Any] = {"list": []}
-        mock_client = make_mock_client(mock_data)
-
-        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
+        client = make_mock_client({"shop_order_list": [], "total": 0})
+        with patch.object(_srv, "_get_client", return_value=client):
             result = await get_order_list()
+        assert result["orders"] == [] and result["total"] == 0
 
-        assert result["orders"] == []
-        assert result["total"] == 0
+    @pytest.mark.asyncio
+    async def test_wrong_response_envelope_is_not_an_empty_success(self):
+        client = make_mock_client({"list": [], "total": 0})
+        with patch.object(_srv, "_get_client", return_value=client):
+            result = await get_order_list()
+        assert "shop_order_list" in result["error"]
 
 
 class TestGetOrderDetail:
-    """Tests for the get_order_detail tool."""
-
     @pytest.mark.asyncio
     async def test_returns_single_order_detail(self):
-        """All detail fields are extracted from the API response."""
-        mock_data = {
-            "detail": {
-                "order_id": "ORD-12345",
-                "shop_order_id": "SHOP-001",
-                "order_status": "3",
-                "order_status_desc": "已发货",
-                "create_time": "2025-06-01 08:00:00",
-                "pay_time": "2025-06-01 08:01:00",
-                "pay_type": "1",
-                "pay_amount": "199.00",
-                "post_amount": "10.00",
-                "post_insurance_amount": "0.50",
-                "coupon_amount": "20.00",
-                "shop_coupon_amount": "5.00",
-                "total_amount": "219.00",
-                "cancel_reason": "",
-                "buyer_words": "请发顺丰",
-                "seller_words": "好的",
-                "is_comment": "0",
-                "logistics_info": {
-                    "company": "顺丰速运",
-                    "code": "SF1234567890",
-                    "receiver_name": "王五",
-                    "receiver_phone": "139****1111",
-                    "receiver_address": "北京市朝阳区",
-                    "ship_time": "2025-06-01 12:00:00",
-                    "delivery_time": "2025-06-03 10:00:00",
-                },
-                "refund_status": "",
-                "refund_amount": "",
-                "refund_type": "",
-                "after_sale_id": "",
-                "product_info": {
-                    "list": [
-                        {
-                            "product_id": "P-100",
-                            "product_name": "蓝牙耳机",
-                            "price": "199.00",
-                            "combo_num": "1",
-                            "spec_desc": "白色",
-                            "outer_sku_id": "SKU-OUT",
-                            "sku_id": "SKU-001",
-                        }
-                    ]
-                },
-                "buyer_info": {
-                    "name": "王五",
-                    "phone": "139****1111",
-                    "post_addr": "北京市朝阳区XXX",
-                    "post_code": "100000",
-                    "province": {"name": "北京"},
-                    "city": {"name": "北京市"},
-                    "town": {"name": "朝阳区"},
-                    "street": {"name": "XX街道"},
-                },
-                "order_tags": {},
-                "appointment_delivery_time": "",
-                "main_status": "3",
-                "main_status_desc": "已发货",
-                "shop_id": "S-001",
-            }
+        raw = {
+            "order_id": "order",
+            "order_status": 3,
+            "pay_amount": 19900,
+            "post_amount": 1000,
+            "sku_order_list": [{"product_id": "P1", "item_num": 1}],
+            "logistics_info": [{"company": "shunfeng", "tracking_no": "SF123"}],
         }
-
-        mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
-            result = await get_order_detail(order_id="ORD-12345")
-
-        mock_client.request.assert_called_once_with("order/detail", {"order_id": "ORD-12345"})
-
-        order = result["order"]
-        assert order is not None
-        assert order["order_id"] == "ORD-12345"
-        assert order["shop_order_id"] == "SHOP-001"
-        assert order["status"] == "3"
-        assert order["pay_amount"] == "199.00"
-        assert order["post_amount"] == "10.00"
-        assert order["coupon_amount"] == "20.00"
-        assert order["total_amount"] == "219.00"
-
-        # logistics
-        log = order["logistics"]
-        assert log["company"] == "顺丰速运"
-        assert log["code"] == "SF1234567890"
-        assert log["receiver_name"] == "王五"
-
-        # products
-        assert len(order["products"]) == 1
-        prod = order["products"][0]
-        assert prod["product_id"] == "P-100"
-        assert prod["price"] == "199.00"
-        assert prod["quantity"] == "1"
-
-        # buyer
-        buyer = order["buyer"]
-        assert buyer["name"] == "王五"
-        assert buyer["province"] == "北京"
-        assert buyer["city"] == "北京市"
+        client = make_mock_client({"shop_order_detail": raw})
+        with patch.object(_srv, "_get_client", return_value=client):
+            result = await get_order_detail(order_id="order")
+        client.request.assert_called_once_with("order/orderDetail", {"shop_order_id": "order"})
+        assert result["order"]["pay_amount"] == 19900
+        assert result["order"]["buyer_paid_amount"] is None
+        assert result["order"]["products"][0]["quantity"] == 1
+        assert result["order"]["logistics"][0]["tracking_no"] == "SF123"
 
     @pytest.mark.asyncio
     async def test_with_shop_order_id(self):
-        """When only shop_order_id is provided, it is sent to the API."""
-        mock_data = {
-            "detail": {
-                "order_id": "ORD-999",
-                "shop_order_id": "SHOP-999",
-            }
-        }
-        mock_client = make_mock_client(mock_data)
-
-        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
+        client = make_mock_client({"shop_order_detail": {"order_id": "SHOP-999"}})
+        with patch.object(_srv, "_get_client", return_value=client):
             result = await get_order_detail(shop_order_id="SHOP-999")
-
-        assert result["order"]["order_id"] == "ORD-999"
-        mock_client.request.assert_called_once_with("order/detail", {"shop_order_id": "SHOP-999"})
+        assert result["order"]["order_id"] == "SHOP-999"
+        client.request.assert_called_once_with("order/orderDetail", {"shop_order_id": "SHOP-999"})
 
     @pytest.mark.asyncio
     async def test_missing_order_id_returns_error(self):
-        """Empty order_id and empty shop_order_id returns an error dict."""
-        mock_client = make_mock_client({})
-        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
-            result = await get_order_detail(order_id="", shop_order_id="")
-
+        client = make_mock_client({})
+        with patch.object(_srv, "_get_client", return_value=client):
+            result = await get_order_detail()
         assert result["error"] == "Please provide either order_id or shop_order_id"
         assert result["order"] is None
-        # The API was never called
-        mock_client.request.assert_not_called()
+        client.request.assert_not_called()
 
 
 class TestGetProductList:
@@ -413,143 +246,52 @@ class TestGetProductList:
 
 
 class TestGetRefundList:
-    """Tests for the get_refund_list tool."""
-
     @pytest.mark.asyncio
     async def test_returns_refund_records(self):
-        """Refund/after-sale records include amount, status, and reason."""
-        mock_data = {
-            "total": 1,
-            "list": [
-                {
-                    "refund_id": "RF-001",
-                    "order_id": "ORD-001",
-                    "refund_type": "1",
-                    "refund_type_desc": "退货退款",
-                    "refund_amount": "99.00",
-                    "status": "2",
-                    "status_desc": "商家同意",
-                    "reason": "不喜欢",
-                    "reason_desc": "不喜欢/不想要",
-                    "create_time": "2025-06-01 10:00:00",
-                    "update_time": "2025-06-02 14:00:00",
-                    "refund_phase": "2",
-                    "pay_amount": "99.00",
-                    "logistics_code": "SF001",
-                    "logistics_company": "顺丰速运",
-                    "product_name": "蓝牙耳机",
-                    "product_id": "P-100",
-                    "buyer_name": "张三",
-                    "arbitrate_status": "0",
-                }
-            ],
+        raw = {
+            "aftersale_info": {
+                "aftersale_id": "RF1",
+                "refund_status": 3,
+                "aftersale_status": 12,
+                "refund_amount": 9900,
+                "aftersale_type": 1,
+                "apply_time": 1788969600,
+            },
+            "order_info": {"shop_order_id": "ORDER1"},
         }
-
-        mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
-            result = await get_refund_list(
-                start_time="2025-06-01 00:00:00",
-                end_time="2025-06-30 23:59:59",
-                refund_type="1",
-                page=0,
-                page_size=10,
-            )
-
-        assert result["total"] == 1
-        assert len(result["refunds"]) == 1
-
+        client = make_mock_client({"items": [raw], "total": 1, "has_more": False})
+        with patch.object(_srv, "_get_client", return_value=client):
+            result = await get_refund_list()
         refund = result["refunds"][0]
-        assert refund["refund_id"] == "RF-001"
-        assert refund["order_id"] == "ORD-001"
-        assert refund["refund_type"] == "1"
-        assert refund["refund_type_desc"] == "退货退款"
-        assert refund["amount"] == "99.00"
-        assert refund["status"] == "2"
-        assert refund["status_desc"] == "商家同意"
-        assert refund["reason"] == "不喜欢"
-        assert refund["product_name"] == "蓝牙耳机"
-        assert refund["buyer_name"] == "张三"
+        assert refund["refund_id"] == "RF1" and refund["order_id"] == "ORDER1"
+        assert refund["requested_amount"] == 9900
+        assert refund["amount"] is None and refund["detail_required"]
+        assert refund["status"] == 3 and "refund_time" not in refund
 
     @pytest.mark.asyncio
     async def test_refund_type_mapped_to_api_param(self):
-        """The refund_type arg is sent as 'type' in the API params."""
-        mock_data = {"total": 0, "list": []}
-        mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
+        client = make_mock_client({"items": [], "total": 0, "has_more": False})
+        with patch.object(_srv, "_get_client", return_value=client):
             await get_refund_list(refund_type="0")
-
-        params = mock_client.request.call_args[0][1]
-        assert params["type"] == "0"
+        client.request.assert_called_once_with("afterSale/List", {"page": 0, "size": 10, "aftersale_type": 0})
 
     @pytest.mark.asyncio
     async def test_empty_list_when_no_refunds(self):
-        """Empty API response returns an empty refunds list."""
-        mock_data: dict[str, Any] = {"list": []}
-        mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
+        client = make_mock_client({"items": [], "total": 0, "has_more": False})
+        with patch.object(_srv, "_get_client", return_value=client):
             result = await get_refund_list()
-
-        assert result["refunds"] == []
-        assert result["total"] == 0
+        assert result["refunds"] == [] and result["total"] == 0
 
 
 class TestGetShopInfo:
-    """Tests for the get_shop_info tool."""
-
     @pytest.mark.asyncio
-    async def test_returns_shop_name_and_rating(self):
-        """Shop info response includes name, rating, and other fields."""
-        mock_data = {
-            "shop": {
-                "shop_id": "S-001",
-                "shop_name": "小王的数码店",
-                "logo": "https://img.example.com/logo.png",
-                "shop_score": "4.8",
-                "status": "1",
-                "status_desc": "正常营业",
-                "shop_type": "品牌店",
-                "main_product": "数码产品",
-                "open_time": "2020-01-01",
-                "province": {"name": "广东"},
-                "city": {"name": "深圳市"},
-                "certification_status": "1",
-                "brand_info": "华为",
-                "goods_count": "150",
-                "order_count_30d": "5000",
-                "refund_rate": "0.02",
-                "dispute_rate": "0.01",
-            }
-        }
-
-        mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
+    async def test_unverified_contract_is_explicitly_unsupported(self):
+        client = make_mock_client({"shop": {"shop_id": "fake", "rating": 4.8}})
+        with patch.object(_srv, "_get_client", return_value=client):
             result = await get_shop_info()
-
-        mock_client.request.assert_called_once_with("shop/basicInfo", {})
-
-        shop = result["shop"]
-        assert shop is not None
-        assert shop["shop_id"] == "S-001"
-        assert shop["shop_name"] == "小王的数码店"
-        assert shop["rating"] == "4.8"
-        assert shop["logo"] == "https://img.example.com/logo.png"
-        assert shop["status"] == "1"
-        assert shop["status_desc"] == "正常营业"
-        assert shop["province"] == "广东"
-        assert shop["city"] == "深圳市"
-        assert shop["goods_count"] == "150"
-        assert shop["order_count_30d"] == "5000"
-        assert shop["refund_rate"] == "0.02"
-
-    @pytest.mark.asyncio
-    async def test_shop_score_fallback(self):
-        """When 'shop_score' is absent, 'rating' is used as fallback."""
-        mock_data = {"shop": {"shop_id": "S-002", "shop_name": "Test Shop", "rating": "4.5"}}
-        mock_client = make_mock_client(mock_data)
-        with patch_environ(), patch.object(_srv, "_get_client", return_value=mock_client):
-            result = await get_shop_info()
-
-        assert result["shop"]["rating"] == "4.5"
+        assert result["shop"] is None and result["supported"] is False
+        assert "Unsupported" in result["error"]
+        client.request.assert_not_called()
 
 
 class TestAPIErrorHandling:
@@ -622,7 +364,8 @@ class TestAPIErrorHandling:
             result = await get_shop_info()
 
         assert result["error"]
-        assert result["code"] == 40004
+        assert result["supported"] is False
+        mock_client.request.assert_not_called()
         assert result["shop"] is None
 
 

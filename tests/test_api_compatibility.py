@@ -13,6 +13,7 @@ import json
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -200,7 +201,7 @@ class TestBackwardCompatibilityOldResponseFormats:
                 legacy_error,
                 "_call",
                 "taobao.trades.sold.get",
-                {},
+                {"fields": "tid"},
             )
         assert caught.value.code == 7
         assert caught.value.msg == "Invalid app key"
@@ -552,10 +553,10 @@ class TestVersionNegotiationCompatibility:
         client = TaobaoMCP(app_key="k", app_secret="s", access_token="t")
         _, request = await _parse_http_response(
             client,
-            {"trades_sold_get_response": {"total_results": 0}},
+            {"trades_sold_get_response": {"total_results": 0, "trades": {"trade": []}}},
             "_call",
             "taobao.trades.sold.get",
-            {},
+            {"fields": "tid"},
         )
         assert str(request.url).split("?")[0] == "https://eco.taobao.com/router/rest"
         assert request.url.params["v"] == "2.0"
@@ -580,7 +581,7 @@ class TestVersionNegotiationCompatibility:
             {},
         )
         assert request.url.host == "api.jd.com"
-        assert request.url.params["v"] == "2.0"
+        assert parse_qs(request.content.decode())["v"] == ["2.0"]
         _compat_results.add(
             "version_negotiation",
             "jd_api_version_v2",
@@ -601,7 +602,7 @@ class TestVersionNegotiationCompatibility:
             "GET",
             "2/advertiser/info/",
         )
-        assert request.url.host == "api.oceanengine.com"
+        assert request.url.host == "ad.oceanengine.com"
         assert request.url.path == "/open_api/2/advertiser/info/"
         assert request.headers["Access-Token"] == "t"
         _compat_results.add(
@@ -741,7 +742,7 @@ class TestSigningMethodCompatibility:
         )
 
     def test_jd_hmac_md5_sign_format(self):
-        """JD HMAC-MD5 produces 32-char uppercase hex."""
+        """Current JOS MD5 signatures use 32-character uppercase hex."""
         from servers.jd.server import JDMCP
 
         client = JDMCP(app_key="k", app_secret="s")
@@ -770,7 +771,7 @@ class TestSigningMethodCompatibility:
         client = KuaishouMCP(app_key="k", app_secret="s", sign_secret="ss", access_token="t")
         sig = client._sign({"app_key": "k", "timestamp": "123"})
         assert len(sig) == 32
-        assert sig == sig.upper()
+        assert sig == sig.lower()
         _compat_results.add(
             "signing_compat",
             "kuaishou_sign_secret_used",

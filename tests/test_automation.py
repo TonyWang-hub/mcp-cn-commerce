@@ -309,34 +309,23 @@ class TestFullRequestFlowAutomation:
 
     @pytest.mark.asyncio
     async def test_jd_full_flow(self, mock_http_response):
-        """JD: tool -> _call -> _request -> mock HTTP -> JSON response."""
-        from servers.jd.server import JDMCP
+        """Known incompatible legacy JD contract must fail before network I/O."""
+        from mcp.server.mcpserver.exceptions import ToolError
+
+        from servers.jd.server import JDMCP, get_order_list
 
         client = JDMCP(app_key="jd_key", app_secret="jd_secret", access_token="jd_tok")
-
         mock_http = AsyncMock()
-        mock_http_response.json.return_value = {
-            "jd_pop_order_search_response": {
-                "searchorderinfo_result": {
-                    "orderInfoList": [{"order_id": "30001"}],
-                    "orderTotal": 1,
-                }
-            }
-        }
-        mock_http.post.return_value = mock_http_response
         mock_http.is_closed = False
-
         with patch("servers.jd.server.jd", client):
             with patch.object(client, "_ensure_client", return_value=mock_http):
-                from servers.jd.server import get_order_list
-
-                result = await get_order_list(
-                    start_time="2024-01-01 00:00:00",
-                    end_time="2024-01-31 23:59:59",
-                )
-
-        data = json.loads(result)
-        assert "jd_pop_order_search_response" in data
+                with pytest.raises(ToolError, match="JD POP"):
+                    await get_order_list(
+                        start_time="2024-01-01 00:00:00",
+                        end_time="2024-01-31 23:59:59",
+                    )
+        mock_http.post.assert_not_awaited()
+        await client.close()
 
     @pytest.mark.asyncio
     async def test_taobao_full_flow(self, mock_http_response):
@@ -374,7 +363,7 @@ class TestFullRequestFlowAutomation:
         mock_http = AsyncMock()
         mock_http_response.json.return_value = {
             "code": 10000,
-            "data": {"list": [{"order_id": "DD001", "order_status": 2}], "total": 1},
+            "data": {"shop_order_list": [{"order_id": "DD001", "order_status": 2}], "total": 1},
         }
         mock_http.post.return_value = mock_http_response
 
@@ -389,26 +378,24 @@ class TestFullRequestFlowAutomation:
 
     @pytest.mark.asyncio
     async def test_kuaishou_full_flow(self, mock_http_response):
-        """Kuaishou: tool -> _call -> mock HTTP -> JSON response."""
-        from servers.kuaishou.server import get_order_list, ks
+        """Current Kuaishou CLI reaches the signed GET protocol."""
+        from servers.kuaishou.server import KuaishouMCP, get_order_list
 
+        client = KuaishouMCP(app_key="key", app_secret="secret", sign_secret="sign", access_token="token")
         mock_http_response.json.return_value = {
             "result": 1,
-            "data": {"orderList": [{"order_id": "KS001"}], "totalCount": 1},
+            "data": {"orderList": [{"orderBaseInfo": {"oid": 123}}], "cursor": "nomore"},
         }
-
-        with patch.object(ks, "_call", new_callable=AsyncMock) as mock_call:
-            mock_call.return_value = {
-                "result": 1,
-                "data": {"orderList": [{"order_id": "KS001"}], "totalCount": 1},
-            }
-            result = await get_order_list(
-                start_time="2024-01-01 00:00:00",
-                end_time="2024-01-31 23:59:59",
-            )
-
-        data = json.loads(result)
-        assert "orderList" in data.get("data", data)
+        http = AsyncMock()
+        http.get.return_value = mock_http_response
+        http.is_closed = False
+        with patch("servers.kuaishou.server.ks", client):
+            with patch.object(client, "_ensure_client", return_value=http):
+                result = await get_order_list("2026-09-01 00:00:00", "2026-09-02 00:00:00")
+        assert json.loads(result)["data"]["cursor"] == "nomore"
+        assert http.get.call_args.args == ("https://openapi.kwaixiaodian.com/open/order/cursor/list",)
+        assert http.get.call_args.kwargs["params"]["method"] == "open.order.cursor.list"
+        await client.close()
 
 
 # ====================================================================
@@ -497,7 +484,7 @@ class TestErrorPropagationAutomation:
                     result = json.loads(await module.get_advertiser_info("123"))
                     assert result["error"]["code"] == 40001
                 else:
-                    result = await module.get_shop_info()
+                    result = await module.get_order_detail(order_id="test-order")
                     assert result["error"]
                     assert result["code"] == 40001
         else:
@@ -515,6 +502,9 @@ class TestErrorPropagationAutomation:
                 with pytest.raises(CommerceAPIError) as caught:
                     if platform == "xiaohongshu":
                         await module.get_order_detail(order_id="test-order")
+                    elif platform in {"pinduoduo", "jd"}:
+                        # Read-contract migrations are gated; retain the transport error regression.
+                        await module.get_product_list()
                     else:
                         await module.get_shop_info()
             assert caught.value.code == 40001

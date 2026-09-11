@@ -34,7 +34,7 @@ async def test_top_session_timestamp_and_signature_on_wire():
 
     def respond(request):
         requests.append(request)
-        return httpx.Response(200, json={"trades_sold_get_response": {"total_results": 0}})
+        return httpx.Response(200, json={"trades_sold_get_response": {"total_results": 0, "trades": {"trade": []}}})
 
     client._client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
     try:

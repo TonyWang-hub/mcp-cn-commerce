@@ -41,8 +41,8 @@ MCP：`build_daily_report(shops_json, report_date, timezone)`，其中 `shops_js
 
 - `input_format="normalized"` 为默认，`orders` / `refunds` 接受统一 dataclass 或其字典。金额必须已经是整数分，时间应含明确 UTC 偏移。
 - `input_format="raw"` 接受已提取的原始订单/退款列表，内部使用 `Normalizer(source_timezone=timezone, amount_units=shop.amount_units)`。这里显式指定的 `timezone` 也表示无偏移原始时间的来源时区；若来源时区不同，请先独立归一化再使用 normalized 模式。
-- 抖店也接受本项目工具的实际投影：`get_order_list()["orders"]` 中 `amount` 是原 `pay_amount` 的**分**值，`product_info` 是商品列表且 `quantity` 是数量；`get_order_detail()["order"]` 的商品列表名为 `products`。这个 `amount` 付款别名仅适用于抖店，不会推广到其他平台。
-- 抖店 `get_refund_list()["refunds"]` 的 `amount` 同样保留原退款分值；工具仅透传上游真实存在的 `completed_at` / `refund_time` / `success_time`。只返回 `create_time` / `update_time` 时不能推断退款完成时间，已完成退款对应日报保持不完整。
+- 抖店买家实付必须使用 `pay_amount - promotion_pay_amount`，单位分；缺少支付优惠字段时不能默认零。`amount_platform_payment` 和 `amount_merchant_received` 分别保存平台支付定义和商家实收，与 `amount_paid` 分开。旧工具只有 `amount` 的数据无法建立买家实付；应重新获取完整字段。商品支持官方 `sku_order_list[].item_num` 和本项目投影。
+- 抖店售后列表只包含申请金额，投影 `amount=None`、`detail_required=true`。需补 `afterSale/Detail`：仅 `refund_status=3` 的 `real_refund_amount` 为实际退款分值，`refund_time` 为资金退回成功时间；详情的 `refund_total_amount` 保存为 `amount_requested`。申请时间、更新时间和售后终结时间不能替代退款成功时间。详见[抖店归一化合同](doudian-normalization.md)。
 - `orders` 和 `refunds` 字段必须显式提供。缺失列表产生 `source_missing` 并令对应指标不完整，即使声明了 coverage=true；只有明确的空数组 `[]` 可以表示已确认没有记录。
 - `coverage[日期].orders=true` 和 `.refunds=true` 是调用方对当日对应事件范围**全部分页成功拉完**的明确声明，默认不是 true。不能因为列表不为空或某页很短就推断取全。
 - 订单指标以**付款时间**为日界，退款指标以**完成时间**为日界。如果平台列表仅按创建时间/申请时间筛选，必须补足跨日创建但当日付款/完成的记录，否则不能声明该事件范围 coverage 完整。

@@ -135,7 +135,8 @@ class TestNormalizeOrderDoudian:
         raw = {
             "order_id": "7385294610238495621",
             "order_status": 2,
-            "pay_amount": "199.00",
+            "pay_amount": 19900,
+            "promotion_pay_amount": 0,
             "post_amount": "0.00",
             "create_time": "2026-06-09 10:30:00",
             "pay_time": "2026-06-09 10:32:00",
@@ -147,7 +148,7 @@ class TestNormalizeOrderDoudian:
         assert order.order_id == "7385294610238495621"
         assert order.platform == "doudian"
         assert order.status == "paid"
-        assert order.amount_paid == 199
+        assert order.amount_paid == 19900
         assert order.buyer_name == "张三"
         assert len(order.items) == 1
         assert order.items[0].product_name == "T恤"
@@ -190,8 +191,15 @@ class TestNormalizeOrderWeixin:
             "order_id": "3705115058471207123",
             "status": 20,
             "order_detail": {
-                "product_infos": [{"product_id": "1001", "title": "耳机", "sale_price": 9900, "product_cnt": 1}],
-                "price_info": {"product_price": 9900, "order_price": 8900, "discounted_price": 1000, "freight": 0},
+                "product_infos": [{"product_id": "1001", "title": "耳机", "sale_price": 9900, "count": 1}],
+                "pay_info": {"payment_method": 1, "pay_time": 1789030000},
+                "price_info": {
+                    "original_order_price": 9900,
+                    "product_price": 9900,
+                    "order_price": 8900,
+                    "discounted_price": 1000,
+                    "freight": 0,
+                },
                 "delivery_info": {"receiver_name": "王五", "receiver_tel": "13800138000", "receiver_address": "北京"},
             },
         }
@@ -200,7 +208,7 @@ class TestNormalizeOrderWeixin:
         assert order.status == "paid"
         assert order.amount_total == 9900
         assert order.amount_discount == 1000
-        assert order.buyer_name == "王五"
+        assert order.buyer_name == ""  # Current metric contract omits buyer identity.
         assert len(order.items) == 1
 
 
@@ -332,13 +340,15 @@ class TestNormalizeRefundIntegration:
         refund = normalizer.normalize_refund(raw, "doudian")
         assert refund.status == "pending"
         assert refund.type == "refund_only"
-        assert refund.amount == 99
+        assert refund.amount is None
+        assert refund.amount_requested == 99
 
     def test_weixin_refund(self, normalizer: Normalizer):
         raw = {
             "after_sale_order_id": "RF002",
             "order_id": "ORD002",
-            "status": 1,
+            "status": "MERCHANT_RETURN_SUCCESS",
+            "complete_time": 1789030000,
             "type": "RETURN",
             "refund_info": {"amount": 9900},
             "reason_text": "质量问题",

@@ -213,31 +213,14 @@ class DoudianProjectionContractTests(unittest.IsolatedAsyncioTestCase):
     """
 
     async def _project(self, tool_name, response, **arguments):
-        import ast
-        import logging
-        from pathlib import Path
         from types import SimpleNamespace
-        from typing import Any
-        from unittest.mock import AsyncMock
+        from unittest.mock import AsyncMock, patch
 
-        source_path = Path(__file__).resolve().parents[1] / "servers" / "doudian" / "server.py"
-        tree = ast.parse(source_path.read_text(encoding="utf-8"))
-        definitions = []
-        for node in tree.body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in ("_safe_get", tool_name):
-                node.decorator_list = []
-                definitions.append(node)
-        self.assertEqual(len(definitions), 2)
+        from servers.doudian import server
+
         client = SimpleNamespace(request=AsyncMock(return_value=copy.deepcopy(response)))
-        namespace = {
-            "Any": Any,
-            "_get_client": lambda: client,
-            "DouDianAPIError": RuntimeError,
-            "ConfigError": ValueError,
-            "logger": logging.getLogger(__name__),
-        }
-        exec(compile(ast.Module(body=definitions, type_ignores=[]), str(source_path), "exec"), namespace)
-        projected = await namespace[tool_name](**arguments)
+        with patch.object(server, "_get_client", return_value=client):
+            projected = await getattr(server, tool_name)(**arguments)
         self.assertNotIn("error", projected)
         client.request.assert_awaited_once()
         return projected
@@ -247,16 +230,17 @@ class DoudianProjectionContractTests(unittest.IsolatedAsyncioTestCase):
             "order_id": "projected-order",
             "order_status": 2,
             "pay_amount": 1000,
+            "promotion_pay_amount": 0,
             "post_amount": 0,
             "total_amount": 1000,
             "create_time": "2026-09-10 09:00:00",
             "pay_time": "2026-09-10 09:30:00",
-            "product_info": {
-                "list": [{"product_id": "projected-product", "product_name": "Projected", "price": 500, "combo_num": 2}]
-            },
+            "sku_order_list": [
+                {"product_id": "projected-product", "product_name": "Projected", "price": 500, "item_num": 2}
+            ],
         }
-        listing = await self._project("get_order_list", {"list": [upstream], "total": 1})
-        detail = await self._project("get_order_detail", {"detail": upstream}, order_id="projected-order")
+        listing = await self._project("get_order_list", {"shop_order_list": [upstream], "total": 1})
+        detail = await self._project("get_order_detail", {"shop_order_detail": upstream}, order_id="projected-order")
         for projected in (listing["orders"][0], detail["order"]):
             a = shop()
             a["input_format"] = "raw"
@@ -269,32 +253,23 @@ class DoudianProjectionContractTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["shops"][0]["top_products"][0]["sales"], 2)
             self.assertEqual(result["shops"][0]["top_products"][0]["gross_item_amount"], 1000)
 
-    async def test_actual_refund_projection_requires_real_completion_time(self):
+    async def test_actual_refund_projection_requires_detail_amount_and_completion_time(self):
         upstream = {
-            "refund_id": "projected-refund",
-            "order_id": "o1",
-            "status": 3,
-            "refund_type": "仅退款",
-            "refund_amount": 299,
-            "create_time": "2026-09-09 10:00:00",
-            "update_time": "2026-09-10 12:00:00",
+            "aftersale_info": {
+                "aftersale_id": "projected-refund",
+                "refund_status": 3,
+                "refund_amount": 299,
+                "apply_time": 1788883200,
+                "update_time": 1788969600,
+            },
+            "order_info": {"shop_order_id": "o1"},
         }
-        for completed_field in ("completed_at", "refund_time", "success_time", None):
-            source = dict(upstream)
-            if completed_field:
-                source[completed_field] = "2026-09-10 11:00:00"
-            projected = await self._project("get_refund_list", {"list": [source], "total": 1})
-            a = shop()
-            a["input_format"] = "raw"
-            a["refunds"] = projected["refunds"]
-            result = report([a])
-            if completed_field:
-                self.assertTrue(result["complete"])
-                self.assertEqual(result["total_summary"]["refund_count"], 1)
-                self.assertEqual(result["total_summary"]["refund_amount"], 299)
-            else:
-                self.assertFalse(result["complete"])
-                self.assertIsNone(result["total_summary"]["refund_count"])
-                self.assertIn(
-                    "refund_completed_timestamp_unknown", [error["code"] for error in result["shops"][0]["errors"]]
-                )
+        projected = await self._project("get_refund_list", {"items": [upstream], "total": 1, "has_more": False})
+        self.assertTrue(projected["refunds"][0]["detail_required"])
+        self.assertIsNone(projected["refunds"][0]["amount"])
+        a = shop()
+        a["input_format"] = "raw"
+        a["refunds"] = projected["refunds"]
+        result = report([a])
+        self.assertFalse(result["complete"])
+        self.assertIsNone(result["total_summary"]["refund_amount"])

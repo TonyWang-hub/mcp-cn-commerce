@@ -3,86 +3,27 @@ products, shop info, after-sale, logistics, reviews, marketing, and coupons.
 
 Auth via env vars: KUAISHOU_APP_KEY, KUAISHOU_APP_SECRET, KUAISHOU_SIGN_SECRET, KUAISHOU_ACCESS_TOKEN.
 API endpoint: https://openapi.kwaixiaodian.com
-Sign method: MD5 (params sorted, sign_secret+string+sign_secret → MD5 → uppercase)
+Sign method: MD5 (sorted key=value pairs + &signSecret=... → lowercase hex)
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from contextlib import asynccontextmanager
-from typing import Any
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
+from servers.kuaishou.client import KuaishouMCP as KuaishouMCP  # pylint: disable=useless-import-alias
+from servers.kuaishou.schema import ORDER_DETAIL, ORDER_LIST, REFUND_DETAIL, REFUND_LIST, SHOP_INFO, validate_params
 from shared.cn_commerce_base import (
-    DEFAULT_RETRY,
-    CommerceMCPBase,
-    ConfigValidationError,
-    SignMethod,
-    canonicalize_sign_value,
     register_common_tools,
 )
 
 # ── Kuaishou client ───────────────────────────────────────────────────────────
-
-
-class KuaishouMCP(CommerceMCPBase):
-    """Kuaishou-specific client.
-
-    Kuaishou uses a separate `sign_secret` for request signing (distinct from
-    `app_secret`).  The base class MD5 signing is overridden to use
-    `sign_secret` in the canonical format:
-        sign_secret + sorted(k+v) + sign_secret  →  MD5  →  uppercase.
-
-    API calls are made via GET to individual REST paths under BASE_URL.
-    """
-
-    PLATFORM = "KUAISHOU"
-    BASE_URL = "https://openapi.kwaixiaodian.com"
-    sign_method = SignMethod.MD5
-
-    def __init__(
-        self,
-        app_key: str = "",
-        app_secret: str = "",
-        sign_secret: str = "",
-        access_token: str = "",
-    ):
-        super().__init__(
-            app_key=app_key,
-            app_secret=app_secret,
-            access_token=access_token,
-        )
-        self.sign_secret = sign_secret
-
-    # ── Override signing to use sign_secret ───────────────────────────────
-
-    def _sign(self, params: dict) -> str:
-        """Generate MD5 signature using sign_secret."""
-
-        to_sign = {k: v for k, v in params.items() if k not in ("sign", "sign_method") and v != ""}
-        sorted_keys = sorted(to_sign.keys())
-        raw = (
-            self.sign_secret
-            + "".join(f"{k}{canonicalize_sign_value(to_sign[k])}" for k in sorted_keys)
-            + self.sign_secret
-        )
-        return hashlib.md5(raw.encode()).hexdigest().upper()
-
-    # ── Convenience wrapper ───────────────────────────────────────────────
-
-    async def _call(self, path: str, params: dict | None = None) -> dict[str, Any]:
-        """Make a signed GET request to a Kuaishou API path."""
-        missing = [
-            f"KUAISHOU_{name.upper()}"
-            for name in ("app_key", "app_secret", "sign_secret", "access_token")
-            if not getattr(self, name)
-        ]
-        if missing:
-            raise ConfigValidationError("KUAISHOU", missing)
-        return await self._request("GET", path, params=params, retry_config=DEFAULT_RETRY)
 
 
 # ── Instantiate client from env ────────────────────────────────────────────
@@ -117,6 +58,32 @@ async def _lifespan(_server):
 mcp = MCPServer("mcp-cn-kuaishou", lifespan=_lifespan)
 
 
+def _milliseconds(value: str) -> int:
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+        return int(parsed.timestamp() * 1000)
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise ToolError("Kuaishou time must be ISO8601 (naive values use Asia/Shanghai)") from exc
+
+
+def _numeric_id(value: str, field: str) -> int:
+    if not value.isascii() or not value.isdecimal():
+        raise ToolError(f"Kuaishou {field} must be a positive decimal ID")
+    number = int(value)
+    if not 0 < number < 2**63:
+        raise ToolError(f"Kuaishou {field} must fit positive int64")
+    return number
+
+
+def _check(method: str, params: dict) -> None:
+    try:
+        validate_params(method, params)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from exc
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 订单 (Orders)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -129,40 +96,39 @@ async def get_order_list(
     order_status: str = "",
     page: int = 1,
     page_size: int = 20,
+    cursor: str = "",
+    query_type: int = 1,
+    sort: int = 1,
 ) -> str:
-    """Query order list by time range and optional status.
+    """Read orders with a real cursor and a fixed window of at most seven days.
 
-    Args:
-        start_time: Order start time, e.g. "2024-01-01 00:00:00"
-        end_time: Order end time, e.g. "2024-01-31 23:59:59"
-        order_status: Status filter. Common values:
-            1 (待发货), 2 (已发货), 3 (已签收), 4 (退款中), 5 (已退款).
-            Empty string means all statuses.
-        page: Page number, starting from 1.
-        page_size: Number of orders per page (max 100).
+    Times accept ISO8601; naive values use Asia/Shanghai. order_status selects
+    orderViewStatus: empty/1 all,2 unpaid,3 unshipped,4 shipped,5 received,6 success,
+    7 closed. These differ from output order status. Size is at most50.
+    page>1 requires the preceding response cursor; never derive it from a page.
+    query_type=1 creation,2 modification; sort=1 descending,2 ascending.
     """
-    params: dict = {
-        "start_time": start_time,
-        "end_time": end_time,
-        "page": str(page),
-        "page_size": str(page_size),
+    if page < 1 or (page > 1 and not cursor):
+        raise ToolError("Kuaishou pagination requires a real cursor after the first page")
+    params = {
+        "beginTime": _milliseconds(start_time),
+        "endTime": _milliseconds(end_time),
+        "orderViewStatus": _numeric_id(order_status, "order_status") if order_status else 1,
+        "pageSize": page_size,
+        "cursor": cursor,
+        "queryType": query_type,
+        "sort": sort,
     }
-    if order_status:
-        params["order_status"] = order_status
-
-    result = await ks._call("/open/api/order/list", params)
+    _check(ORDER_LIST, params)
+    result = await ks._call(ORDER_LIST, params)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 @mcp.tool()
 async def get_order_detail(order_id: str) -> str:
-    """Get full details of a single order.
-
-    Args:
-        order_id: The Kuaishou order ID (e.g. "KS202401150000001").
-    """
-    params = {"order_id": order_id}
-    result = await ks._call("/open/api/order/detail", params)
+    """Read one order using its official numeric int64 oid."""
+    params = {"oid": _numeric_id(order_id, "order_id")}
+    result = await ks._call(ORDER_DETAIL, params)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
@@ -214,40 +180,42 @@ async def get_refund_list(
     refund_status: str = "",
     page: int = 1,
     page_size: int = 20,
+    pcursor: str = "",
+    query_type: int = 1,
+    request_type: int = 9,
+    sort: int = 1,
 ) -> str:
-    """Query refund (after-sale) list by time range.
+    """Read after-sales within one day using the returned pcursor.
 
-    Args:
-        start_time: Query start time, e.g. "2024-01-01 00:00:00"
-        end_time: Query end time, e.g. "2024-01-31 23:59:59"
-        refund_status: Status filter. Common values:
-            1 (退款中), 2 (退款成功), 3 (退款失败).
-            Empty string means all statuses.
-        page: Page number, starting from 1.
-        page_size: Number of records per page (max 100).
+    ISO8601 times are converted to milliseconds (naive means Asia/Shanghai).
+    request_type=8 waiting or9 all; query_type=1 created or2 updated. page_size<=100.
+    Statuses:10 waiting,12 rejected,20 intervention,30 awaiting return,40 awaiting
+    receipt,45 exchanged delivery,50 refund processing,60 success,70 closed.
+    Success can include exchanges: consumers must also inspect handlingWay.
     """
-    params: dict = {
-        "start_time": start_time,
-        "end_time": end_time,
-        "page": str(page),
-        "page_size": str(page_size),
+    if page < 1 or (page > 1 and not pcursor):
+        raise ToolError("Kuaishou pagination requires a real pcursor after the first page")
+    params = {
+        "beginTime": _milliseconds(start_time),
+        "endTime": _milliseconds(end_time),
+        "type": request_type,
+        "pageSize": page_size,
+        "currentPage": page,
+        "pcursor": pcursor,
+        "queryType": query_type,
+        "sort": sort,
     }
     if refund_status:
-        params["refund_status"] = refund_status
-
-    result = await ks._call("/open/api/refund/list", params)
+        params["status"] = _numeric_id(refund_status, "refund_status")
+    _check(REFUND_LIST, params)
+    result = await ks._call(REFUND_LIST, params)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 @mcp.tool()
 async def get_refund_detail(refund_id: str) -> str:
-    """Get full details of a single refund record.
-
-    Args:
-        refund_id: The refund/after-sale record ID (e.g. "RF123456789").
-    """
-    params = {"refund_id": refund_id}
-    result = await ks._call("/open/api/refund/detail", params)
+    """Read one after-sale using its official numeric int64 refundId."""
+    result = await ks._call(REFUND_DETAIL, {"refundId": _numeric_id(refund_id, "refund_id")})
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
@@ -309,8 +277,8 @@ async def get_review_list(
 
 @mcp.tool()
 async def get_shop_info() -> str:
-    """Get shop/mall basic information for the authenticated merchant."""
-    result = await ks._call("/open/api/shop/info")
+    """Read the authorized user's shop name/type; this API has no shop ID."""
+    result = await ks._call(SHOP_INFO, {})
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 

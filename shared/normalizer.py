@@ -588,6 +588,8 @@ _MONEY_SCHEMA = {
             "discounted_price",
             "freight",
             "order_price",
+            "original_order_price",
+            "merchant_receieve_price",
             "sale_price",
             "min_price",
             "max_price",
@@ -762,6 +764,8 @@ class Normalizer:
     def normalize_order(self, raw: dict, platform: str) -> UnifiedOrder:
         platform = normalize_platform(platform)
         r = self._record(raw, platform)
+        if platform == "weixin" and any(key in raw for key in ("order", "order_detail")):
+            return self._weixin_order(raw, r)
         if platform == "taobao":
             return self._taobao_order(raw, r)
         if platform == "youzan":
@@ -963,6 +967,8 @@ class Normalizer:
     def normalize_refund(self, raw: dict, platform: str) -> UnifiedRefund:
         platform = normalize_platform(platform)
         r = self._record(raw, platform)
+        if platform == "weixin" and ("after_sale_order" in raw or "after_sale_order_id" in raw):
+            return self._weixin_refund(raw, r)
         if platform == "doudian":
             return self._doudian_refund(raw, r)
         if platform == "taobao":
@@ -985,6 +991,114 @@ class Normalizer:
             completed_at=r.time(_first(raw, "completed_at", "refund_time", "success_time"), "completed_at") or None,
         )
         if result.status == "unknown":
+            _warn(r.warnings, "status", "status_unknown")
+        return r.attach(result)
+
+    @staticmethod
+    def _weixin_time(value: Any, r: _Record, field_name: str) -> str:
+        """Native shop timestamps are seconds; never infer milliseconds/civil time."""
+        if value in (None, ""):
+            return r.time(None, field_name)
+        if not isinstance(value, int) or isinstance(value, bool) or not 0 < value < 100_000_000_000:
+            _warn(r.warnings, field_name, "timestamp_invalid")
+            return ""
+        return r.time(value, field_name)
+
+    @staticmethod
+    def _weixin_order(raw: dict, r: _Record) -> UnifiedOrder:
+        info = r.mapping(raw.get("order", raw), "order")
+        detail = r.mapping(info.get("order_detail"), "order_detail")
+        price = r.mapping(detail.get("price_info"), "price_info")
+        pay = r.mapping(detail.get("pay_info"), "pay_info")
+        present_value = info.get("order_present_info", {})
+        present = r.mapping(present_value, "order_present_info")
+        state = info.get("status")
+        result = UnifiedOrder(
+            order_id=r.identifier(info.get("order_id"), "order_id"),
+            shop_id=r.identifier(raw.get("shop_id"), "shop_id"),
+            platform="weixin",
+            status=(
+                "shipped"
+                if isinstance(state, int) and not isinstance(state, bool) and state == 21
+                else normalize_order_status(state, "weixin")
+            ),
+            status_raw=str(state),
+            created_at=Normalizer._weixin_time(info.get("create_time"), r, "created_at"),
+            updated_at=Normalizer._weixin_time(info.get("update_time"), r, "updated_at") or None,
+            amount_total=r.amount(price, ("original_order_price",), "amount_total"),
+            amount_discount=r.amount(price, ("discounted_price",), "amount_discount"),
+            amount_shipping=r.amount(price, ("freight",), "amount_shipping"),
+            amount_merchant_received=r.amount(price, ("merchant_receieve_price",), "amount_merchant_received"),
+        )
+        # Method 2 records pay-later confirmation; 3/4 record order creation.
+        # None of those timestamps establishes an actual payment event.
+        standard_payment = (
+            isinstance(pay.get("payment_method"), int)
+            and not isinstance(pay.get("payment_method"), bool)
+            and pay["payment_method"] == 1
+        )
+        if (
+            standard_payment
+            and isinstance(present_value, dict)
+            and ("is_b2c_free_present" not in present or present["is_b2c_free_present"] is False)
+        ):
+            result.amount_paid = r.amount(price, ("order_price",), "amount_paid")
+            result.paid_at = Normalizer._weixin_time(pay.get("pay_time"), r, "paid_at") or None
+        for field_name in (
+            "amount_paid",
+            "amount_total",
+            "amount_discount",
+            "amount_shipping",
+            "amount_merchant_received",
+        ):
+            value = getattr(result, field_name)
+            if value is not None and value < 0:
+                setattr(result, field_name, None)
+                _warn(r.warnings, field_name, "amount_invalid")
+        if result.amount_paid is None:
+            _warn(r.warnings, "amount_paid", "buyer_payment_unknown")
+        if result.status == "paid" and (result.paid_at is None or result.amount_paid is None):
+            result.status = "unknown"
+        for i, item in enumerate(r.array(detail.get("product_infos"), "items")):
+            if not isinstance(item, dict):
+                _warn(r.warnings, f"items[{i}]", "object_invalid")
+                continue
+            prefix = f"items[{i}]"
+            result.items.append(
+                OrderItem(
+                    product_id=r.identifier(item.get("product_id"), prefix + ".product_id"),
+                    sku_id=r.identifier(item.get("sku_id"), prefix + ".sku_id"),
+                    price=r.amount(item, ("sale_price",), prefix + ".price"),
+                    quantity=r.integer(item.get("count"), prefix + ".quantity"),
+                )
+            )
+        if result.status == "unknown":
+            _warn(r.warnings, "status", "status_unknown")
+        return r.attach(result)
+
+    @staticmethod
+    def _weixin_refund(raw: dict, r: _Record) -> UnifiedRefund:
+        info = r.mapping(raw.get("after_sale_order", raw), "after_sale_order")
+        kind, status = info.get("type"), info.get("status")
+        success = (kind, status) in (("REFUND", "MERCHANT_REFUND_SUCCESS"), ("RETURN", "MERCHANT_RETURN_SUCCESS"))
+        result = UnifiedRefund(
+            refund_id=r.identifier(info.get("after_sale_order_id"), "refund_id"),
+            order_id=r.identifier(info.get("order_id"), "order_id"),
+            shop_id=r.identifier(raw.get("shop_id"), "shop_id"),
+            platform="weixin",
+            status="completed" if success else "unknown",
+            type=normalize_refund_type(kind, "weixin"),
+            applied_at=Normalizer._weixin_time(info.get("create_time"), r, "applied_at"),
+            updated_at=Normalizer._weixin_time(info.get("update_time"), r, "updated_at") or None,
+        )
+        if success:
+            amount = r.amount(r.mapping(info.get("refund_info"), "refund_info"), ("amount",), "amount")
+            if amount is not None and amount < 0:
+                amount = None
+                _warn(r.warnings, "amount", "refund_amount_negative")
+            result.amount = amount
+            result.completed_at = Normalizer._weixin_time(info.get("complete_time"), r, "completed_at") or None
+        else:
             _warn(r.warnings, "status", "status_unknown")
         return r.attach(result)
 

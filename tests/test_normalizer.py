@@ -191,8 +191,15 @@ class TestNormalizeOrderWeixin:
             "order_id": "3705115058471207123",
             "status": 20,
             "order_detail": {
-                "product_infos": [{"product_id": "1001", "title": "耳机", "sale_price": 9900, "product_cnt": 1}],
-                "price_info": {"product_price": 9900, "order_price": 8900, "discounted_price": 1000, "freight": 0},
+                "product_infos": [{"product_id": "1001", "title": "耳机", "sale_price": 9900, "count": 1}],
+                "pay_info": {"payment_method": 1, "pay_time": 1789030000},
+                "price_info": {
+                    "original_order_price": 9900,
+                    "product_price": 9900,
+                    "order_price": 8900,
+                    "discounted_price": 1000,
+                    "freight": 0,
+                },
                 "delivery_info": {"receiver_name": "王五", "receiver_tel": "13800138000", "receiver_address": "北京"},
             },
         }
@@ -201,7 +208,7 @@ class TestNormalizeOrderWeixin:
         assert order.status == "paid"
         assert order.amount_total == 9900
         assert order.amount_discount == 1000
-        assert order.buyer_name == "王五"
+        assert order.buyer_name == ""  # Current metric contract omits buyer identity.
         assert len(order.items) == 1
 
 
@@ -340,7 +347,8 @@ class TestNormalizeRefundIntegration:
         raw = {
             "after_sale_order_id": "RF002",
             "order_id": "ORD002",
-            "status": 1,
+            "status": "MERCHANT_RETURN_SUCCESS",
+            "complete_time": 1789030000,
             "type": "RETURN",
             "refund_info": {"amount": 9900},
             "reason_text": "质量问题",

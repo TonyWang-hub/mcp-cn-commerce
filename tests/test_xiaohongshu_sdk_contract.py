@@ -92,6 +92,22 @@ async def test_numeric_aliases_preserve_native_units_and_explicit_update_mode():
 
 
 @pytest.mark.asyncio
+async def test_native_order_type_null_keeps_official_all_types_filter():
+    params = {"startTime": 1000, "endTime": 2000, "timeType": 1, "orderType": None}
+    _, sent = await exchange("get_order_list", params, {"success": True, "error_code": 0, "data": {}})
+    assert sent["orderType"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["get_order_list", "get_refund_list"])
+async def test_only_legacy_time_aliases_default_to_creation_mode(operation):
+    _, sent = await exchange(
+        operation, {"start_time": "1000", "end_time": "2000"}, {"success": True, "code": 0, "data": {}}
+    )
+    assert sent["timeType"] == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("time_type,window", [(1, 86_400_000), (2, 1_800_000)])
 async def test_refund_native_window_edges_and_filters_survive(time_type, window):
     params = {
@@ -202,6 +218,9 @@ REFUND = {"startTime": 1788969600000, "endTime": 1788971400000, "timeType": 2}
 @pytest.mark.parametrize(
     "operation,params",
     [
+        ("get_order_list", {"startTime": 1000, "endTime": 2000}),
+        ("get_refund_list", {"startTime": 1000, "endTime": 2000}),
+        ("get_refund_list", {"orderId": "order-1", "startTime": 1000, "endTime": 2000}),
         ("get_order_list", {**ORDER, "start_time": ORDER["startTime"]}),
         ("get_order_list", {**ORDER, "pageNo": 2, "page": 2}),
         ("get_order_list", {**ORDER, "timeType": 3}),
@@ -266,6 +285,7 @@ async def test_invalid_or_ambiguous_parameters_never_send(operation, params):
             "data": {"success": False, "code": 401, "data": {}, "msg": "xhs-shop-token phone=13800000000"},
         },
         {"success": True, "error_code": 0, "data": {"code": 0, "data": {}}},
+        {"success": True, "error_code": 0, "data": {"data": {"afterSaleInfo": {}}}},
         {"success": True, "error_code": 0, "data": {"success": True, "code": 0, "data": []}},
     ],
 )

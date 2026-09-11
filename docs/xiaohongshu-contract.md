@@ -22,7 +22,7 @@
 - 四个只读 operation 接受下表中的原生字段；旧 snake_case 参数名保留为别名。同一字段同时传原生名和别名时拒绝，未知字段也拒绝，不允许覆盖系统凭证。
 - `startTime/endTime` 与数值别名均按原生整数原样发送。订单日期字符串不再自动附加 Asia/Shanghai 或转换成秒；订单业务时间单位尚未得到明确正文证明。调用者必须先取得平台确认的原生值，SDK 不替其宣称固定时间窗口已验。
 - `timeType=1` 表示创建，`2` 表示更新，兼容入口默认 1。订单官方窗口分别 24 小时、30 分钟，但未知业务单位时不实施虚假的秒级窗口校验；`endTime>startTime`、页码与类型仍严格检查。订单响应时间 `createdTime/paidTime/updateTime` 则明确为毫秒，不能混淆两组字段。
-- 新售后时间明确毫秒，两端包含。创建最多 86,400,000 ms，更新最多 1,800,000 ms。别名可接收带明确时区的 ISO 日期转换为毫秒；无时区日期拒绝。`orderId` 查询可以不传时间组；传时间组时起止必须齐全，缺省 `timeType` 为 1；不会为单独 `orderId` 查询生成时间条件。
+- 新售后时间明确毫秒，两端包含。创建最多 86,400,000 ms，更新最多 1,800,000 ms。别名可接收带明确时区的 ISO 日期转换为毫秒；无时区日期拒绝。`orderId` 查询可以不传时间组；原生订单和售后时间查询必须显式传齐 `startTime/endTime/timeType`，只有纯旧 `start_time/end_time` 入口允许缺省类型 1；不会为单独 `orderId` 查询生成时间条件。
 - 页码从 1 开始，SDK 默认大小 20；订单 `pageNo<=100`，大小 `<=100`；售后 `pageNo*pageSize<=50000`。这不是自动分页器。订单更新扫描须先取总数/最大页，再按最后页至第一页处理；SDK 保留 `total/maxPageNo/orderList` 原值，不能把 page 1 当扫描起点强制连续递增。
 - 售后保留 `afterSaleBasicInfos/totalCount/pageNo/pageSize`，详情保留 `afterSaleInfo`。`statuses` 是流程状态过滤，`returnTypes` 是售后类型过滤；没有默认只查成功的过滤。售后详情只取指标所需对象，不请求协商记录。
 - 成功要求明确布尔 `success=true`、有效零错误码及对象 `data`；官方指南是 `error_code`，当前新售后 schema/SDK 兼容 `code`。若两个码同时存在都须为零。`common_controller` 包装新售后 `success/code/data` 时，两层分别检查；缺少成功标记、任何一层失败、非对象 data 均拒绝。失败用固定错误消息和安全数字错误码，不透传平台错误原文；返回的成功对象维持原信封，不做二次 data 解包。
@@ -34,7 +34,7 @@
 | `get_refund_list` | 起止、类型、分页同上，另有 `orderId(order_id)`、`statuses(refund_status)`、`returnTypes(return_types)` |
 | `get_refund_detail` | `returnsId(refund_id)` |
 
-原生筛选数组接受整数列表，旧售后筛选别名额外兼容逗号分隔字符串。数值拒绝布尔、浮点和 signed 64-bit 溢出；不按位数改变时间单位。原生状态值 0 不会被当作空值丢弃。售后详情不开放 `requestHeader` 或 `needNegotiateRecord`；未核实接口仍保持零网络拒绝。MCP 的订单/售后列表工具额外暴露 `time_type`，默认 1。
+原生筛选数组接受整数列表，旧售后筛选别名额外兼容逗号分隔字符串。数值拒绝布尔、浮点和 signed 64-bit 溢出；不按位数改变时间单位。原生状态值 0 不会被当作空值丢弃；官方支持的 `orderType=null` 表示全部类型并保留。售后详情不开放 `requestHeader` 或 `needNegotiateRecord`；未核实接口仍保持零网络拒绝。MCP 的订单/售后列表工具额外暴露 `time_type`，默认 1。
 
 ## 金额与采集边界
 
@@ -48,6 +48,6 @@
 
 ## 验证记录
 
-实现使用先失败后通过的真实 SDK → HTTPX MockTransport 测试：`tests/test_xiaohongshu_sdk_contract.py` 首次 50 failed / 7 passed，修复后 57 passed。覆盖签名、原生整数不缩放、别名冲突、时区、创建/更新边界、分页上限、筛选、详情 ID、两层成功/失败信封与错误信息脱敏。相关旧测试同步移除了猜测订单秒级查询、无成功信封和混传不同 operation 参数的样例。
+实现使用先失败后通过的真实 SDK → HTTPX MockTransport 测试：`tests/test_xiaohongshu_sdk_contract.py` 首次 50 failed / 7 passed，修复后 57 passed；独立复审补充原生必填时间类型、`orderType=null` 和嵌套缺标志的信封，复现 5 failed / 59 passed，最终 64 passed。覆盖签名、原生整数不缩放、别名冲突、时区、创建/更新边界、分页上限、筛选、详情 ID、两层成功/失败信封与错误信息脱敏。相关旧测试同步移除了猜测订单秒级查询、无成功信封和混传不同 operation 参数的样例。
 
 所有 `live_verified` 保持 false。Pro 原生投影、归一化和 Source 未在本修复范围内，未知完成日期不得进入按退款完成日统计的完整性结论。

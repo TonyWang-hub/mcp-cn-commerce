@@ -53,7 +53,8 @@ class XiaohongshuMCP(CommerceMCPBase):
     @staticmethod
     def _integer(value, field: str) -> int:
         """Read a native nonnegative Long without guessing its time unit."""
-        if type(value) is int:
+        # Exact JSON integer scalars exclude bool, which subclasses int.
+        if type(value) is int:  # pylint: disable=unidiomatic-typecheck
             number = value
         elif isinstance(value, str) and re.fullmatch(r"[0-9]+", value.strip()):
             number = int(value.strip())
@@ -136,6 +137,8 @@ class XiaohongshuMCP(CommerceMCPBase):
         if not refund or has_time or "orderId" not in result:
             if "startTime" not in values or "endTime" not in values:
                 raise ValueError("startTime and endTime are required for time queries")
+            if "timeType" not in values and any(field in params for field in ("startTime", "endTime")):
+                raise ValueError("Native time queries require an explicit timeType")
             time_type = cls._integer(values.get("timeType", 1), "timeType")
             if time_type not in {1, 2}:
                 raise ValueError("timeType must be 1 (creation) or 2 (update)")
@@ -172,6 +175,9 @@ class XiaohongshuMCP(CommerceMCPBase):
             for field, maximum in (("orderStatus", 10), ("orderType", 5)):
                 if field not in values or (aliases[field] in params and values[field] == ""):
                     continue
+                if field == "orderType" and values[field] is None:
+                    result[field] = None  # Officially equivalent to orderType=0 (all types).
+                    continue
                 result[field] = cls._integer(values[field], field)
                 if result[field] > maximum:
                     raise ValueError(f"{field} must be between 0 and {maximum}")
@@ -187,7 +193,8 @@ class XiaohongshuMCP(CommerceMCPBase):
             if field not in result:
                 continue
             value = result[field]
-            if type(value) is int and -(2**31) <= value < 2**31:
+            # Exact JSON integer scalars exclude bool, including false-as-zero.
+            if type(value) is int and -(2**31) <= value < 2**31:  # pylint: disable=unidiomatic-typecheck
                 codes.append(value)
             elif isinstance(value, str) and re.fullmatch(r"-?[0-9]{1,10}", value):
                 number = int(value)
@@ -313,7 +320,7 @@ class XiaohongshuMCP(CommerceMCPBase):
             # another success/error_code/data envelope. Validate both levels,
             # preserving the original response shape for SDK callers.
             if api_method.startswith("afterSale.") and any(
-                field in result["data"] for field in ("success", "code", "error_code", "error_response")
+                field in result["data"] for field in ("success", "code", "error_code", "error_response", "data")
             ):
                 self._check_envelope(result["data"])
             return result

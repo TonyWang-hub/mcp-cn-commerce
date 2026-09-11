@@ -14,6 +14,10 @@
 
 **English** | [简体中文](README.md)
 
+> **Status — 2026-09-11:** Repairs and documentation are merged into public `main`. The Core **0.1.6 engineering candidate** and main CI have passed. **PyPI and the public stable release are still 0.1.5**; a normal `pip install` does not include all candidate fixes. Use the pinned source installation below for the verified candidate. Merchant live acceptance has not been performed.
+>
+> [Project and inquiry status](docs/project-status.md) · [Engineering/release evidence](docs/release-readiness.md) · [Changelog](CHANGELOG.md)
+
 ---
 
 ## Table of Contents
@@ -22,9 +26,8 @@
 - [Why This Project](#why-this-project)
 - [Supported Platforms](#platforms)
 - [Quick Start](#quick-start)
-  - [Docker](#docker-recommended--no-local-python-setup)
 - [Architecture](#architecture)
-- [Tools Reference](#tools-per-server)
+- [Tools Reference](#tools-summary)
 - [Security](#security)
 - [Docker](docs/docker.md) - Docker 部署与配置
 - [Examples](docs/examples.md) - 使用示例和场景
@@ -38,10 +41,13 @@
 
 A **monorepo of independent MCP (Model Context Protocol) servers** that give AI agents structured, type-safe access to Chinese e-commerce platform business data. Each server wraps one platform's open API:
 
-- **巨量引擎 (Ocean Engine)** — advertising campaign, report, and account data
-- **抖店 (Douyin Shop)** — orders, products, refunds, shop management
-- **京东 (JD.com)** — orders, products, shop information
-- Additional included adapters: **淘宝**, **拼多多**, **快手**, **小红书**, **微信小店**
+- **Douyin Shop and Taobao** — documented order/refund queries, ready for scoped merchant acceptance once authorized inputs are available.
+- **JD** — documented orders, shop information and two after-sale queries; complete refund collection remains unsupported.
+- **Kuaishou, Xiaohongshu and WeChat Store** — documented subsets of order/refund reads; authorization identity and collection boundaries differ.
+- **Ocean Engine / Qianchuan** — the reviewed SDK scope is advertiser information and balance; reports and the authorization account tree remain incomplete.
+- **Pinduoduo** — platform entry points exist, but merchant SDK reads are disabled pending complete official business schemas. Legacy MCP names do not establish verified support.
+
+Eight MCP platform entry points expose **155 registered tools**, including compatibility and unsupported entries. Youzan is an additional SDK-only platform. Registration, a documented contract, an SDK callable mapping and merchant live acceptance are separate states.
 
 All tools are **read-only** by default — AI agents can analyze your business data but cannot modify anything.
 
@@ -57,60 +63,62 @@ Official APIs, official MCP services and this third-party adapter are distinct. 
 
 ## Platforms
 
-Eight platform adapters are included. Xiaohongshu has nine business tool mappings based on current official schemas; the four retained review, shop, promotion and coupon entry points return an explicit unsupported error without sending a request. Registered tool counts include these retained entry points. Tool registration is not proof of successful merchant API access. App eligibility, authorization, endpoint versions and account permissions require platform-specific verification. See [platform contracts](docs/platforms.md) and [official access evidence](docs/official-access-status.md). CI covers Python 3.11/3.12/3.13; use the workflow result for the exact commit as verification evidence.
+The [current SDK operation table](docs/sdk-integration.md#catalogue-and-evidence-status) is the source for per-operation support. All SDK `live_verified` values remain false.
+
+| Platform | Documented SDK scope | Remaining boundary |
+| --- | --- | --- |
+| Douyin Shop | Orders list/detail; refunds list/detail | General shop info unsupported; payment discounts, actual refunds and 90-day creation scope need merchant checks |
+| Taobao | Orders list/increment/detail; refunds list/detail | Shop info is transport-only; app fields and historical payment basis require verification |
+| JD | Orders list/detail, shop info, after-sale list/refund detail | Two after-sale queries do not cover all refunds; generic refunds and Pro refund Source remain unavailable |
+| Pinduoduo | No callable merchant SDK reads | Complete official business schemas are missing |
+| Kuaishou | Orders/refunds list/detail; shop info | Pro open_id-to-shop authorization binding remains unresolved |
+| Xiaohongshu | Orders/refunds list/detail | Query/completed-refund time units needed by Source remain unresolved |
+| WeChat Store | Orders/refunds list/detail; shop info | Actual permissions/live cursor checks pending; Pro cross-tenant delegation for one shared component remains a gap |
+| Ocean Engine | Advertiser info; account balance | Report migration and account-tree authorization are incomplete |
+
+Product, inventory, logistics, reviews, marketing and billing registrations are not a claim of complete current API support. See [platform contracts](docs/platforms.md), [official evidence](docs/official-access-status.md) and [release readiness](docs/release-readiness.md).
 
 ## Quick Start
 
-### Docker (recommended — no local Python setup)
+### Install the verified 0.1.6 source candidate
 
-```bash
-# Build the image
-docker build -t mcp-cn-commerce .
-
-# Build the development target to run tests
-docker build --target development -t mcp-cn-commerce-dev .
-docker run --rm mcp-cn-commerce-dev make test
-
-# Run a platform server (Ocean Engine example)
-docker run --rm -i --env-file .env mcp-cn-commerce mcp-cn-oceanengine
-```
-
-See [Docker documentation](docs/docker.md) for full usage, MCP client configuration, and Docker Compose shortcuts.
-
-### Installation
-
-#### From PyPI (recommended)
-
-```bash
-# One install, all 8 platforms included
-pip install mcp-cn-commerce
-```
-
-All platform servers are bundled. Choose which to use via your MCP client configuration.
-
-#### From GitHub Releases
-
-```bash
-# Visit the latest Release and download the .whl file
-# https://github.com/TonyWang-hub/mcp-cn-commerce/releases/latest
-
-# Download the wheel shown on the latest Release page, then install that local file.
-python -m pip install /path/to/downloaded.whl
-```
-
-#### From Git (always latest)
-
-```bash
-pip install git+https://github.com/TonyWang-hub/mcp-cn-commerce.git
-```
-
-#### For development
+Use Python 3.11+; the commands below use an existing Python 3.12 installation and a project virtual environment. The pinned revision
+[`c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e)
+has engineering acceptance evidence, not merchant live acceptance:
 
 ```bash
 git clone https://github.com/TonyWang-hub/mcp-cn-commerce.git
 cd mcp-cn-commerce
-pip install -e ".[dev]"
+git checkout --detach c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -c requirements-lock.txt .
+mcp-cn-commerce --version
 ```
+
+The expected version is `0.1.6`. For development, replace the install command above within the same project environment with:
+
+```bash
+python -m pip install -c requirements-lock.txt -e ".[dev]"
+```
+
+This uses `.venv`, not a global Python installation. Configure a desktop MCP client's `command` with the absolute path to the executable in the project's `.venv/bin/`; activating a terminal environment alone does not change a desktop application's PATH. Use the equivalent virtual-environment paths on other operating systems.
+
+### Install the current PyPI stable version
+
+[PyPI 0.1.5](https://pypi.org/project/mcp-cn-commerce/0.1.5/) is the historical public version and **does not contain all 0.1.6 candidate protocol/stability fixes**. If you need that release, install it in a separate project virtual environment:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install "mcp-cn-commerce==0.1.5"
+```
+
+### GitHub Releases and main
+
+The [public stable release v0.1.5](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.5) and `releases/latest` still refer to the historical stable version. Version 0.1.6 is an engineering candidate being prepared as a release draft; it has not been formally published to PyPI or MCP Registry. A draft is not a publicly downloadable stable release.
+
+Public `main` contains the candidate fixes and subsequent documentation, but continues to change. Pin the full SHA above to reproduce the tested candidate. For container deployment in an environment that permits it, see the existing [deployment guide](docs/docker.md); containers are not required for the source installation above.
 
 ### Configuration
 
@@ -156,12 +164,14 @@ Works with **Claude Desktop**, **Cherry Studio**, **Kimi Work**, and any MCP-com
 
 ### Example: AI Agent Querying Your Business
 
-Once connected, you can ask your AI agent questions like:
+After confirming the operation contract and the app's actual permissions, scoped read-only examples include:
 
-> "Show me this week's Ocean Engine campaign ROAS, sorted by spend"
-> "Which Douyin Shop products are low on stock?"
-> "How many JD refunds are pending approval?"
-> "Compare my ad performance across Ocean Engine campaigns this month vs last month"
+> “Read Douyin Shop orders in this fixed update window and identify the remaining pages and details.”
+> “Show the state, amount and completion time of this Taobao refund.”
+> “Read the balance of this authorized advertiser account.”
+> “Export the normalized records I supplied and flag missing fields.”
+
+First merchant calls still require comparison with the platform's back office.
 
 ## Architecture
 
@@ -183,11 +193,11 @@ mcp-cn-commerce/
 └── LICENSE                           # MIT
 ```
 
-Single-package architecture: `pip install mcp-cn-commerce` installs all 8 platform servers at once. Choose which to use via your MCP client configuration.
+Single-package architecture: the selected Core version bundles all 8 platform servers. Choose the version and verified operation scope first, then configure your MCP client.
 
 ## Workflow Templates 🆕
 
-Ready-to-use AI workflow templates with realistic Chinese example data. No API credentials needed to try.
+Templates and previews use simulated data. No API credentials are needed, and these demos do not prove that a platform data source is connected. Raw platform records require pagination, normalization and explicit coverage before reporting.
 
 | Template | Purpose | Target User | Demo |
 |----------|---------|-------------|------|
@@ -247,6 +257,8 @@ See all templates: [`templates/`](templates/)
 
 ## Tools Summary
 
+This is a registration count, including legacy/unverified and unsupported entries. It is not the number of documented SDK operations or live merchant APIs.
+
 | Server | Tools | Categories |
 |---|---|---|
 | oceanengine | 23 | Ads, Qianchuan, Star, Creative, Audience, Optimization |
@@ -265,8 +277,6 @@ Every server also exposes **5 cross-platform shared tools** (counted above): `ge
 (deterministic reports with explicit timezone and completeness). Request tracing and metrics are collected automatically on every call.
 
 For full tool details, see the source code in each `servers/<platform>/server.py` file.
-| `get_product_list` | Product catalog with pricing and stock | `/product/list` |
-| `get_shop_info` | Merchant shop information | `/shop/info` |
 
 ## Security
 
@@ -281,30 +291,29 @@ This project handles sensitive e-commerce API credentials. Our security guarante
 
 ## 💼 Pro (private beta)
 
-The open-source version is complete and free forever (single shop, manual token management). **Pro** adds what agencies / ISVs / multi-shop merchants need: **automatic OAuth token refresh** (Ocean Engine's 24h expiry handled for you), a local **`auth` wizard** for the authorization-code flow, and **multi-shop management** (`shops.yaml`, alias routing, cross-shop aggregation) — still fully local, offline license, zero telemetry. Phase 1 covers Ocean Engine / Douyin Shop / JD.
+Core remains free under the MIT license. Its MCP processes use one credential configuration per platform process; SDK hosts can manage multiple explicit snapshots. Pro adds encrypted application/grant storage, shop ACLs, supported authorization/refresh providers, persistent collection and reports. It reuses Core SDK operations rather than exposing every legacy MCP registration.
+
+A permitted, registered loopback callback can use the CLI authorization flow; HTTPS partner callbacks and user identity require server integration. Pro does not currently promise Ocean Engine/Qianchuan automatic renewal or reports. Old `shops.yaml` files are not automatically imported. Data flow depends on deployment: platform requests, remote partner APIs and explicitly configured notifications are separate from local storage and offline licensing.
 
 > 🎯 Recruiting seed users: free beta access in exchange for real-world feedback.
 > [Open a Pro inquiry](https://github.com/TonyWang-hub/mcp-cn-commerce/issues/new?labels=pro-inquiry&title=%5BPro%5D%20Inquiry)
 
+Pro remains privately delivered. The free seed-user beta commitment above is preserved; local trial timing does not replace arrangements already offered to beta participants. Commercial integration and redistribution rights require the applicable Pro terms, not the existence of an installable package.
+
 ## Roadmap
 
-### Phase 1 — Foundation ✅
-- 巨量引擎: Ad campaign & report read APIs
-- 巨量千川: E-commerce advertising (shared Ocean Engine auth)
-- 抖店: Order, product, after-sale read APIs
-- 京东: Order, product, shop read APIs
+### Completed engineering
 
-### Phase 2 — Mid-Tier Expansion ✅
-- 淘宝 (Taobao): Full Top API integration — orders, products, logistics
-- 拼多多 (Pinduoduo): Orders, products, promotion tools
+- Eight MCP platform entry points, common tools and an explicit-credential platform SDK; compatibility registrations remain in the catalogue.
+- Documented read-contract migrations for the specific operations in the current SDK table.
+- Exact-revision regression, installation and real MCP transport checks; see [engineering evidence](docs/release-readiness.md).
 
-### Phase 3 — Long-Tail Coverage ✅
-- 快手 (Kuaishou): Orders, products, logistics
-- 小红书 (Xiaohongshu): Orders, products, inventory
-- 微信小店 (WeChat Store): Orders, products, after-sale
+### Current acceptance and contract work
 
-### Phase 4 — Exploratory ⬜
-- 闲鱼, 美团, 饿了么 (API access pending policy)
+- Start with authorized Douyin Shop/Taobao samples on 1–2 platforms: pagination, money/time fields, back-office comparison and authorization lifecycle.
+- Obtain PDD business schemas, XHS Source time contracts, JD refund coverage and outstanding Pro identity/delegation contracts.
+- Verify broad product/inventory/logistics/review/marketing/ad/billing domains individually. Historical phase completion does not establish current support for every domain.
+- Xianyu, Meituan and Ele.me remain exploratory.
 
 ## Related Resources
 

@@ -15,6 +15,10 @@
 
 [English](README_en.md) | **简体中文**
 
+> **2026-09-11 状态**：修复代码和文档已合入公开 `main`。Core **0.1.6 工程候选**的源码与 main CI 已通过；**PyPI / 公开稳定 Release 仍是 0.1.5**，普通 `pip install` 不会取得本轮全部修复。体验新候选请使用下方固定提交安装。真实店铺验收尚未执行。
+>
+> [项目与咨询进展](docs/project-status.md) · [工程/发布证据](docs/release-readiness.md) · [更新记录](CHANGELOG.md)
+
 ---
 
 ## 目录
@@ -82,39 +86,45 @@
 
 ### 安装
 
-#### 从 PyPI 安装（推荐）
+#### 体验已验证的 0.1.6 候选源码
 
-```bash
-# 一次安装，包含所有 8 个平台
-pip install mcp-cn-commerce
-```
-
-所有平台 server 都在包内，通过 MCP 客户端配置选择使用哪些。
-
-#### 从 GitHub Releases 下载
-
-```bash
-# 下载最新 Release 的 .whl 文件安装
-# https://github.com/TonyWang-hub/mcp-cn-commerce/releases/latest
-
-# 或直接安装：
-# Download the wheel shown on the latest Release page, then install that local file.
-python -m pip install /path/to/downloaded.whl
-```
-
-#### 从 Git 安装（始终最新）
-
-```bash
-pip install git+https://github.com/TonyWang-hub/mcp-cn-commerce.git
-```
-
-#### 开发模式
+使用 Python 3.11+；以下以已有 Python 3.12 为例，在项目虚拟环境安装。固定提交
+[`c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e)
+已经完成工程验收，不代表商家 API live 通过：
 
 ```bash
 git clone https://github.com/TonyWang-hub/mcp-cn-commerce.git
 cd mcp-cn-commerce
-pip install -e ".[dev]"
+git checkout --detach c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -c requirements-lock.txt .
+mcp-cn-commerce --version
 ```
+
+预期版本为 `0.1.6`。开发者在上述同一项目环境将安装命令替换为：
+
+```bash
+python -m pip install -c requirements-lock.txt -e ".[dev]"
+```
+
+这会安装到 `.venv`，不默认改全局 Python。MCP 桌面客户端的 `command` 应填写该项目 `.venv/bin/` 下命令的绝对路径；只在终端激活环境不保证桌面应用能找到它。其他操作系统使用对应的虚拟环境解释器/启动脚本路径。
+
+#### 安装当前 PyPI 稳定版 0.1.5
+
+[PyPI 0.1.5](https://pypi.org/project/mcp-cn-commerce/0.1.5/) 是历史公开版本，**不含上面 0.1.6 候选的全部协议与稳定性修复**。需要该版本时，在单独的项目虚拟环境中安装：
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install "mcp-cn-commerce==0.1.5"
+```
+
+#### GitHub Releases 与 main
+
+[公开稳定 Release v0.1.5](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.5) 与 `releases/latest` 仍指向历史稳定版本。0.1.6 当前按工程候选准备发布草稿，尚未正式发布到 PyPI / MCP Registry；草稿不是公开可下载安装的稳定版。后续发布状态以[项目进展](docs/project-status.md)及实际 Release 为准。
+
+`main` 已包含候选修复和后续文档，但会继续变化。复现实测版本使用上面的完整 SHA；不要把未固定的 Git 安装、最新 main 或旧 PyPI 包称为同一个候选构建。
 
 ### 配置凭证
 
@@ -318,7 +328,7 @@ mcp-cn-commerce/
 └── LICENSE                           # MIT
 ```
 
-单一包架构：`pip install mcp-cn-commerce` 一次安装，8 个平台 server 都在包内，通过 MCP 客户端配置选择使用哪些。
+单一包架构：所选 Core 版本包含 8 个平台 server。先按上方说明选择候选或稳定版本，再按实际已核能力配置 MCP 客户端。
 
 ## 安全
 

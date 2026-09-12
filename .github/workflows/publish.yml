@@ -48,6 +48,8 @@ jobs:
           python -m pip install build twine
           python -m build
           python -m twine check dist/*
+      - name: Reject private payloads or dependencies before public upload
+        run: python scripts/check_public_boundary.py --dist dist
       - name: Publish to PyPI
         env:
           TWINE_USERNAME: __token__

@@ -45,6 +45,17 @@ promoted to live support by the SDK.
 
 ## Use from a service
 
+This SDK, the normalizers and `shared.aggregation.build_daily_report` are public
+Core capabilities under the repository's unchanged MIT license. A host can use
+multiple explicit authorization snapshots and supply normalized records from
+multiple shops to the deterministic report builder without Pro. The host remains
+responsible for obtaining all required pages and declaring data completeness.
+Private Pro adds authorization governance, tenant/shop access control, encrypted
+persistence, restartable collection, report history, scheduling and audit; it
+does not own the already-public aggregation algorithm exclusively. Core never
+imports or depends on Pro or the separate commercial HTTP Client. See the
+[distribution boundary and CI checks](core-pro-boundary.md).
+
 ```python
 import httpx
 from shared.platform_clients import create_platform_client

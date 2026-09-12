@@ -3,96 +3,86 @@
 ## General
 
 ### What is mcp-cn-commerce?
-A suite of MCP (Model Context Protocol) servers that let AI agents (Claude, ChatGPT, Gemini) read business data from Chinese e-commerce platforms. Think of it as a universal translator between your AI assistant and your store data on Douyin Shop, JD.com, Ocean Engine, and more.
+
+An independent suite of MCP servers and an explicit-credential Python SDK for authorized Chinese merchant business data. Core also includes money/time normalization and deterministic reporting over records supplied by the caller. It is not affiliated with the platforms.
 
 ### What makes this different from other MCP servers?
-All existing Chinese-platform MCP servers focus on **content publishing** — posting videos, searching trending topics. mcp-cn-commerce is the first to cover **merchant business operations** — ad reports, orders, refunds, inventory.
 
-### Is this affiliated with the platforms?
-No. This is an independent open-source project. It uses each platform's official public API.
+The focus is authorized merchant operations data, read-only adapters and explicit data-completeness handling. Current per-operation support is listed in the [SDK catalogue](sdk-integration.md#catalogue-and-evidence-status); platform registration alone is not evidence that every API works.
 
-### Do I need to be a developer to use this?
-Basic familiarity with terminal/command line is helpful. You need to configure environment variables and MCP client settings. If you can follow the Quick Start guide, you can use it.
+### Is Core free, and can it calculate multi-shop reports?
+
+Yes. Core remains under the unchanged [MIT license](../LICENSE). The explicit SDK, normalizers and `build_daily_report` multi-shop calculation are already public and remain available without Pro. The caller supplies normalized records, timezone and truthful completeness information. It must obtain the required pages itself; a report is not proof of complete merchant accounts.
+
+### What does Pro add?
+
+Pro reuses Core and adds authorization lifecycle governance, encrypted application/grant storage, tenant/shop access control, persistent collection and restart recovery, report history, scheduling and audit. It does not make the public aggregation algorithm exclusive. Pro is separately authorized; standard seed-user beta testing remains free. See [Core/Pro boundaries](core-pro-boundary.md) and the [inquiry guide](pro-inquiry-playbook.md).
+
+### Does Core install private Pro code?
+
+No. Core does not require Pro or the separate commercial HTTP Client. CI checks source imports/dependencies before installation and checks wheel/sdist payloads before installation and public upload. See [the boundary checker](../scripts/check_public_boundary.py). This is a static packaging guard, not a proof against arbitrary renamed/copied implementation.
 
 ## Platforms & Compatibility
 
 ### Which platforms are supported?
-- **Phase 1 (done)**: 巨量引擎 (Ocean Engine), 巨量千川 (Qianchuan), 抖店 (Douyin Shop), 京东 (JD.com)
-- **Phase 2 (planned)**: 淘宝 (Taobao), 拼多多 (Pinduoduo)
-- **Phase 3 (planned)**: 快手 (Kuaishou), 小红书 (Xiaohongshu), 微信小店 (WeChat Store)
+
+There are eight MCP platform entry points and 155 registered tools, including historical or explicitly unsupported operations. Youzan is an additional SDK-only adapter. Use the [current catalogue](sdk-integration.md#catalogue-and-evidence-status), not old phase labels. PDD merchant SDK reads remain disabled; JD after-sale queries are not complete refunds; XHS collection time contracts and advertising report coverage still have gaps. All platform live acceptance remains unverified.
 
 ### Do I need a business license?
-- **抖店**: Enterprise or individual business license required
-- **京东**: Enterprise license required
-- **巨量引擎**: Developer account with approved app
-- **拼多多**: Individual sellers can access (Phase 2)
-- **淘宝**: Enterprise license effectively required for order APIs — see below
+
+Eligibility depends on the actual developer identity, application category, requested API permissions and authorized shop. Do not infer that all personal stores or all enterprise stores can or cannot use an API. Check the actual platform console and current permission review. The [official access record](official-access-status.md) links the platform entry points and distinguishes documentary evidence from merchant acceptance.
 
 ### How do I get 淘宝 (Taobao) API credentials?
-1. Register a developer account at [open.taobao.com](https://open.taobao.com)
-2. Create an app — merchants connecting their own shop should pick 自用型应用 (self-use app)
-3. Apply for the API permissions this server uses:
-   - Orders: `taobao.trades.sold.get`, `taobao.trade.fullinfo.get`, `taobao.trades.sold.increment.get`
-   - Products: `taobao.items.onsale.get`, `taobao.item.get`
-   - Refunds: `taobao.refunds.receive.get`, `taobao.refund.get`
-   - Logistics / reviews / shop: `taobao.logistics.trace.search`, `taobao.traderates.get`, `taobao.shop.get`
-4. Complete the OAuth authorization to obtain an `access_token` (it expires — refresh per the platform's docs for your app type)
-5. Set `TAOBAO_APP_KEY`, `TAOBAO_APP_SECRET`, `TAOBAO_ACCESS_TOKEN`
 
-Platform rules change often — the 开发者入驻 page and each API's permission package on open.taobao.com are the source of truth.
+1. Sign in to the [Taobao Open Platform](https://open.taobao.com/) with the actual applicant identity and inspect available application types and required materials.
+2. Create an approved application and obtain its AppKey. Request the specific order/refund permissions and fields needed by the [implemented TOP contracts](taobao-contract.md).
+3. Complete seller authorization using the applicable official flow. Registration alone does not guarantee API permissions or a sandbox/test token.
+4. Configure credentials on the controlled deployment: the Core MCP process uses `TAOBAO_APP_KEY`, `TAOBAO_APP_SECRET`, `TAOBAO_ACCESS_TOKEN`; SDK hosts pass an explicit credential snapshot. The host manages expiry and renewal.
 
-### Can an individual shop (个人店) use the Taobao server?
-Partly, and probably not for the part you want. Taobao's open platform does let individuals register as developers, but the order APIs (`taobao.trades.sold.get`, `taobao.trade.fullinfo.get`, and friends) expose consumer personal data, so they sit behind a separate high-sensitivity permission review that in practice requires an enterprise entity (business license) plus a signed data-security agreement. An individual C-shop generally can't clear that review.
+### Can a 个人店 / 个人 C 店 (individual store) use it?
 
-Net effect for an individual shop: **product and shop data is usually reachable, order data usually isn't.** For full order access, register the app under an enterprise entity.
+Earlier wording that personal stores generally could not obtain order permissions was too categorical and lacked evidence for the specific application. Store type alone is insufficient; use the console's actual application and permission decision. To investigate a blocker, share the application category, API name, environment and a redacted error code/screenshot. Do not post secrets, tokens, authorization codes or buyer details.
 
-### Which AI clients are compatible?
-Any MCP-compatible client: Claude Desktop, Cherry Studio, Kimi Work, Cline, Continue, and others.
+### Which AI clients work?
+
+Use an MCP-compatible client with stdio support for the Core process. Platform business permissions are separate from the MCP client connection. See [Quick Start](../README_en.md#quick-start).
 
 ### Can I use this on Windows / macOS / Linux?
-Yes. Python 3.11+ on any OS.
+
+Core requires Python 3.11+. Installation and transport evidence is tied to specific environments and commits; see [release readiness](release-readiness.md). Do not treat source portability as all-system or merchant acceptance.
 
 ## Security
 
 ### Where do my API credentials go?
-They stay in environment variables on your machine. The code reads them locally and connects directly to platform APIs. No credentials are ever sent to any third-party server.
+
+Core MCP processes read configured credentials locally; the SDK accepts an explicit snapshot. Platform requests send the required authorization to the configured official gateway. Query results go to the caller/MCP client, whose own hosting and data policy also matter. Do not send AppSecret, code or access/refresh tokens through public issues or ordinary email.
 
 ### Can AI agents modify my store data?
-No. All tools are read-only by default. AI agents can analyze your data but cannot create, modify, or delete anything.
+
+The supported business operations are read-only. Diagnostic, export and report tools may create local outputs, but do not place orders, issue refunds or alter platform business records. Historical tool registration does not imply every named API contract has been verified.
 
 ### How do I report a security issue?
-See [SECURITY.md](../SECURITY.md). Please report vulnerabilities privately — do not open a public issue.
 
-## Development & Contributing
+Follow [SECURITY.md](../SECURITY.md); report vulnerabilities privately.
+
+## Development & Troubleshooting
 
 ### How do I add a new platform?
-1. Create `servers/<platform>/` with the standard structure
-2. Extend `CommerceMCPBase` from `shared/cn_commerce_base.py`
-3. Set `BASE_URL`, `sign_method`, and define tool functions
-4. Add tests and update documentation
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for details.
-
-### What's the shared base class?
-`CommerceMCPBase` (in `shared/cn_commerce_base.py`) encapsulates the common pattern across all Chinese e-commerce APIs:
-- Request signing (MD5 or HMAC-MD5)
-- Parameter sorting and serialization
-- Pagination handling
-- Error parsing and translation
+Read [CONTRIBUTING.md](../CONTRIBUTING.md), implement the platform client and applicable MCP tools, and verify official request/response contracts. Add tests and catalogue/documentation updates; keep unsupported operations explicit. Preserve the public namespace and dependency checks.
 
 ### Will there be CLI support?
-Yes — Phase 2 will add CLI entry points that share the same core logic as the MCP servers.
+
+CLI entry points already exist: `mcp-cn-commerce --help` lists platform selection, and platform-specific commands are declared in [pyproject.toml](../pyproject.toml).
 
 ### Can I use this as a library instead of MCP?
-The server code is structured so you can import and use the API wrappers directly, outside of MCP. This is not the primary use case but is supported.
 
-## Troubleshooting
+Yes. Use the [explicit SDK](sdk-integration.md) to avoid environment-backed server globals. The host is responsible for authorization, refresh, access control, pagination and persistence.
 
-### "Sign does not match" errors
-Most common cause: timestamp skew. Ensure your system clock is accurate. Some platforms are very strict about time drift.
+### "Sign does not match", "App key not exist" or "Invalid access token"
 
-### "App key not exist" or "Invalid access token"
-Verify your credentials: check that environment variables are set correctly and tokens haven't expired. Ocean Engine tokens expire every 24 hours.
+Check the specific platform contract, application/environment, permissions, timestamp units and token expiry. Lifetime and refresh behavior differ by platform and application mode; there is no universal 24-hour lifetime. Provide redacted error metadata, not credentials, when requesting help.
 
 ### Tests fail locally but pass in CI
-Check that you don't have real credentials set — tests use mock responses. If real environment variables are set, tests might attempt real API calls.
+
+Use the documented Python environment and dependency constraints, and record the failing test and exact source commit. Engineering tests use synthetic transports and local MCP/HTTP connections; they are not evidence of merchant live success. Never replace a controlled fixture with real credentials to make an offline test pass.

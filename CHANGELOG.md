@@ -15,6 +15,7 @@ See [installation choices](README.md#安装) and [release evidence](docs/release
 
 ### Added
 
+- A no-network public-package gate rejects accidental Pro/Client imports, dependencies and wheel/sdist payloads before CI installation or public upload. Core's MIT license, normalization and multi-shop report calculations remain unchanged; [Core/Pro guidance](docs/core-pro-boundary.md) explains the separate governance and persistence capabilities.
 - An explicit-credential platform SDK: immutable per-authorization snapshots, an operation catalogue, isolated routing, injected/owned HTTP resource handling, and rejection of credential/protocol overrides. Hosts own token refresh, tenant authorization and output privacy.
 - Youzan SDK-only order/refund/shop reads, without adding a ninth environment-backed MCP CLI.
 - JD `get_aftersale_list` and `get_aftersale_refund_detail` SDK reads with strict native parameters and safe errors. These are after-sale queries, not complete refund collection or new MCP registrations.

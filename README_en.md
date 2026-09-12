@@ -291,7 +291,9 @@ This project handles sensitive e-commerce API credentials. Our security guarante
 
 ## 💼 Pro (private beta)
 
-Core remains free under the MIT license. Its MCP processes use one credential configuration per platform process; SDK hosts can manage multiple explicit snapshots. Pro adds encrypted application/grant storage, shop ACLs, supported authorization/refresh providers, persistent collection and reports. It reuses Core SDK operations rather than exposing every legacy MCP registration.
+Core remains free under the unchanged MIT license. Platform adapters, explicit-credential clients, money/time normalization and deterministic multi-shop `build_daily_report` calculations are already public Core features. Multi-shop calculation does not require Pro; the host supplies collected records and truthful completeness declarations. MCP processes use one credential configuration per platform process, while SDK hosts can manage multiple explicit snapshots.
+
+Pro reuses those public capabilities and adds authorization lifecycle governance, encrypted application/grant storage, tenant/shop ACLs, persistent collection with page evidence and restart recovery, report history, scheduling and audit. It does not make the public multi-shop algorithm exclusive or imply support for every historical MCP registration. Supported providers and collection sources remain subject to their documented limits and merchant acceptance.
 
 A permitted, registered loopback callback can use the CLI authorization flow; HTTPS partner callbacks and user identity require server integration. Pro does not currently promise Ocean Engine/Qianchuan automatic renewal or reports. Old `shops.yaml` files are not automatically imported. Data flow depends on deployment: platform requests, remote partner APIs and explicitly configured notifications are separate from local storage and offline licensing.
 
@@ -299,6 +301,8 @@ A permitted, registered loopback callback can use the CLI authorization flow; HT
 > [Open a Pro inquiry](https://github.com/TonyWang-hub/mcp-cn-commerce/issues/new?labels=pro-inquiry&title=%5BPro%5D%20Inquiry)
 
 Pro remains privately delivered. The free seed-user beta commitment above is preserved; local trial timing does not replace arrangements already offered to beta participants. Commercial integration and redistribution rights require the applicable Pro terms, not the existence of an installable package.
+
+Core installation requires neither Pro nor the separate commercial Client. CI checks source boundaries before dependency installation and inspects both wheel and sdist before installation/public upload to catch accidental private imports, dependencies and payloads. See [Core/Pro boundaries and checks](docs/core-pro-boundary.md). This packaging gate preserves public features; it is not a claim of merchant API acceptance or absolute source-code secrecy.
 
 ## Roadmap
 

@@ -15,8 +15,21 @@ permissions:
   contents: read
 
 jobs:
+  public-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Reject private dependencies and imports before installation
+        run: python scripts/check_public_boundary.py
+
   test:
     runs-on: ubuntu-latest
+    needs: [public-boundary]
     strategy:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
@@ -42,6 +55,7 @@ jobs:
 
   install-smoke:
     runs-on: ubuntu-latest
+    needs: [public-boundary]
     strategy:
       matrix:
         dependency-set: [locked, latest-supported]
@@ -56,6 +70,8 @@ jobs:
         run: |
           python -m pip install build
           python -m build
+      - name: Verify public wheel and source distribution boundaries
+        run: python scripts/check_public_boundary.py --dist dist
       - name: Install wheel into a clean environment
         env:
           DEPENDENCY_SET: ${{ matrix.dependency-set }}
@@ -80,6 +96,7 @@ jobs:
 
   docker-smoke:
     runs-on: ubuntu-latest
+    needs: [public-boundary]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -112,6 +129,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    needs: [public-boundary]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -125,6 +143,7 @@ jobs:
 
   typecheck:
     runs-on: ubuntu-latest
+    needs: [public-boundary]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -133,10 +152,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -c requirements-lock.txt -e ".[dev]"
-      - run: mypy servers/ shared/ tests/ --config-file=pyproject.toml
+      - run: mypy servers/ shared/ tests/ scripts/check_public_boundary.py --config-file=pyproject.toml
 
   code-quality:
     runs-on: ubuntu-latest
+    needs: [public-boundary]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -145,5 +165,5 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -c requirements-lock.txt -e ".[dev]"
-      - run: pylint --rcfile=pyproject.toml --disable=import-error servers/ shared/
-      - run: bandit -c pyproject.toml -r servers/ shared/
+      - run: pylint --rcfile=pyproject.toml --disable=import-error servers/ shared/ scripts/check_public_boundary.py
+      - run: bandit -c pyproject.toml -r servers/ shared/ scripts/check_public_boundary.py

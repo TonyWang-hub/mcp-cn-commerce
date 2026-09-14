@@ -33,7 +33,7 @@ jsonschema-specifications==2025.9.1
 opentelemetry-api==1.44.0
 pycparser==3.0
 pydantic==2.13.5
-pydantic_core==2.46.5
+pydantic_core==2.49.0
 PyJWT==2.13.0
 python-multipart==0.0.32
 referencing==0.37.0

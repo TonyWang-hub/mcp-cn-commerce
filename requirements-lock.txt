@@ -39,7 +39,7 @@ python-multipart==0.0.32
 referencing==0.37.0
 rpds-py==2026.6.3
 sse-starlette==3.4.11
-starlette==1.6.0
+starlette==1.7.0
 truststore==0.10.4
 typing_extensions==4.16.0
 typing-inspection==0.4.4

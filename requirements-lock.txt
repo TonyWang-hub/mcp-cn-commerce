@@ -14,7 +14,7 @@
 #
 # Use:  pip install -r requirements-lock.txt
 mcp==2.1.1
-mcp-types==2.1.1
+mcp-types==2.2.0
 httpx==0.28.1
 annotated-types==0.8.0
 anyio==4.15.1

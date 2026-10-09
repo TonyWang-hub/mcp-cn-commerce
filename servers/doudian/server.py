@@ -36,6 +36,7 @@ from shared.cn_commerce_base import (
     SensitiveDataFilter,
     register_common_tools,
 )
+from shared.platform_clients import mcp_capability_tool
 
 logger = logging.getLogger(__name__)
 logger.addFilter(SensitiveDataFilter())
@@ -52,6 +53,7 @@ async def _lifespan(_server):
 
 
 server = MCPServer("mcp-cn-doudian", lifespan=_lifespan)
+business_tool = mcp_capability_tool(server.tool, "doudian")
 
 # ── Exceptions ──────────────────────────────────────────────
 
@@ -102,7 +104,7 @@ def _safe_get(d: dict, *keys: str, default: Any = "") -> Any:
 # ═══════════════════════════════════════════════════════════════
 
 
-@server.tool()
+@business_tool()
 async def get_order_list(
     start_time: str = "",
     end_time: str = "",
@@ -142,7 +144,7 @@ async def get_order_list(
         return {"error": str(exc), "orders": []}
 
 
-@server.tool()
+@business_tool()
 async def get_order_detail(order_id: str = "", shop_order_id: str = "") -> dict:
     """查询抖店店铺父订单详情；order_id为shop_order_id的兼容别名，二者不能冲突。"""
     try:
@@ -159,7 +161,7 @@ async def get_order_detail(order_id: str = "", shop_order_id: str = "") -> dict:
         return {"error": str(exc), "order": None}
 
 
-@server.tool()
+@business_tool()
 async def get_product_list(
     page: int = 0,
     page_size: int = 10,
@@ -234,7 +236,7 @@ async def get_product_list(
         return {"error": f"Unexpected error: {e}", "products": []}
 
 
-@server.tool()
+@business_tool()
 async def get_refund_list(
     start_time: str = "",
     end_time: str = "",
@@ -271,7 +273,7 @@ async def get_refund_list(
         return {"error": str(exc), "refunds": []}
 
 
-@server.tool()
+@business_tool()
 async def get_shop_info() -> dict:
     """暂不支持：当前官方目录没有已核实的通用抖店基础信息接口。"""
     return {
@@ -284,7 +286,7 @@ async def get_shop_info() -> dict:
 # ── 物流 (logistics) ────────────────────────────────────────────
 
 
-@server.tool()
+@business_tool()
 async def get_logistics_tracking(
     order_id: str = "",
 ) -> dict:
@@ -347,7 +349,7 @@ async def get_logistics_tracking(
         return {"error": f"Unexpected error: {e}", "tracking": None}
 
 
-@server.tool()
+@business_tool()
 async def list_logistics_companies() -> dict:
     """物流公司列表 — 获取抖店支持的物流/快递公司列表。
 
@@ -391,7 +393,7 @@ async def list_logistics_companies() -> dict:
 # ── 评价 (reviews) ─────────────────────────────────────────────
 
 
-@server.tool()
+@business_tool()
 async def get_review_list(
     start_time: str = "",
     end_time: str = "",
@@ -470,7 +472,7 @@ async def get_review_list(
         return {"error": f"Unexpected error: {e}", "reviews": []}
 
 
-@server.tool()
+@business_tool()
 async def get_review_detail(
     review_id: str = "",
 ) -> dict:
@@ -537,7 +539,7 @@ async def get_review_detail(
 # ── 客服 (customer service — 飞鸽) ────────────────────────────
 
 
-@server.tool()
+@business_tool()
 async def get_feige_messages(
     user_id: str = "",
     start_time: str = "",
@@ -620,7 +622,7 @@ async def get_feige_messages(
 # ── 直播 (live streaming) ──────────────────────────────────────
 
 
-@server.tool()
+@business_tool()
 async def get_live_data(
     room_id: str = "",
     start_time: str = "",
@@ -695,7 +697,7 @@ async def get_live_data(
         return {"error": f"Unexpected error: {e}", "live_data": None}
 
 
-@server.tool()
+@business_tool()
 async def list_live_rooms(
     start_time: str = "",
     end_time: str = "",
@@ -775,7 +777,7 @@ async def list_live_rooms(
 # ── 流量 (traffic) ─────────────────────────────────────────────
 
 
-@server.tool()
+@business_tool()
 async def get_traffic_data(
     start_date: str = "",
     end_date: str = "",
@@ -841,7 +843,7 @@ async def get_traffic_data(
 # ── 短视频 (short video) ───────────────────────────────────────
 
 
-@server.tool()
+@business_tool()
 async def get_short_video_data(
     video_id: str = "",
     start_date: str = "",
@@ -916,7 +918,7 @@ async def get_short_video_data(
 # ── 营销 (marketing) ──────────────────────────────────────────
 
 
-@server.tool()
+@business_tool()
 async def list_promotions(
     status: str = "",
     page: int = 0,
@@ -985,7 +987,7 @@ async def list_promotions(
         return {"error": f"Unexpected error: {e}", "promotions": []}
 
 
-@server.tool()
+@business_tool()
 async def list_coupons(
     status: str = "",
     page: int = 0,
@@ -1060,7 +1062,7 @@ async def list_coupons(
 # ── 资金 (billing) ────────────────────────────────────────────
 
 
-@server.tool()
+@business_tool()
 async def get_bill_list(
     start_date: str = "",
     end_date: str = "",
@@ -1136,7 +1138,7 @@ async def get_bill_list(
 # ── 店铺 (shop extended) ──────────────────────────────────────
 
 
-@server.tool()
+@business_tool()
 async def get_shop_score() -> dict:
     """店铺评分详情 — 获取抖店DSR评分、商品体验、服务体验、物流体验等详细评分。
 
@@ -1193,7 +1195,7 @@ async def get_shop_score() -> dict:
         return {"error": f"Unexpected error: {e}", "shop_score": None}
 
 
-@server.tool()
+@business_tool()
 async def list_categories(
     parent_id: str = "0",
 ) -> dict:
@@ -1244,7 +1246,7 @@ async def list_categories(
         return {"error": f"Unexpected error: {e}", "categories": []}
 
 
-@server.tool()
+@business_tool()
 async def list_brands(
     category_id: str = "",
     page: int = 0,

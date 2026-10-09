@@ -1,27 +1,51 @@
 # Core 工程候选与发布状态
 
-更新：2026-09-11。**代码和文档已经在公开 main；0.1.6 工程候选已通过验证，PyPI / 公开稳定 Release 仍为 0.1.5。真实店铺验收尚未执行。** 本页区分源码上传、工程测试、正式发布和商家数据验收。
+更新：2026-10-08。**截至该日核对的公开 Core `main` 快照为 `1449f49`、版本为 `0.1.6`；PyPI / 公开稳定 Release 仍为 `0.1.5`，`0.1.6` Release 仍是草稿。先前通过验收的 Core 候选固定为 `c32e004`，其 CI 结果只对应那个提交。2026-10-08 的提交前工作区改动已通过本地工程验收、尚未发布。真实店铺验收尚未执行。** 本页区分公开快照、历史工程证据、本轮本地改动、正式发布和商家数据验收。
 
 ## 版本与公开工程证据
 
 | 对象 | 精确版本 / 提交 | 实际状态 |
 | --- | --- | --- |
-| 已验证的候选源码 | Core `0.1.6`；[`c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e) | [CI 34572407075](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/34572407075) success |
-| 已合并 main 快照 | [`67c8fc9c0eb0e83cd8f819a686fe8c092f0d9f7c`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/67c8fc9c0eb0e83cd8f819a686fe8c092f0d9f7c) | [CI 34572676414](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/34572676414) success；[PR116](https://github.com/TonyWang-hub/mcp-cn-commerce/pull/116) 和 [PR117](https://github.com/TonyWang-hub/mcp-cn-commerce/pull/117) 已合并 |
+| 2026-10-08 核对的公开 Core `main` 快照 | [`1449f49`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/1449f494aa68d5261fc0c57c44bfce6a409a5611)，版本 `0.1.6` | 比下列已验候选更新；不能套用历史 CI 结果 |
+| 2026-10-08 提交前的 Core 工作区 | `1449f49` + 当时未提交改动，版本 `0.1.6` | 下述本地回归和安装验收通过；该次验收未包含远程 CI 或公开发行 |
+| 先前已验 Core 候选 | `0.1.6`；[`c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e) | [CI 34572407075](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/34572407075) success；验收结果绑定此完整 SHA |
+| 已验 main 合并快照 | [`67c8fc9c0eb0e83cd8f819a686fe8c092f0d9f7c`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/67c8fc9c0eb0e83cd8f819a686fe8c092f0d9f7c) | [CI 34572676414](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/34572676414) success；[PR116](https://github.com/TonyWang-hub/mcp-cn-commerce/pull/116) 和 [PR117](https://github.com/TonyWang-hub/mcp-cn-commerce/pull/117) 已合并；结果绑定此快照 |
 | PyPI / 公开稳定 Release | `0.1.5` | [PyPI](https://pypi.org/project/mcp-cn-commerce/0.1.5/) 与 [Release](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.5) 是历史公开版本，不含本次候选全部修复 |
-| 0.1.6 发布阶段 | 工程候选 / 发布草稿准备 | 尚未正式发布到 PyPI 或 MCP Registry；发布草稿不等于公开稳定包 |
+| `0.1.6` 发布阶段 | 当前源码版本；公开 Release 仍为草稿 | 尚未正式发布到 PyPI 或 MCP Registry；发布草稿不等于公开稳定包 |
+| 当前私有 Pro / Client 候选 | Pro `0.1.5b1` / Core `0.1.6` / Client `0.1.0b1` | 最近三项工程 CI 成功；所有商家 `live_verified=false`；正式客户制品需签名密钥、许可和接收方信息 |
+| 历史 Pro Release | `v0.1.1b1` | 旧 Release / 制品，不代表当前 Pro 源码或候选构建；不将旧验收记录归给新候选 |
 | 商家 live | 全部 SDK `live_verified=false` | 尚无真实商家授权、业务样本和后台对账的通过记录 |
 
-本次源码可按 [README 的完整 SHA 安装步骤](../README.md#安装)复现，使用项目虚拟环境。普通 `pip install mcp-cn-commerce` 与 `releases/latest` 当前取到的是旧稳定版，不能作为本次修复验收的安装方式。main 会继续变化，复现候选使用固定 SHA 与配套构建 manifest。
+`c32e004` 的历史验收结果可按 [README 的完整 SHA 安装步骤](../README.md#安装)复现，使用项目虚拟环境。普通 `pip install mcp-cn-commerce` 与 `releases/latest` 当前取到的是旧稳定版。2026-10-08 核对的公开 main 快照 `1449f49` 比已验提交更新；本轮工作区结果单独记录在下方[本轮记录](#2026-10-08-本轮本地变更验收)。
+
+## 2026-10-08 本轮本地变更验收
+
+该次提交前验收源码为 `1449f494aa68d5261fc0c57c44bfce6a409a5611` 加当时工作区改动；记录不包含后续提交的远程 CI。`servers/` 与 `shared/` 下 50 个 Python 文件的内容指纹为 `fe0f45d6e2426c6cc92734ae450a24c61f819ce16f4645d64f550b28bff6e02f`（路径排序后对 `路径 + NUL + 内容 + NUL` 计算 SHA-256），用于区分当前运行源码和历史提交。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| 问题复现 | 原 HEAD 的三个巨量报表触发禁止创建客户端的 sentinel，3 项失败；修复后 3 项均在客户端创建前报 migration 错误 |
+| 完整 Core 回归 | Python 3.12.3、MCP 2.2.0：`python -m pytest -q`，**2291 passed + 20 subtests passed**；补充安装脚本回归为 13 passed + 20 subtests passed |
+| 格式、类型和静态检查 | Black、Ruff、mypy、Pylint、Bandit 全部通过；后三项包含 CI 要求的 `scripts/check_public_boundary.py` 范围 |
+| 工具兼容与能力 | 8 平台、每平台 5 个共享工具、155 注册项；全部名称及输入输出 schema 与原 HEAD 一致；15 个 `supported=false` 项均不发送平台请求；业务描述公开合同/支持/live 状态 |
+| 构建和公开包边界 | `python -m build`、`python -m twine check`、`python scripts/check_public_boundary.py --dist ...` 均通过；生成 wheel 与 sdist |
+| 干净安装 | Python 3.12.13：锁定 wheel、最新支持依赖 wheel、锁定 sdist，真实解析安装及三个 `pip check` 均通过；每环境 24 个 stdio 情境，共 **72/72** |
+| 依赖版本 | 锁定环境 MCP/mcp-types 2.2.0；最新环境 MCP/mcp-types 2.3.0；各环境 httpx 0.28.1、httpx2/httpcore2 2.13.1、Pydantic 2.13.5 / pydantic_core 2.46.5 |
+| 文档样例 | [数据契约](data-contracts.md)两段 Python 原样执行成功：GMV 1999 分、1 笔付款订单、`complete=true`；中英文 README 与 LLM 安装指南的 JSON/TOML 样例解析通过 |
+| 独立审查 | 能力守卫的实际 MCP ToolManager 调用、委派阻断路径、依赖和文档均完成审查；发现的格式与文档问题已修正，无剩余阻断项 |
+
+最终 wheel/sdist 的 SHA-256、安装版本和命令退出状态见[提交前本地验收记录](core-readiness-20261008.json)。命令使用相对路径和 `<validation-dir>` 占位符；原始日志与制品保留在本地验收目录，不作为公开附件。上述哈希对应该次本地构建，后续构建须重新计算。制品用于本地安装核对，不表示公开版本已变更。
+
+该次本地执行范围为 macOS / Python 3.12；当时未执行新的远程 Python 3.11/3.13 矩阵、容器作业或 Registry publisher 校验。商家 HTTP 合同测试使用受控响应，安装情境没有使用真实凭证或发送商家请求；所有 `live_verified=false`。这些结果不替代正式发布或真店验收，也不归给 `c32e004` 的旧 CI。
 
 ## 已完成的工程验证
 
-- Core 完整回归 **2225 tests + 20 subtests**，JUnit 汇总为 **2245**；候选和合并 main 的上述两次 CI 均成功。
-- Python 版本矩阵、格式/类型/静态检查、锁定与最新支持依赖安装、wheel/sdist、真实 MCP stdio、manifest 校验及托管容器作业均有对应 workflow 证据。真实进程握手不等于商家 HTTP 已联调。
-- 配套私有 Pro `0.1.1b1` 候选的工程回归为 **1432**，独立 Python PartnerClient 为 **203**；配套 Core/Pro/Client 交付完成 **26 项安装/握手检查与 7 项质量检查**。这些是配套交付的验收汇总，不是额外的 Core 测试数，公开用户无需访问私有源码或 CI 才能核对上面的 Core 证据。
-- 商家接口合同测试使用受控响应；当前没有真店通过记录。仅文档同步不重复全量产品测试，不修改产品协议、版本或 CI。
+- Core 历史候选 `c32e004` 完整回归为 **2225 tests + 20 subtests**，JUnit 汇总为 **2245**；该提交和已验 main 快照 `67c8fc9` 的上述 CI 均成功。数字不代表 2026-10-08 的公开 main 快照或本轮本地改动已验收。
+- 历史 workflow 记录覆盖 Python 版本矩阵、格式/类型/静态检查、锁定与最新支持依赖安装、wheel/sdist、真实 MCP stdio、manifest 校验及托管容器作业。真实进程握手不等于商家 HTTP 已联调，也不替代当前提交的新验收。
+- 当前私有 Pro `0.1.5b1` / Core `0.1.6` / Client `0.1.0b1` 候选最近三项工程 CI 已成功。先前 Pro `v0.1.1b1` 的测试统计只属于对应历史制品；不在此处用旧数字描述当前候选。当前商家 live 仍未验收，正式客户制品还需签名密钥、许可和接收方信息。
+- 商家接口合同测试使用受控响应；当前没有真店通过记录。本轮包含实现、依赖与文档修改，其回归和安装结果单独记录在本轮验收项中。
 
-较早的 `6b6a7f9` / Pro `64dc3f5` 等结果保留在[历史验收记录](verification-results.md)中，不替代本页新候选的准确提交。新的包哈希、安装结果和发布状态必须绑定实际发行 manifest；不把旧包说成由新文档提交构建。
+较早的 `6b6a7f9` / Pro `64dc3f5` 等结果保留在[历史验收记录](verification-results.md)中；`c32e004`、`67c8fc9` 与公开 main 快照 `1449f49` 也分别记录。新的包哈希、安装结果和发布状态必须绑定实际发行 manifest；不把旧制品或旧 CI 说成本轮本地改动的验收。
 
 ## 真店验收与支持边界
 

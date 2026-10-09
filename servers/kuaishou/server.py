@@ -22,6 +22,7 @@ from servers.kuaishou.schema import ORDER_DETAIL, ORDER_LIST, REFUND_DETAIL, REF
 from shared.cn_commerce_base import (
     register_common_tools,
 )
+from shared.platform_clients import mcp_capability_tool
 
 # ── Kuaishou client ───────────────────────────────────────────────────────────
 
@@ -56,6 +57,7 @@ async def _lifespan(_server):
 
 
 mcp = MCPServer("mcp-cn-kuaishou", lifespan=_lifespan)
+business_tool = mcp_capability_tool(mcp.tool, "kuaishou", unavailable_error=ToolError)
 
 
 def _milliseconds(value: str) -> int:
@@ -89,7 +91,7 @@ def _check(method: str, params: dict) -> None:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_order_list(
     start_time: str,
     end_time: str,
@@ -124,7 +126,7 @@ async def get_order_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_order_detail(order_id: str) -> str:
     """Read one order using its official numeric int64 oid."""
     params = {"oid": _numeric_id(order_id, "order_id")}
@@ -137,7 +139,7 @@ async def get_order_detail(order_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_product_list(
     page: int = 1,
     page_size: int = 20,
@@ -156,7 +158,7 @@ async def get_product_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_product_detail(item_id: str) -> str:
     """Get full details of a single product by item ID.
 
@@ -173,7 +175,7 @@ async def get_product_detail(item_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_refund_list(
     start_time: str,
     end_time: str,
@@ -212,7 +214,7 @@ async def get_refund_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_refund_detail(refund_id: str) -> str:
     """Read one after-sale using its official numeric int64 refundId."""
     result = await ks._call(REFUND_DETAIL, {"refundId": _numeric_id(refund_id, "refund_id")})
@@ -224,7 +226,7 @@ async def get_refund_detail(refund_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_logistics_tracking(order_id: str) -> str:
     """Get logistics tracking information for an order.
 
@@ -236,7 +238,7 @@ async def get_logistics_tracking(order_id: str) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def list_logistics_companies() -> str:
     """List all available logistics companies on Kuaishou platform."""
     result = await ks._call("/open/api/logistics/company/list")
@@ -248,7 +250,7 @@ async def list_logistics_companies() -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_review_list(
     item_id: str,
     page: int = 1,
@@ -275,7 +277,7 @@ async def get_review_list(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_shop_info() -> str:
     """Read the authorized user's shop name/type; this API has no shop ID."""
     result = await ks._call(SHOP_INFO, {})
@@ -287,7 +289,7 @@ async def get_shop_info() -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def list_promotions(
     page: int = 1,
     page_size: int = 20,
@@ -306,7 +308,7 @@ async def list_promotions(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def list_coupons(
     page: int = 1,
     page_size: int = 20,

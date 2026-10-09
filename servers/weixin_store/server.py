@@ -26,6 +26,7 @@ from shared.cn_commerce_base import (
     ConfigValidationError,
     register_common_tools,
 )
+from shared.platform_clients import mcp_capability_tool
 
 # ── WeChat Store client ───────────────────────────────────────────────────────
 
@@ -71,6 +72,7 @@ async def _lifespan(_server):
 
 
 mcp = MCPServer("mcp-cn-weixin-store", lifespan=_lifespan)
+business_tool = mcp_capability_tool(mcp.tool, "weixin_store", unavailable_error=ToolError)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -78,7 +80,7 @@ mcp = MCPServer("mcp-cn-weixin-store", lifespan=_lifespan)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_order_list(
     start_time: str,
     end_time: str,
@@ -129,7 +131,7 @@ async def get_order_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_order_detail(order_id: str) -> str:
     """Get full details of a single WeChat Store order.
 
@@ -146,7 +148,7 @@ async def get_order_detail(order_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_product_list(
     status: int = 0,
     page: int = 1,
@@ -170,7 +172,7 @@ async def get_product_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_product_detail(product_id: str) -> str:
     """Get full details of a single product by product ID.
 
@@ -187,7 +189,7 @@ async def get_product_detail(product_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_refund_list(
     start_time: str,
     end_time: str,
@@ -229,7 +231,7 @@ async def get_refund_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_refund_detail(after_sale_order_id: str) -> str:
     """Get full details of a single after-sale (refund) record.
 
@@ -246,7 +248,7 @@ async def get_refund_detail(after_sale_order_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_logistics_tracking(order_id: str) -> str:
     """Get logistics tracking information for a WeChat Store order.
 
@@ -263,7 +265,7 @@ async def get_logistics_tracking(order_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_shop_info() -> str:
     """Get basic shop (店铺) information for the authenticated merchant."""
     result = await _wx._request("GET", "/channels/ec/basics/info/get")
@@ -275,7 +277,7 @@ async def get_shop_info() -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def list_coupons(
     status: int = 0,
     page: int = 1,
@@ -304,7 +306,7 @@ async def list_coupons(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_supply_order_list(
     start_time: str,
     end_time: str,
@@ -338,7 +340,7 @@ async def get_supply_order_list(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def list_categories(parent_id: int = 0) -> str:
     """List available product categories (类目) on WeChat Store.
 

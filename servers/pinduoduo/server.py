@@ -20,6 +20,7 @@ from shared.cn_commerce_base import (
     ConfigValidationError,
     register_common_tools,
 )
+from shared.platform_clients import mcp_capability_tool
 
 # ── Pinduoduo client ────────────────────────────────────────────────────────
 
@@ -57,6 +58,7 @@ async def _lifespan(_server):
 
 
 mcp = MCPServer("mcp-cn-pinduoduo", lifespan=_lifespan)
+business_tool = mcp_capability_tool(mcp.tool, "pinduoduo", unavailable_error=ToolError)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -64,7 +66,7 @@ mcp = MCPServer("mcp-cn-pinduoduo", lifespan=_lifespan)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_order_list(
     start_time: str,
     end_time: str,
@@ -80,7 +82,7 @@ async def get_order_list(
     raise ToolError("PDD read schema unavailable; see docs/pinduoduo-contract.md")
 
 
-@mcp.tool()
+@business_tool()
 async def get_order_detail(order_sn: str) -> str:
     """Unavailable until the official PDD read schema can be verified.
 
@@ -95,7 +97,7 @@ async def get_order_detail(order_sn: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_product_list(
     page: int = 1,
     page_size: int = 20,
@@ -114,7 +116,7 @@ async def get_product_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_product_detail(goods_id: str) -> str:
     """Get full details of a single product by goods ID.
 
@@ -126,7 +128,7 @@ async def get_product_detail(goods_id: str) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def search_products(
     keyword: str,
     page: int = 1,
@@ -153,7 +155,7 @@ async def search_products(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_refund_list(
     start_time: str,
     end_time: str,
@@ -168,7 +170,7 @@ async def get_refund_list(
     raise ToolError("PDD read schema unavailable; see docs/pinduoduo-contract.md")
 
 
-@mcp.tool()
+@business_tool()
 async def get_refund_detail(refund_id: str) -> str:
     """Unavailable until the official PDD read schema can be verified.
 
@@ -183,7 +185,7 @@ async def get_refund_detail(refund_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_logistics_tracking(order_sn: str) -> str:
     """Get logistics tracking information for an order.
 
@@ -195,7 +197,7 @@ async def get_logistics_tracking(order_sn: str) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def list_logistics_companies() -> str:
     """List all available logistics companies on Pinduoduo platform."""
     result = await pdd._call("pdd.logistics.companies.get", {})
@@ -207,7 +209,7 @@ async def list_logistics_companies() -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_review_list(
     goods_id: str,
     page: int = 1,
@@ -234,7 +236,7 @@ async def get_review_list(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_shop_info() -> str:
     """Unavailable until the official PDD read schema can be verified.
 
@@ -249,7 +251,7 @@ async def get_shop_info() -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def list_promotions(
     page: int = 1,
     page_size: int = 20,
@@ -273,7 +275,7 @@ async def list_promotions(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def search_affiliate_goods(
     keyword: str,
     page: int = 1,

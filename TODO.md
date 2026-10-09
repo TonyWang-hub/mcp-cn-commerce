@@ -1,40 +1,19 @@
-# 待办事项
+# 当前待办
 
-## PyPI 发布待办
+更新：2026-10-08。前三项是本轮批准的 Core readiness 工作，已完成本地工程验收；记录见[发布就绪](docs/release-readiness.md#2026-10-08-本轮本地变更验收)。后续外部证据、真店验收和公开发布分别记录。
 
-### 已完成 ✅
+## Core readiness
 
-- [x] 主包 `mcp-cn-commerce` 已发布
-- [x] `mcp-cn-oceanengine` 已发布
-- [x] `mcp-cn-doudian` 已发布
-- [x] `mcp-cn-jd` 已发布
-- [x] 更新 README 添加 PyPI 安装说明
+- [x] **MCP / SDK 能力边界**：复现并修复显式 unsupported 操作，确认请求前拒绝；保留工具名、输入签名和已记录的工具数量；核对发现元数据与操作表说法一致。
+- [x] **运行依赖升级**：核实关联依赖的真实约束，成组升级并更新 runtime lock / Dependabot；在隔离环境完成安装、无忽略项的 `pip check`、MCP stdio 握手及 wheel/sdist 检查。
+- [x] **文档与示例校准**：执行含显式 `promotion_pay_amount` 的日报样例；核对 2026-10-08 的公开 main 快照、历史已验候选、公开稳定版、Pro/Client 候选、安装方式和真实商家验收状态；不把历史验收归给本轮本地改动。
 
-### 待上传 ⏳
+## 外部证据与平台验收
 
-已重构为单一包架构，不再需要分别上传子包。
+- [ ] **真实店铺只读验收**：在商家提供获准凭证和样本后，按抖店/TOP 的接口权限、两页分页、金额/日期、退款生命周期、后台对账和授权刷新/撤销记录结果；未执行的样本保持未执行。
+- [ ] **平台合同缺口**：取得 PDD 完整经营业务 schema；确认小红书订单查询与退款完成时间；补齐京东完整退款资金/持续发现合同；继续核对快手授权主体、微信共享组件跨 tenant 委托及广告报表/账户树。
+- [ ] **宽数据域**：商品、库存、物流、评价、营销、账单等逐操作依据官方合同和权限确认，不以历史 MCP 注册或平台名称推定已支持。
+- [ ] **Pro 正式客户制品**：为当前 Pro `0.1.5b1` / Core `0.1.6` / Client `0.1.0b1` 候选准备正式签名密钥、客户许可及接收方信息；完成前不称正式客户制品已就绪。真实商家 API 和后台对账另行验收。
+- [ ] **Core 公开发布**：发布前核对实际提交、版本/tag、包哈希、CI、PyPI 与 MCP Registry；`0.1.6` Release 草稿不算公开稳定版。
 
----
-
-## 后续推广待办
-
-### 短期（1-2 周）
-
-- [ ] 提交到 Anthropic 官方 Registry（GitHub PR）
-- [ ] 在小红书/知乎/B站发布使用教程
-- [ ] 在 V2EX/掘金发布项目介绍
-
-### 中期（1-2 月）
-
-- [ ] 联系 Cherry Studio 官方收录
-- [ ] 联系 Kimi Work 官方收录
-- [ ] 准备阿里云百炼 MCP 市场上架材料
-
----
-
-## PyPI 链接
-
-- 主包: https://pypi.org/project/mcp-cn-commerce/0.1.0/
-- 巨量引擎: https://pypi.org/project/mcp-cn-oceanengine/0.1.0/
-- 抖店: https://pypi.org/project/mcp-cn-doudian/0.1.0/
-- 京东: https://pypi.org/project/mcp-cn-jd/0.1.0/
+详细边界和证据入口：[项目状态](docs/project-status.md)、[发布就绪](docs/release-readiness.md)、[平台缺口](docs/platform-gap-evidence-20260911.md)。

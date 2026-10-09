@@ -1,4 +1,4 @@
-"""Check README tool counts against registrations, without importing the SDK."""
+"""Check tool counts and capability-aware registrations without importing the SDK."""
 
 from __future__ import annotations
 
@@ -7,14 +7,22 @@ import re
 from pathlib import Path
 
 
+def _decorator_name(decorator: ast.expr) -> str | None:
+    target = decorator.func if isinstance(decorator, ast.Call) else decorator
+    if isinstance(target, ast.Name):
+        return target.id
+    if isinstance(target, ast.Attribute):
+        return target.attr
+    return None
+
+
 def tool_count(tree: ast.AST) -> int:
     count = 0
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         for decorator in node.decorator_list:
-            target = decorator.func if isinstance(decorator, ast.Call) else decorator
-            if isinstance(target, ast.Attribute) and target.attr == "tool":
+            if _decorator_name(decorator) in {"tool", "business_tool"}:
                 count += 1
     return count
 
@@ -26,11 +34,22 @@ def main() -> None:
         node for node in base.body if isinstance(node, ast.FunctionDef) and node.name == "register_common_tools"
     )
     common = tool_count(registration)
-    counts = {
-        path.parent.name: tool_count(ast.parse(path.read_text(encoding="utf-8"))) + common
+    server_trees = {
+        path.parent.name: ast.parse(path.read_text(encoding="utf-8"))
         for path in sorted((root / "servers").glob("*/server.py"))
     }
+    counts = {name: tool_count(tree) + common for name, tree in server_trees.items()}
     problems = []
+    for name, tree in server_trees.items():
+        bypasses = []
+        for node in tree.body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            decorators = {_decorator_name(decorator) for decorator in node.decorator_list}
+            if "tool" in decorators:
+                bypasses.append(node.name)
+        if bypasses:
+            problems.append(f"servers/{name}/server.py: tools bypass capability metadata: {', '.join(bypasses)}")
     for filename in ("README.md", "README_en.md"):
         text = (root / filename).read_text(encoding="utf-8")
         for name, expected in counts.items():

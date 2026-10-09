@@ -13,8 +13,8 @@
 # calls still use httpx, so both HTTP stacks are present by design.
 #
 # Use:  pip install -r requirements-lock.txt
-mcp==2.2.0
-mcp-types==2.2.0
+mcp==2.3.0
+mcp-types==2.3.0
 httpx==0.28.1
 annotated-types==0.8.0
 anyio==4.15.1

@@ -9,12 +9,6 @@ updates:
       - "dependencies"
       - "auto-merge"
     open-pull-requests-limit: 10
-    ignore:
-      # Pydantic 2.13.5 requires core 2.46.5; 2.49.0 alone cannot resolve.
-      # Remove this temporary exception when a matching Pydantic upgrade
-      # requires core 2.49.0, then update both pins together.
-      - dependency-name: "pydantic-core"
-        versions: ["2.49.0"]
     groups:
       mcp-sdk:
         patterns:

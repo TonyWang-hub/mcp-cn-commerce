@@ -4,8 +4,12 @@
 # runtime dependencies (mcp, httpx) and their transitive dependencies to the
 # exact versions verified in the reference environment.
 #
-# Generated as `pip freeze` of a clean venv holding only the runtime closure
-# of mcp + httpx. Regenerate the same way after changing either pin.
+# Derived from `pip freeze` of a clean venv holding only the runtime closure
+# of mcp + httpx. Regenerate that closure after changing either pin, then
+# omit the explicit pydantic-core entry: its exact version is already fixed
+# by the pinned Pydantic release metadata. Keep this exception when freezing
+# to avoid incompatible standalone core updates, and audit the resolved
+# closure including that implied dependency.
 #
 # mcp v2 pulls a notably larger closure than v1: mcp-types (pinned to the
 # exact mcp version), opentelemetry-api (tracing is on by default), and the
@@ -32,8 +36,9 @@ jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 opentelemetry-api==1.45.0
 pycparser==3.0
+# pydantic-core is pinned exactly by the pydantic release metadata.
+# Update the parent to move core to its required compatible version.
 pydantic==2.13.5
-pydantic_core==2.46.5
 PyJWT==2.15.1
 python-multipart==0.0.32
 referencing==0.37.0

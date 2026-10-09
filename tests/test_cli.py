@@ -74,12 +74,12 @@ class TestGetSrcPath:
 
     def test_returns_path_under_servers(self):
         p = get_src_path("oceanengine")
-        assert p.name == "src"
+        assert p.name == "oceanengine"
         assert "oceanengine" in str(p)
 
     def test_all_platforms_have_server_file(self):
         for platform in SERVER_REGISTRY:
-            p = get_src_path(platform).parent / "server.py"
+            p = get_src_path(platform) / "server.py"
             assert p.is_file(), f"server.py not found for {platform}: {p}"
 
 
@@ -88,15 +88,15 @@ class TestBuildPythonpath:
 
     def test_includes_shared_dir(self):
         pp = build_pythonpath(["oceanengine"])
-        assert "shared" in pp
+        assert str(get_src_path("oceanengine").parents[1]) in pp
 
     def test_multiple_platforms(self):
         pp = build_pythonpath(["oceanengine", "jd"])
-        assert "shared" in pp
+        assert str(get_src_path("oceanengine").parents[1]) in pp
 
     def test_empty_platforms_still_includes_shared(self):
         pp = build_pythonpath([])
-        assert "shared" in pp
+        assert str(get_src_path("oceanengine").parents[1]) in pp
 
 
 # ── Config Loading Tests ──────────────────────────────────
@@ -106,8 +106,8 @@ class TestLoadConfig:
     """Tests for load_config."""
 
     def test_returns_empty_when_no_config(self):
-        config = load_config("/nonexistent/path/config.json")
-        assert config == {}
+        with pytest.raises(ValueError, match="not found"):
+            load_config("/nonexistent/path/config.json")
 
     def test_loads_valid_json(self, tmp_path):
         config_file = tmp_path / "config.json"
@@ -119,8 +119,8 @@ class TestLoadConfig:
     def test_handles_invalid_json(self, tmp_path):
         config_file = tmp_path / "bad.json"
         config_file.write_text("{invalid json}")
-        config = load_config(str(config_file))
-        assert config == {}
+        with pytest.raises(ValueError, match="Cannot read"):
+            load_config(str(config_file))
 
     def test_returns_empty_when_path_is_none(self):
         config = load_config(None)
@@ -350,9 +350,9 @@ class TestMain:
 
     def test_start_exits_without_platform(self):
         """start command requires at least one platform."""
-        parser = build_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(["start"])
+        with pytest.raises(SystemExit) as exc_info:
+            main(["start"])
+        assert exc_info.value.code == 1
 
 
 # ── Integration: show_version Tests ───────────────────────

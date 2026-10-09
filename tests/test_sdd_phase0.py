@@ -8,6 +8,9 @@ Covers Item 2 of docs/specs/sdd-items-1-5.md:
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
+import httpx
 import pytest
 
 from shared.cn_commerce_base import (
@@ -71,13 +74,15 @@ class TestRequestInputValidation:
 
     @pytest.mark.asyncio
     async def test_validation_can_be_disabled(self):
-        # With validation off, the suspicious value must pass the validation gate
-        # (it will then fail later at the network layer, which is fine — we only
-        # assert that no ValueError is raised by the validator).
         client = _DummyClient(app_key="k", app_secret="s", validate_input=False)
-        try:
-            await client._request("GET", "orders", params={"q": "1' OR '1'='1"})
-        except ValueError as exc:  # pragma: no cover - must not be a validation error
-            pytest.fail(f"validation should be disabled, got ValueError: {exc}")
-        except Exception:
-            pass  # network/HTTP errors are expected and acceptable here
+        observed = []
+
+        def respond(request):
+            observed.append(request)
+            return httpx.Response(200, json={"result": "accepted"})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+            with patch.object(client, "_ensure_client", return_value=http):
+                result = await client._request("GET", "orders", params={"q": "1' OR '1'='1"})
+        assert result == {"result": "accepted"}
+        assert observed[0].url.params["q"] == "1' OR '1'='1"

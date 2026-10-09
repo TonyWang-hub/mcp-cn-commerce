@@ -2,6 +2,35 @@
 
 mcp-cn-commerce provides MCP (Model Context Protocol) servers for 8 Chinese e-commerce platforms. All servers expose read-only tools over stdio transport.
 
+## Current capability boundary
+
+Checked against Core `6b6a7f9` on 2026-09-11. This reference is a catalogue of
+registered MCP compatibility names; registration does not establish a current
+official business contract. There are **155 registered tools**, including five
+common tools per server and explicitly unsupported entries. All SDK
+`live_verified` values remain false.
+
+Use the [current SDK operation table](sdk-integration.md#catalogue-and-evidence-status)
+for `supported`, `contract_status`, `live_verified` and each missing contract.
+SDK native parameters are not interchangeable with MCP aliases. For MCP input
+schemas, use `tools/list` from the selected installed version; the compatibility
+parameter summaries below are not substitutes for a platform contract.
+
+| Platform | Documented SDK reads | Remaining boundary |
+| --- | --- | --- |
+| Doudian | Orders list/detail; refunds list/detail | General shop info unsupported; refund detail is an SDK operation, not an added MCP tool |
+| Taobao | Orders list/increment/detail; refunds list/detail | Shop info is callable but transport-only |
+| JD | Orders list/detail; shop info; after-sale list/refund detail | SDK `get_aftersale_list/get_aftersale_refund_detail` are separate from the legacy MCP `get_after_sale_list/get_after_sale_detail`; generic refunds unsupported |
+| Pinduoduo | None | Business reads unsupported pending complete official schema |
+| Kuaishou | Orders/refunds list/detail; shop info | Pro authorization-to-shop identity proof pending |
+| Xiaohongshu | Orders/refunds list/detail | Source query/completion timestamp units unresolved; other MCP mappings are outside this SDK scope |
+| WeChat Store | Orders/refunds list/detail; shop info | Actual application permission and live cursor acceptance pending |
+| Ocean Engine | Advertiser info; account balance | SDK report operations unsupported pending contract migration; no promise for legacy campaign/ROAS tools |
+
+Youzan is an additional SDK-only platform. Product, inventory, logistics,
+reviews, marketing and billing names below do not imply that those whole data
+domains have been verified. See [release readiness](release-readiness.md).
+
 ## Table of Contents
 
 - [Common Concepts](#common-concepts)
@@ -21,47 +50,50 @@ mcp-cn-commerce provides MCP (Model Context Protocol) servers for 8 Chinese e-co
 
 ### Authentication
 
-Each platform uses environment variables for authentication. All servers require at minimum an app key (or client ID), app secret, and access token.
+The CLI reads each platform's documented environment configuration; the explicit
+SDK accepts a fixed credential snapshot supplied by its host. Required keys differ:
+Ocean Engine uses an access token, WeChat supports static or explicitly managed
+local-store mode, and other adapters have platform-specific app/signing fields.
+See [credentials and platform boundaries](platforms.md) and [SDK construction](sdk-integration.md).
 
 ### Signing Methods
 
-| Method | Platforms |
-|--------|-----------|
-| MD5 | Ocean Engine, Taobao, Pinduoduo, Xiaohongshu |
-| HMAC-MD5 | JD |
-| MD5 (sign_secret) | Kuaishou |
-| MD5 (custom) | Doudian |
-| OAuth 2.0 (no signing) | WeChat Store |
+| Platform | Current transport contract |
+| --- | --- |
+| Doudian | HMAC-SHA256 over the official ordered system fields and canonical JSON |
+| Taobao | TOP uppercase MD5, `session`, GMT+8 formatted timestamp |
+| JD | JOS uppercase MD5; POST form containing JSON string `360buy_param_json` |
+| Pinduoduo | Public uppercase MD5 and Unix-second timestamp; business schema remains blocked |
+| Kuaishou | Official SDK default lowercase MD5 with signSecret; native GET query and JSON string `param` |
+| Xiaohongshu | Lowercase MD5 of official method/system fields; common POST JSON gateway |
+| Ocean Engine | `Access-Token` header; no generic commerce MD5 signature |
+| WeChat Store | Endpoint-specific access-token requests; no generic commerce MD5 signature |
 
 ### Response Format
 
-All tools return JSON strings (via `json.dumps` with `ensure_ascii=False, indent=2`) or platform-specific dict objects. Successful responses contain the platform's data payload. Errors are returned as:
-
-```json
-{
-  "error": {
-    "code": 10001,
-    "message": "Error description"
-  }
-}
-```
+SDK calls return each adapter's validated dictionary envelope and raise exceptions
+on rejected requests. MCP responses may be JSON text, projected dictionaries or
+MCP tool errors. A Doudian error dictionary may include an empty collection;
+that is a failed query, not evidence of zero business records. Check both MCP
+error state and the tool-specific result before consuming any data.
 
 ### Pagination
 
-Most list tools support pagination with these common parameters:
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `page` | int | 1 (or 0 for Doudian) | Page number |
-| `page_size` | int | 10-20 | Items per page (max 100-200 depending on platform) |
+Pagination is operation-specific. Doudian starts at page 0; TOP/JD page-based
+queries start at 1; Kuaishou and WeChat use native cursors. TOP increment reads
+require reverse page traversal. Never turn a page number into a cursor, infer a
+missing total as zero, or treat one page as full daily coverage. Use the exact
+platform contract and maximum time window linked from the SDK table.
 
 ---
 
 ## 1. Ocean Engine (巨量引擎)
 
 **Server name:** `mcp-cn-oceanengine`
-**Base URL:** `https://ad.oceanengine.com/open_api/`
-**Sign method:** MD5
+**Base URL:** `https://ad.oceanengine.com/open_api/` for the two reviewed advertiser reads; legacy routes remain separate
+**Authentication:** `Access-Token` header
+
+Current reviewed SDK scope is advertiser info and balance. The other registered advertising tools below remain outside that verified scope; report SDK operations explicitly reject pending migration.
 
 ### Environment Variables
 
@@ -267,7 +299,7 @@ Get diagnostic analysis for a campaign (delivery issues, budget constraints, aud
 
 **Server name:** `mcp-cn-doudian`
 **Base URL:** `https://openapi-fxg.jinritemai.com/`
-**Sign method:** MD5 (custom: `MD5(app_key + sorted_json_params + app_secret)`)
+**Sign method:** HMAC-SHA256; see [Doudian contract](doudian-contract.md)
 
 ### Environment Variables
 
@@ -288,13 +320,13 @@ Get order list. Returns `dict` with keys: `total`, `page`, `page_size`, `orders`
 |-----------|------|----------|---------|-------------|
 | `start_time` | str | No | `""` | Start time, e.g. `"2024-01-01 00:00:00"` |
 | `end_time` | str | No | `""` | End time |
-| `order_status` | str | No | `""` | Status: `1`(待确认), `2`(备货中), `3`(已发货), `4`(已收货), `5`(已完成), `101`(已取消) |
+| `order_status` | str | No | `""` | Status: `1`(待支付), `105`(已支付), `2`(备货中), `101`(部分发货), `3`(已发货), `4`(取消), `5`(完成) |
 | `page` | int | No | 0 | Page number (starts from 0) |
 | `page_size` | int | No | 10 | Items per page (max 100) |
 
 #### `get_order_detail`
 
-Get single order detail with logistics, refund status, products, and buyer info. Returns `dict` with key: `order`.
+Get projected parent-order detail. Returns `dict` with key `order`; the two ID aliases must agree if both are supplied.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -315,19 +347,19 @@ Get product list. Returns `dict` with keys: `total`, `page`, `page_size`, `produ
 
 #### `get_refund_list`
 
-Get after-sale/refund list. Returns `dict` with keys: `total`, `page`, `page_size`, `refunds`.
+Get after-sale/refund list. Returns `dict` with keys: `total`, `page`, `page_size`, `refunds`. This is requested money, not completed refund money; use SDK `get_refund_detail` for actual amount and completion time. Both order and refund list tools accept `time_type=create|update`; see the current MCP `tools/list` schema.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `start_time` | str | No | `""` | Start time |
 | `end_time` | str | No | `""` | End time |
-| `refund_type` | str | No | `""` | Type: `0`(仅退款), `1`(退货退款), `2`(换货), `3`(维修) |
+| `refund_type` | str | No | `""` | Type: `0`(退货退款), `1`(已发货退款), `2`(未发货退款), `3`(换货), `6`(价保), `7`(补寄), `8`(维修) |
 | `page` | int | No | 0 | Page number (starts from 0) |
 | `page_size` | int | No | 10 | Items per page (max 100) |
 
 #### `get_shop_info`
 
-Get shop basic info (name, logo, rating, status, certification). Returns `dict` with key: `shop`.
+Explicitly unsupported: no verified general Doudian shop-info contract. Returns `supported=false`, `shop=null` and an error; no HTTP request is sent.
 
 No parameters.
 
@@ -477,7 +509,7 @@ Get brand list. Returns `dict` with keys: `total`, `page`, `page_size`, `brands`
 
 **Server name:** `mcp-cn-jd`
 **Base URL:** `https://api.jd.com/routerjson`
-**Sign method:** HMAC-MD5
+**Sign method:** uppercase JOS MD5 with signed POST form and `360buy_param_json`; see [JD contract](jd-contract.md)
 
 ### Environment Variables
 
@@ -1023,7 +1055,7 @@ List coupon activities.
 ## 7. Xiaohongshu (小红书)
 
 **Server name:** `mcp-cn-xiaohongshu`
-**Base URL:** `https://open.xiaohongshu.com`
+**Base URL:** `https://ark.xiaohongshu.com/ark/open_api/v3/common_controller`
 **Sign method:** MD5
 
 ### Environment Variables
@@ -1288,79 +1320,37 @@ List available product categories.
 
 | Exception | Description |
 |-----------|-------------|
-| `CommerceAPIError` | Platform API returned an error response. Has `code` (int) and `msg` (str) attributes. |
+| `CommerceAPIError` | Platform API returned an error response. Carries a platform error code and message; callers must not expose raw diagnostics to other tenants. |
 | `ConfigValidationError` | Required environment variables are missing. Has `platform` and `missing_vars` attributes. |
 | `DouDianAPIError` | Doudian-specific error. Has `code`, `msg`, `sub_code`, `sub_msg` attributes. |
 
-### Error Response Formats
+### Handling rejected reads
 
-**Ocean Engine, JD, Taobao, Pinduoduo, Kuaishou, Xiaohongshu:**
-
-Tools return a JSON string:
-```json
-{"error": {"code": 10001, "message": "Invalid access token"}}
-```
-
-**Doudian:**
-
-Tools return a dict:
-```json
-{"error": "[10001] Invalid access token", "code": 10001, "orders": []}
-```
-
-The empty list key matches the tool's primary data key (e.g., `orders`, `products`, `refunds`).
-
-**WeChat Store:**
-
-WeChat errors use `errcode` (0 = success):
-```json
-{"errcode": 40001, "errmsg": "invalid credential"}
-```
-
-### Common Error Codes by Platform
-
-| Platform | Code | Meaning |
-|----------|------|---------|
-| All | -1 | Network/JSON parse error |
-| Doudian | 10000 | Success |
-| Doudian | != 10000 | API error (check `msg` and `sub_code`) |
-| WeChat | 0 | Success |
-| WeChat | 40001 | Invalid credential |
-| WeChat | 40002 | Invalid grant_type |
-| WeChat | 42001 | Token expired |
-| WeChat | 45009 | API call limit reached |
-| Taobao/PDD/XHS | 0 or absent | Success |
-| Taobao/PDD/XHS | Present in `error_response` | API error |
-
-### Handling Errors in Code
-
-```python
-# For tools returning JSON strings (Ocean Engine, JD, Taobao, PDD, KS, XHS)
-result = json.loads(tool_output)
-if "error" in result:
-    print(f"Error {result['error']['code']}: {result['error']['message']}")
-
-# For Doudian tools returning dicts
-if "error" in result:
-    print(f"Error {result['code']}: {result['error']}")
-
-# For WeChat Store
-if "errcode" in result and result["errcode"] != 0:
-    print(f"Error {result['errcode']}: {result['errmsg']}")
-```
+Do not use one global `code == 0` or absent-error-field rule across platforms.
+Business success depends on the endpoint and its nested envelope. SDK callers
+must handle raised exceptions; MCP callers must also inspect the MCP error state
+and platform-specific `error`/unsupported result. Never transform a failure into
+successful empty data or include a raw gateway diagnostic in a customer report.
+The [SDK guide](sdk-integration.md) and each linked platform contract define the
+current request/response boundary; host applications own tenant authorization and
+output privacy.
 
 ---
 
 ## Tool Count Summary
 
-| Platform | Server Name | Tool Count |
+| Platform | Server Name | Tool Count (including 5 common tools) |
 |----------|-------------|------------|
-| Ocean Engine | mcp-cn-oceanengine | 18 |
-| Doudian | mcp-cn-doudian | 22 |
-| JD | mcp-cn-jd | 14 |
-| Taobao | mcp-cn-taobao | 12 |
-| Pinduoduo | mcp-cn-pinduoduo | 13 |
-| Kuaishou | mcp-cn-kuaishou | 12 |
-| Xiaohongshu | mcp-cn-xiaohongshu | 13 |
-| WeChat Store | mcp-cn-weixin-store | 10 |
-| **Total** | | **114** |
+| Ocean Engine | mcp-cn-oceanengine | 23 |
+| Doudian | mcp-cn-doudian | 25 |
+| JD | mcp-cn-jd | 20 |
+| Taobao | mcp-cn-taobao | 18 |
+| Pinduoduo | mcp-cn-pinduoduo | 18 |
+| Kuaishou | mcp-cn-kuaishou | 17 |
+| Xiaohongshu | mcp-cn-xiaohongshu | 18 |
+| WeChat Store | mcp-cn-weixin-store | 16 |
+| **Total** | | **155** |
+
+The five common registrations are `get_metrics`, `get_traces`, `get_alerts`,
+`export_data` and `build_daily_report`. These counts describe registration, not
+merchant API acceptance or SDK operation count.

@@ -322,8 +322,8 @@ class TestCommerceMCPBase:
     async def test_paginate_max_pages(self):
         client = CommerceMCPBase()
         mock_fetch = AsyncMock(return_value={"result": [{"id": 1}]})
-        result = await client._paginate(mock_fetch, page_size=1, max_pages=3)
-        assert len(result) == 3
+        with pytest.raises(RuntimeError, match="result may be incomplete"):
+            await client._paginate(mock_fetch, page_size=1, max_pages=3)
         assert mock_fetch.call_count == 3
 
     def test_init_has_metrics_collector(self):
@@ -994,7 +994,7 @@ class TestSensitiveDataFilter:
         )
         result = f.filter(record)
         assert result is True
-        assert record.msg == 42
+        assert record.getMessage() == "42"
 
 
 # ── validate_platform_name Tests ───────────────────────────
@@ -1046,8 +1046,11 @@ class TestValidateApiParam:
     def test_valid_param(self):
         assert validate_api_param("page", "1") == "1"
 
-    def test_normal_string(self):
-        assert validate_api_param("name", "hello world") == "hello world"
+    @pytest.mark.parametrize(
+        "value", ["hello world", "SELECT coffee", "DROP shoulder shirt", "CREATE collection", "商品 -- 新款"]
+    )
+    def test_normal_string(self, value):
+        assert validate_api_param("name", value) == value
 
     def test_non_string_passthrough(self):
         assert validate_api_param("count", 42) == 42
@@ -3934,6 +3937,19 @@ class TestRequestTracer:
         child = tracer.start_span("child", parent=parent)
         assert child.parent_id == parent.span_id
         assert child.trace_id == parent.trace_id
+
+    def test_completed_trace_retention_is_bounded(self):
+        tracer = RequestTracer(max_spans=3)
+        roots = []
+        for i in range(5):
+            span = tracer.start_span(f"request-{i}")
+            roots.append(span)
+            tracer.finish_span(span)
+        assert [span.name for span in tracer.get_spans()] == ["request-2", "request-3", "request-4"]
+        assert tracer.get_active_spans() == []
+        assert tracer.get_trace_summary()["trace_id"] == roots[-1].trace_id
+        assert tracer.get_trace_summary()["span_count"] == 1
+        assert tracer.get_trace_summary(roots[-2].trace_id)["root_span"] == "request-3"
 
     def test_trace_summary(self):
         tracer = RequestTracer(service_name="test")

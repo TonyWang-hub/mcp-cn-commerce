@@ -9,51 +9,19 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import asynccontextmanager
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
+from servers.taobao.client import TaobaoMCP
+from servers.taobao.schema import ORDER_DETAIL_FIELDS, ORDER_FIELDS, REFUND_DETAIL_FIELDS, REFUND_FIELDS
 from shared.cn_commerce_base import (
-    CommerceAPIError,
-    CommerceMCPBase,
     ConfigValidationError,
-    SignMethod,
     register_common_tools,
 )
+from shared.platform_clients import mcp_capability_tool
 
 # ── Taobao client ───────────────────────────────────────────────────────────────
-
-
-class TaobaoMCP(CommerceMCPBase):
-    """Taobao Open Platform (TOP) client.
-
-    Signs with MD5 (not HMAC-MD5). All parameters (system + business) go
-    together as query-string params in a POST to the single router endpoint.
-    """
-
-    BASE_URL = "https://eco.taobao.com/router/rest"
-    sign_method = SignMethod.MD5
-
-    async def _call(self, api_method: str, biz_params: dict | None = None) -> dict:
-        """Make a Taobao API call.
-
-        Merges system params (method, format, v) with business params and
-        sends everything through _request as query-string parameters.
-
-        Returns the API response dict, or an error_response dict on failure.
-        """
-        try:
-            params: dict[str, str] = {
-                "method": api_method,
-                "format": "json",
-                "v": "2.0",
-            }
-            if biz_params:
-                params.update(biz_params)
-            return await self._request("POST", "", params=params)
-        except CommerceAPIError as e:
-            return {"error_response": {"code": e.code, "msg": e.msg}}
-        except Exception as e:
-            return {"error_response": {"code": -1, "msg": str(e)}}
 
 
 # ── Instantiate client from env ────────────────────────────────────────────────
@@ -77,7 +45,19 @@ taobao = _create_taobao_client()
 
 # ── MCP server ─────────────────────────────────────────────────────────────────
 
-mcp = FastMCP("mcp-cn-taobao")
+
+@asynccontextmanager
+async def _lifespan(_server):
+    try:
+        yield {}
+    finally:
+        client = taobao
+        if client is not None:
+            await client.close()
+
+
+mcp = MCPServer("mcp-cn-taobao", lifespan=_lifespan)
+business_tool = mcp_capability_tool(mcp.tool, "taobao")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -85,7 +65,7 @@ mcp = FastMCP("mcp-cn-taobao")
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_order_list(
     start_time: str,
     end_time: str,
@@ -93,7 +73,7 @@ async def get_order_list(
     page: int = 1,
     page_size: int = 20,
 ) -> str:
-    """Query order list by time range and optional status.
+    """Query orders created within the last three months; one page is not a complete report.
 
     Args:
         start_time: Order start time, e.g. "2024-01-01 00:00:00"
@@ -110,6 +90,7 @@ async def get_order_list(
     """
     biz_params: dict[str, str] = {
         "start_created": start_time,
+        "fields": ORDER_FIELDS,
         "end_created": end_time,
         "page_no": str(page),
         "page_size": str(page_size),
@@ -121,19 +102,19 @@ async def get_order_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_order_detail(tid: str) -> str:
     """Get full details of a single order.
 
     Args:
         tid: The Taobao trade ID (e.g. "123456789012345678").
     """
-    biz_params = {"tid": tid}
+    biz_params = {"tid": tid, "fields": ORDER_DETAIL_FIELDS}
     result = await taobao._call("taobao.trade.fullinfo.get", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_increment_orders(
     start_time: str,
     end_time: str,
@@ -142,16 +123,19 @@ async def get_increment_orders(
 ) -> str:
     """Query incrementally modified orders by time range.
 
-    Useful for syncing order changes (status updates, modifications).
+    Only trades within three months are visible. Each window must be at most one
+    day; the platform recommends 30 minutes. Results are modified-time descending;
+    collect from the last page backwards to reduce missed changes.
 
     Args:
         start_time: Modification start time, e.g. "2024-01-01 00:00:00"
-        end_time: Modification end time, e.g. "2024-01-31 23:59:59"
+        end_time: Modification end time, e.g. "2024-01-01 23:59:59"
         page: Page number, starting from 1.
         page_size: Number of orders per page (max 100).
     """
     biz_params: dict[str, str] = {
         "start_modified": start_time,
+        "fields": ORDER_FIELDS,
         "end_modified": end_time,
         "page_no": str(page),
         "page_size": str(page_size),
@@ -166,7 +150,7 @@ async def get_increment_orders(
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_product_list(
     page: int = 1,
     page_size: int = 20,
@@ -191,7 +175,7 @@ async def get_product_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_product_detail(num_iid: str) -> str:
     """Get full details of a single product by item ID.
 
@@ -208,7 +192,7 @@ async def get_product_detail(num_iid: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_refund_list(
     start_time: str,
     end_time: str,
@@ -240,18 +224,19 @@ async def get_refund_list(
     if status:
         biz_params["status"] = status
 
+    biz_params["fields"] = REFUND_FIELDS
     result = await taobao._call("taobao.refunds.receive.get", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_refund_detail(refund_id: str) -> str:
     """Get full details of a single refund/return record.
 
     Args:
-        refund_id: The refund record ID (e.g. "RF12345678901").
+        refund_id: The refund record ID (e.g. "12345678901").
     """
-    biz_params = {"refund_id": refund_id}
+    biz_params = {"refund_id": refund_id, "fields": REFUND_DETAIL_FIELDS}
     result = await taobao._call("taobao.refund.get", biz_params)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -261,7 +246,7 @@ async def get_refund_detail(refund_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_logistics_tracking(tid: str) -> str:
     """Get logistics tracking information for an order.
 
@@ -278,7 +263,7 @@ async def get_logistics_tracking(tid: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_review_list(
     num_iid: str,
     page: int = 1,
@@ -306,7 +291,7 @@ async def get_review_list(
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_shop_info(nick: str = "") -> str:
     """Get shop basic information.
 
@@ -321,7 +306,7 @@ async def get_shop_info(nick: str = "") -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_seller_info() -> str:
     """Get authenticated seller (user) information including seller credit and profile."""
     result = await taobao._call("taobao.user.seller.get", {})
@@ -333,7 +318,7 @@ async def get_seller_info() -> str:
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def list_promotions(
     status: str = "",
     page: int = 1,
@@ -364,7 +349,7 @@ async def list_promotions(
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def list_categories(parent_cid: str = "0") -> str:
     """List product categories under a given parent category.
 

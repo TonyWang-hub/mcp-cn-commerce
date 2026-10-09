@@ -5,7 +5,7 @@ Run mcp-cn-commerce in Docker for consistent, isolated environments — no local
 ## Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) 20.10+
-- [Docker Compose](https://docs.docker.com/compose/) v2 (included with Docker Desktop)
+- [Docker Compose](https://docs.docker.com/compose/) 2.24+ (the Compose file uses optional env_file)
 
 ## Quick Start
 
@@ -18,8 +18,9 @@ docker build -t mcp-cn-commerce .
 ### Run Tests
 
 ```bash
-# All tests
-docker run --rm mcp-cn-commerce make test
+# Build the development image with test dependencies
+docker build --target development -t mcp-cn-commerce-dev .
+docker run --rm mcp-cn-commerce-dev make test
 
 # With coverage report (output in ./htmlcov/)
 docker compose up test-cov
@@ -90,10 +91,10 @@ docker compose run --rm shell
 
 ```bash
 # Start Ocean Engine server
-docker compose run --rm -i oceanengine
+docker compose run --rm -T oceanengine
 
 # Start Douyin Shop server
-docker compose run --rm -i doudian
+docker compose run --rm -T doudian
 ```
 
 ## MCP Client Configuration
@@ -128,7 +129,7 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
   "mcpServers": {
     "oceanengine": {
       "command": "docker",
-      "args": ["compose", "run", "--rm", "-i", "oceanengine"]
+      "args": ["compose", "run", "--rm", "-T", "oceanengine"]
     }
   }
 }
@@ -147,7 +148,7 @@ docker compose run --rm shell
 # Inside the container:
 make test                    # Run tests
 make lint                    # Check code style
-python -c "import mcp_oceanengine"  # Verify imports
+python -c "import servers.oceanengine.server"  # Verify imports
 ```
 
 ### Rebuild After Changes
@@ -186,22 +187,12 @@ All platform credentials are passed via environment variables. See [`.env.exampl
 
 ### Build fails with network errors
 
-```bash
-# Use a Chinese mirror for pip (faster in China)
-docker build --build-arg PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple -t mcp-cn-commerce .
-```
+Builds need access to the Python package registry, and the development target also installs make from the image's OS package registry. Diagnose that network access in your environment; do not remove the dependency constraints to mask a download failure.
 
 ### Tests fail inside container but pass locally
 
-Ensure PYTHONPATH is set correctly:
+Build the development target and run its tests. The project is a single installed package; do not add obsolete servers/<platform>/src directories to PYTHONPATH. Check that the image was rebuilt after source changes.
 
-```bash
-docker run --rm -e PYTHONPATH=servers/oceanengine/src:servers/doudian/src:servers/jd/src:servers/taobao/src:servers/pinduoduo/src:servers/kuaishou/src:servers/xiaohongshu/src:servers/weixin-store/src mcp-cn-commerce make test
-```
+### MCP connection fails
 
-### Permission denied on volumes
-
-```bash
-# Fix file ownership
-docker compose run --rm -u root shell chown -R $(id -u):$(id -g) /app
-```
+Use one platform per stdio connection, `docker run -i` without `-t`, or `docker compose run -T`. A detached `docker compose up` does not provide an MCP routing gateway. Missing merchant credentials should permit discovery but cause a clear error on a business query; discovery alone does not prove authorization.

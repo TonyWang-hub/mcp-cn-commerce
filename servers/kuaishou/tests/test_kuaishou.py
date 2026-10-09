@@ -55,32 +55,10 @@ def mock_call():
 @pytest.fixture
 def order_list_payload() -> dict:
     return {
-        "code": 0,
-        "msg": "success",
+        "result": 1,
         "data": {
-            "order_list": [
-                {
-                    "order_id": "KS202401150000001",
-                    "order_status": 1,
-                    "order_amount": "99.00",
-                    "goods_count": 2,
-                    "created_at": "2024-01-15 10:30:00",
-                    "receiver_name": "张三",
-                    "receiver_phone": "138****8000",
-                    "receiver_address": "北京市朝阳区XX路1号",
-                },
-                {
-                    "order_id": "KS202401160000001",
-                    "order_status": 3,
-                    "order_amount": "199.00",
-                    "goods_count": 1,
-                    "created_at": "2024-01-16 14:20:00",
-                    "receiver_name": "李四",
-                    "receiver_phone": "139****9000",
-                    "receiver_address": "上海市浦东新区YY路2号",
-                },
-            ],
-            "total_count": 2,
+            "orderList": [{"orderBaseInfo": {"oid": 123, "status": 30}}, {"orderBaseInfo": {"oid": 456, "status": 70}}],
+            "cursor": "nomore",
         },
     }
 
@@ -88,31 +66,10 @@ def order_list_payload() -> dict:
 @pytest.fixture
 def order_detail_payload() -> dict:
     return {
-        "code": 0,
-        "msg": "success",
+        "result": 1,
         "data": {
-            "order_info": {
-                "order_id": "KS202401150000001",
-                "order_status": 1,
-                "order_amount": "99.00",
-                "discount_amount": "10.00",
-                "shipping_fee": "0.00",
-                "pay_amount": "89.00",
-                "created_at": "2024-01-15 10:30:00",
-                "paid_at": "2024-01-15 10:32:00",
-                "receiver_name": "张三",
-                "receiver_phone": "13800138000",
-                "receiver_address": "北京市朝阳区XX路1号",
-                "items": [
-                    {
-                        "item_id": "KS987654321",
-                        "item_name": "无线蓝牙耳机 Pro",
-                        "item_price": "99.00",
-                        "item_count": 1,
-                        "item_thumb": "https://img.kwaixiaodian.com/thumb1.jpg",
-                    },
-                ],
-            },
+            "orderBaseInfo": {"oid": 202401150000001, "status": 30, "totalFee": 1200},
+            "orderItemInfo": {"num": 1},
         },
     }
 
@@ -192,30 +149,13 @@ def product_detail_payload() -> dict:
 @pytest.fixture
 def refund_list_payload() -> dict:
     return {
-        "code": 0,
-        "msg": "success",
+        "result": 1,
         "data": {
-            "refund_list": [
-                {
-                    "refund_id": "RF123456789",
-                    "order_id": "KS202401150000001",
-                    "refund_status": 1,
-                    "refund_type": "退货退款",
-                    "refund_amount": "99.00",
-                    "apply_time": "2024-01-20 10:00:00",
-                    "reason": "商品质量问题",
-                },
-                {
-                    "refund_id": "RF123456790",
-                    "order_id": "KS202401160000001",
-                    "refund_status": 3,
-                    "refund_type": "仅退款",
-                    "refund_amount": "199.00",
-                    "apply_time": "2024-01-25 15:30:00",
-                    "reason": "未收到货",
-                },
+            "refundOrderInfoList": [
+                {"refundId": 123456789, "oid": 202401150000001, "status": 60, "handlingWay": 10, "refundFee": 100}
             ],
-            "total_count": 2,
+            "pcursor": "nomore",
+            "totalSize": 1,
         },
     }
 
@@ -223,21 +163,8 @@ def refund_list_payload() -> dict:
 @pytest.fixture
 def refund_detail_payload() -> dict:
     return {
-        "code": 0,
-        "msg": "success",
-        "data": {
-            "refund_info": {
-                "refund_id": "RF123456789",
-                "order_id": "KS202401150000001",
-                "refund_status": 1,
-                "refund_type": "退货退款",
-                "refund_amount": "99.00",
-                "apply_time": "2024-01-20 10:00:00",
-                "reason": "商品质量问题",
-                "description": "收到商品后发现有划痕，要求退货退款",
-                "evidence": ["https://img.kwaixiaodian.com/evidence1.jpg"],
-            },
-        },
+        "result": 1,
+        "data": {"refundId": 123456789, "oid": 202401150000001, "status": 60, "handlingWay": 10, "refundFee": 100},
     }
 
 
@@ -251,7 +178,7 @@ def logistics_tracking_payload() -> dict:
         "msg": "success",
         "data": {
             "logistics_info": {
-                "order_id": "KS202401150000001",
+                "order_id": "202401150000001",
                 "logistics_no": "KS0001234567890",
                 "company": "中通快递",
                 "status": "已签收",
@@ -322,21 +249,7 @@ def review_list_payload() -> dict:
 
 @pytest.fixture
 def shop_info_payload() -> dict:
-    return {
-        "code": 0,
-        "msg": "success",
-        "data": {
-            "shop_info": {
-                "shop_id": "12345",
-                "shop_name": "数码旗舰店",
-                "shop_type": "旗舰店",
-                "shop_status": 1,
-                "shop_logo": "https://img.kwaixiaodian.com/logo.png",
-                "shop_desc": "专注数码产品，正品保障",
-                "created_at": "2020-01-01",
-            },
-        },
-    }
+    return {"result": 1, "data": {"shopName": "示例店铺", "shopType": 1}}
 
 
 # ── Fixtures: Marketing ──────────────────────────────────────────────────────
@@ -355,7 +268,7 @@ def promotion_list_payload() -> dict:
                     "promotion_type": "满减",
                     "status": 1,
                     "start_time": "2024-01-01 00:00:00",
-                    "end_time": "2024-01-31 23:59:59",
+                    "end_time": "2024-01-01 23:59:59",
                     "description": "满199减30，满399减60",
                 },
                 {
@@ -392,7 +305,7 @@ def coupon_list_payload() -> dict:
                     "used_quantity": 120,
                     "status": 2,
                     "start_time": "2024-01-01 00:00:00",
-                    "end_time": "2024-01-31 23:59:59",
+                    "end_time": "2024-01-01 23:59:59",
                 },
                 {
                     "coupon_id": "CP00000002",
@@ -406,7 +319,7 @@ def coupon_list_payload() -> dict:
                     "used_quantity": 85,
                     "status": 2,
                     "start_time": "2024-01-01 00:00:00",
-                    "end_time": "2024-01-31 23:59:59",
+                    "end_time": "2024-01-01 23:59:59",
                 },
             ],
             "total_count": 2,
@@ -421,60 +334,36 @@ def coupon_list_payload() -> dict:
 
 @pytest.mark.asyncio
 async def test_get_order_list_returns_orders_with_correct_fields(mock_call, order_list_payload):
-    """get_order_list should return a list of orders with expected fields."""
     mock_call.return_value = order_list_payload
-
-    result_json = await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-    )
-    result = json.loads(result_json)
-
-    assert result["code"] == 0
-    orders = result["data"]["order_list"]
-    assert len(orders) == 2
-    assert result["data"]["total_count"] == 2
-
-    for order in orders:
-        assert "order_id" in order
-        assert "order_status" in order
-        assert "order_amount" in order
-        assert "created_at" in order
-
-    mock_call.assert_called_once_with(
-        "/open/api/order/list",
-        {"start_time": "2024-01-01 00:00:00", "end_time": "2024-01-31 23:59:59", "page": "1", "page_size": "20"},
-    )
+    result = json.loads(await get_order_list("2024-01-01 00:00:00", "2024-01-01 23:59:59"))
+    assert [order["orderBaseInfo"]["oid"] for order in result["data"]["orderList"]] == [123, 456]
+    assert result["data"]["cursor"] == "nomore"
+    method, params = mock_call.call_args[0]
+    assert method == "open.order.cursor.list"
+    assert params == {
+        "beginTime": 1704038400000,
+        "endTime": 1704124799000,
+        "orderViewStatus": 1,
+        "pageSize": 20,
+        "cursor": "",
+        "queryType": 1,
+        "sort": 1,
+    }
 
 
 @pytest.mark.asyncio
 async def test_get_order_list_with_status_filter(mock_call, order_list_payload):
-    """get_order_list should include order_status in params when provided."""
     mock_call.return_value = order_list_payload
-
-    await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-        order_status="3",
-    )
-
-    _, params = mock_call.call_args[0]
-    assert params["order_status"] == "3"
+    await get_order_list("2024-01-01 00:00:00", "2024-01-01 23:59:59", order_status="3")
+    assert mock_call.call_args[0][1]["orderViewStatus"] == 3
 
 
 @pytest.mark.asyncio
 async def test_get_order_list_without_status_omits_field(mock_call, order_list_payload):
-    """get_order_list should NOT include order_status when empty."""
     mock_call.return_value = order_list_payload
-
-    await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-        order_status="",
-    )
-
-    _, params = mock_call.call_args[0]
-    assert "order_status" not in params
+    await get_order_list("2024-01-01 00:00:00", "2024-01-01 23:59:59")
+    assert mock_call.call_args[0][1]["orderViewStatus"] == 1
+    assert "order_status" not in mock_call.call_args[0][1]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -484,28 +373,10 @@ async def test_get_order_list_without_status_omits_field(mock_call, order_list_p
 
 @pytest.mark.asyncio
 async def test_get_order_detail_returns_single_order_with_all_fields(mock_call, order_detail_payload):
-    """get_order_detail should return a single order with full details."""
     mock_call.return_value = order_detail_payload
-
-    result_json = await get_order_detail(order_id="KS202401150000001")
-    result = json.loads(result_json)
-
-    details = result["data"]["order_info"]
-    assert details["order_id"] == "KS202401150000001"
-    assert details["order_status"] == 1
-    assert "order_amount" in details
-    assert "discount_amount" in details
-    assert "shipping_fee" in details
-    assert "pay_amount" in details
-    assert "receiver_name" in details
-    assert "items" in details
-    assert len(details["items"]) == 1
-    assert details["items"][0]["item_name"] == "无线蓝牙耳机 Pro"
-
-    mock_call.assert_called_once_with(
-        "/open/api/order/detail",
-        {"order_id": "KS202401150000001"},
-    )
+    result = json.loads(await get_order_detail("202401150000001"))
+    assert result["data"]["orderBaseInfo"]["oid"] == 202401150000001
+    mock_call.assert_awaited_once_with("open.order.detail", {"oid": 202401150000001})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -576,30 +447,22 @@ async def test_get_product_detail_returns_full_product_info(mock_call, product_d
 
 @pytest.mark.asyncio
 async def test_get_refund_list_returns_refunds_with_expected_fields(mock_call, refund_list_payload):
-    """get_refund_list should return refund records with correct fields."""
     mock_call.return_value = refund_list_payload
-
-    result_json = await get_refund_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-    )
-    result = json.loads(result_json)
-
-    refunds = result["data"]["refund_list"]
-    assert len(refunds) == 2
-
-    for r in refunds:
-        assert "refund_id" in r
-        assert "order_id" in r
-        assert "refund_status" in r
-        assert "refund_type" in r
-        assert "refund_amount" in r
-        assert "reason" in r
-
-    mock_call.assert_called_once_with(
-        "/open/api/refund/list",
-        {"start_time": "2024-01-01 00:00:00", "end_time": "2024-01-31 23:59:59", "page": "1", "page_size": "20"},
-    )
+    result = json.loads(await get_refund_list("2024-01-01 00:00:00", "2024-01-01 23:59:59"))
+    assert result["data"]["refundOrderInfoList"][0]["refundId"] == 123456789
+    assert result["data"]["pcursor"] == "nomore"
+    method, params = mock_call.call_args[0]
+    assert method == "open.seller.order.refund.pcursor.list"
+    assert params == {
+        "beginTime": 1704038400000,
+        "endTime": 1704124799000,
+        "type": 9,
+        "pageSize": 20,
+        "currentPage": 1,
+        "pcursor": "",
+        "queryType": 1,
+        "sort": 1,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -609,26 +472,10 @@ async def test_get_refund_list_returns_refunds_with_expected_fields(mock_call, r
 
 @pytest.mark.asyncio
 async def test_get_refund_detail_returns_full_refund_record(mock_call, refund_detail_payload):
-    """get_refund_detail should return a single refund record with full details."""
     mock_call.return_value = refund_detail_payload
-
-    result_json = await get_refund_detail(refund_id="RF123456789")
-    result = json.loads(result_json)
-
-    detail = result["data"]["refund_info"]
-    assert detail["refund_id"] == "RF123456789"
-    assert detail["order_id"] == "KS202401150000001"
-    assert detail["refund_status"] == 1
-    assert "refund_type" in detail
-    assert "refund_amount" in detail
-    assert "reason" in detail
-    assert "description" in detail
-    assert "evidence" in detail
-
-    mock_call.assert_called_once_with(
-        "/open/api/refund/detail",
-        {"refund_id": "RF123456789"},
-    )
+    result = json.loads(await get_refund_detail("123456789"))
+    assert result["data"]["refundId"] == 123456789
+    mock_call.assert_awaited_once_with("open.seller.order.refund.detail", {"refundId": 123456789})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -641,11 +488,11 @@ async def test_get_logistics_tracking_returns_tracking_nodes(mock_call, logistic
     """get_logistics_tracking should return tracking with ordered nodes."""
     mock_call.return_value = logistics_tracking_payload
 
-    result_json = await get_logistics_tracking(order_id="KS202401150000001")
+    result_json = await get_logistics_tracking(order_id="202401150000001")
     result = json.loads(result_json)
 
     logistics = result["data"]["logistics_info"]
-    assert logistics["order_id"] == "KS202401150000001"
+    assert logistics["order_id"] == "202401150000001"
     assert logistics["logistics_no"] == "KS0001234567890"
     assert logistics["company"] == "中通快递"
     assert "status" in logistics
@@ -655,7 +502,7 @@ async def test_get_logistics_tracking_returns_tracking_nodes(mock_call, logistic
 
     mock_call.assert_called_once_with(
         "/open/api/logistics/track",
-        {"order_id": "KS202401150000001"},
+        {"order_id": "202401150000001"},
     )
 
 
@@ -721,22 +568,11 @@ async def test_get_review_list_returns_reviews_with_expected_fields(mock_call, r
 
 @pytest.mark.asyncio
 async def test_get_shop_info_returns_shop_details(mock_call, shop_info_payload):
-    """get_shop_info should return shop details."""
     mock_call.return_value = shop_info_payload
-
-    result_json = await get_shop_info()
-    result = json.loads(result_json)
-
-    shop = result["data"]["shop_info"]
-    assert shop["shop_id"] == "12345"
-    assert shop["shop_name"] == "数码旗舰店"
-    assert shop["shop_type"] == "旗舰店"
-    assert "shop_status" in shop
-    assert "shop_logo" in shop
-    assert "shop_desc" in shop
-    assert "created_at" in shop
-
-    mock_call.assert_called_once_with("/open/api/shop/info")
+    result = json.loads(await get_shop_info())
+    assert result["data"]["shopName"] == "示例店铺"
+    assert "shopId" not in result["data"]
+    mock_call.assert_awaited_once_with("open.shop.info.get", {})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -827,7 +663,7 @@ async def test_missing_order_id_returned_in_result(mock_call):
     }
     mock_call.return_value = error_response
 
-    result_json = await get_order_detail(order_id="KS9999999999999")
+    result_json = await get_order_detail(order_id="9999999999999")
     result = json.loads(result_json)
 
     assert result["code"] == 10001
@@ -842,7 +678,7 @@ async def test_api_error_propagates(mock_call):
     with pytest.raises(CommerceAPIError) as exc_info:
         await get_order_list(
             start_time="2024-01-01 00:00:00",
-            end_time="2024-01-31 23:59:59",
+            end_time="2024-01-01 23:59:59",
         )
 
     assert exc_info.value.code == 40001
@@ -864,7 +700,7 @@ async def test_refund_api_error_propagates(mock_call):
     mock_call.side_effect = CommerceAPIError(code=50001, msg="Refund record not found")
 
     with pytest.raises(CommerceAPIError) as exc_info:
-        await get_refund_detail(refund_id="RF99999999")
+        await get_refund_detail(refund_id="99999999")
 
     assert exc_info.value.code == 50001
     assert "Refund record not found" in exc_info.value.msg
@@ -889,57 +725,27 @@ async def test_coupon_api_error_propagates(mock_call):
 
 @pytest.mark.asyncio
 async def test_pagination_default_page_and_size(mock_call, order_list_payload):
-    """Default page=1, page_size=20 should be sent as strings."""
     mock_call.return_value = order_list_payload
-
-    await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-    )
-
-    _, params = mock_call.call_args[0]
-    assert params["page"] == "1"
-    assert params["page_size"] == "20"
+    await get_order_list("2024-01-01 00:00:00", "2024-01-01 23:59:59")
+    params = mock_call.call_args[0][1]
+    assert params["cursor"] == "" and params["pageSize"] == 20
+    assert "page" not in params
 
 
 @pytest.mark.asyncio
 async def test_pagination_custom_page(mock_call, order_list_payload):
-    """Custom page and page_size values should be passed correctly."""
     mock_call.return_value = order_list_payload
-
-    await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
-        page=3,
-        page_size=50,
-    )
-
-    _, params = mock_call.call_args[0]
-    assert params["page"] == "3"
-    assert params["page_size"] == "50"
+    await get_order_list("2024-01-01 00:00:00", "2024-01-01 23:59:59", page=3, page_size=50, cursor="last-cursor")
+    params = mock_call.call_args[0][1]
+    assert params["cursor"] == "last-cursor" and params["pageSize"] == 50
+    assert "page" not in params
 
 
 @pytest.mark.asyncio
 async def test_pagination_empty_result_set(mock_call):
-    """An empty order list should be handled gracefully."""
-    empty_response = {
-        "code": 0,
-        "msg": "success",
-        "data": {
-            "order_list": [],
-            "total_count": 0,
-        },
-    }
-    mock_call.return_value = empty_response
-
-    result_json = await get_order_list(
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-01-01 00:00:01",
-    )
-    result = json.loads(result_json)
-
-    assert result["data"]["total_count"] == 0
-    assert result["data"]["order_list"] == []
+    mock_call.return_value = {"result": 1, "data": {"orderList": [], "cursor": "nomore"}}
+    result = json.loads(await get_order_list("2024-01-01 00:00:00", "2024-01-01 00:00:01"))
+    assert result["data"] == {"orderList": [], "cursor": "nomore"}
 
 
 @pytest.mark.asyncio
@@ -991,7 +797,7 @@ async def test_output_is_valid_json_string(mock_call, order_list_payload):
 
     result = await get_order_list(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
+        end_time="2024-01-01 23:59:59",
     )
 
     assert isinstance(result, str)
@@ -1006,7 +812,7 @@ async def test_refund_output_is_valid_json_string(mock_call, refund_list_payload
 
     result = await get_refund_list(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
+        end_time="2024-01-01 23:59:59",
     )
 
     assert isinstance(result, str)
@@ -1043,14 +849,9 @@ async def test_coupon_output_is_valid_json_string(mock_call, coupon_list_payload
 
 @pytest.mark.asyncio
 async def test_call_passthrough_with_minimal_params(mock_call):
-    """Verify _call receives the expected API path and params."""
-    mock_call.return_value = _mock_response({"ok": True})
-
-    await get_order_detail(order_id="KS202401150000001")
-
-    path, params = mock_call.call_args[0]
-    assert path == "/open/api/order/detail"
-    assert params == {"order_id": "KS202401150000001"}
+    mock_call.return_value = {"result": 1, "data": {"orderBaseInfo": {"oid": 123}}}
+    await get_order_detail("123")
+    mock_call.assert_awaited_once_with("open.order.detail", {"oid": 123})
 
 
 @pytest.mark.asyncio

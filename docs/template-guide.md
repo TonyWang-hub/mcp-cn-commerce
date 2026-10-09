@@ -1,74 +1,18 @@
 # 工作流模板接入指南
 
-## 快速开始
+模板由确定的数据处理代码供数，模型负责说明和建议。业务求和、日期归属、去重与完整性不能交给提示词猜测。
 
-### 1. 安装 mcp-cn-commerce
-
-```bash
-pip install mcp-cn-commerce
-```
-
-### 2. 配置 API 凭证
-
-在项目根目录创建 `.env` 文件：
-
-```env
-# 抖店
-DOUDIAN_APP_KEY=your_app_key
-DOUDIAN_APP_SECRET=your_app_secret
-DOUDIAN_ACCESS_TOKEN=your_access_token
-DOUDIAN_SHOP_ID=your_shop_id
-
-# 京东
-JD_APP_KEY=your_app_key
-JD_APP_SECRET=your_app_secret
-JD_ACCESS_TOKEN=your_access_token
-
-# 拼多多
-PDD_CLIENT_ID=your_client_id
-PDD_CLIENT_SECRET=your_client_secret
-PDD_ACCESS_TOKEN=your_access_token
-
-# 快手
-KUAISHOU_APP_KEY=your_app_key
-KUAISHOU_APP_SECRET=your_app_secret
-KUAISHOU_SIGN_SECRET=your_sign_secret
-KUAISHOU_ACCESS_TOKEN=your_access_token
-
-# 小红书
-XHS_CLIENT_ID=your_client_id
-XHS_CLIENT_SECRET=your_client_secret
-XHS_ACCESS_TOKEN=your_access_token
-
-# 微信小店
-WX_APP_ID=your_app_id
-WX_APP_SECRET=your_app_secret
-
-# 巨量引擎
-OCEANENGINE_ACCESS_TOKEN=your_access_token
-OCEANENGINE_ADVERTISER_ID=your_advertiser_id
-
-# 淘宝
-TAOBAO_APP_KEY=your_app_key
-TAOBAO_APP_SECRET=your_app_secret
-TAOBAO_ACCESS_TOKEN=your_access_token
-```
-
-### 3. 启动 MCP Server
+## 1. 安装并启动一个平台
 
 ```bash
-# 启动单个平台
-mcp-cn-doudian
-
-# 或用 Docker 启动全部
-docker-compose up
+python -m pip install mcp-cn-commerce
 ```
 
-### 4. 在 AI Agent 中使用
+每个 stdio MCP 连接启动一个平台，例如 mcp-cn-commerce start doudian 或 mcp-cn-doudian。多平台请在客户端配置多个连接；docker compose up 不是一个聚合 MCP 连接。
 
-#### Claude Code / Cowork
+凭证通过 shell 环境、MCP 客户端 env 或 CLI 配置传入。项目不会自动加载 .env；仅创建该文件不会改变 Python 进程的环境。变量名以 [.env.example](../.env.example) 为准，拼多多使用 PINDUODUO_*，微信使用 WX_*。
 
-在 `.claude/settings.json` 中添加 MCP 配置：
+客户端配置示例（配置文件位置由客户端决定）：
 
 ```json
 {
@@ -76,52 +20,76 @@ docker-compose up
     "doudian": {
       "command": "mcp-cn-doudian",
       "env": {
-        "DOUDIAN_APP_KEY": "...",
-        "DOUDIAN_APP_SECRET": "..."
+        "DOUDIAN_APP_KEY": "your-app-key",
+        "DOUDIAN_APP_SECRET": "your-app-secret",
+        "DOUDIAN_ACCESS_TOKEN": "your-authorized-token"
       }
     }
   }
 }
 ```
 
-#### Kimi Work / 通义
+## 2. 准备数据与完整性声明
 
-参考各平台的 MCP 接入文档。
+调用所选平台的订单、退款工具，按该平台官方时间/分页契约提取列表。平台返回通常还有包装字段，不能把整个 API envelope 当作统一订单。
 
-### 5. 使用模板
+对今天和昨天分别完成全部分页，记录每个来源是否成功。coverage[date].orders/refunds=true 是调用者对已完成查询的声明，系统不会根据“列表看起来很长”推断取完。平台失败、缺权限、漏页或数据截止时间不足时应传 false 或不设置。
 
-将模板的 `prompt.md` 中的 `{{EXAMPLE_DATA}}` 替换为 MCP Server 返回的真实数据：
+每家店输入：
 
+```json
+{
+  "platform": "doudian",
+  "shop_id": "demo-shop",
+  "shop_name": "示例店铺",
+  "input_format": "normalized",
+  "orders": [],
+  "refunds": [],
+  "coverage": {
+    "2026-09-10": {"orders": false, "refunds": false},
+    "2026-09-09": {"orders": false, "refunds": false}
+  },
+  "errors": []
+}
 ```
-# 在 AI Agent 中执行：
-1. 调用 get_order_list 获取订单数据
-2. 调用 get_refund_list 获取退款数据
-3. 将数据填入模板 prompt
-4. 生成日报
+
+空列表加 false 表示没有足够数据，不能作为销售为零的证据。只有已经完成查询且确实为空，才能声明完整。
+
+input_format="raw" 可输入当前 normalizer 支持的原平台记录；该转换不证明平台响应 schema 已通过真实账号验证。字段单位不确定时必须按官方说明设置该店铺的 amount_units，否则金额保持 null。具体格式见 [data-contracts.md](data-contracts.md)。
+
+## 3. 调用确定性日报工具
+
+每个平台注册同一个公共工具：
+
+```text
+build_daily_report(
+  shops_json="上述店铺对象构成的 JSON 数组",
+  report_date="2026-09-10",
+  timezone="Asia/Shanghai"
+)
 ```
 
-## 数据格式
+也可以直接使用 Python API：
 
-所有模板使用统一的数据格式（由 `shared/normalizer.py` 提供）：
+```python
+from shared.aggregation import build_daily_report
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| 金额 | int | 单位：分（1元=100分） |
-| 时间 | string | ISO 8601 格式 |
-| 状态 | string | 统一枚举值 |
+report = build_daily_report("2026-09-10", shops, timezone="Asia/Shanghai")
+```
 
-详见 [normalizer.py](../shared/normalizer.py) 文档。
+该操作只处理提供的数据，不自动请求商家 API。跨店去重按平台/店铺隔离；每店订单按订单号去重。冲突记录和未知字段产生质量错误。
 
-## 常见问题
+输出包含 shops[].summary/yesterday/top_products、total_summary、complete、metric_definitions 和各店错误。完整性不足的正式指标为 null，已获取的部分数据单独放 observed_summary。金额以整数分计，平均值使用 Decimal；无数据时的比率是 null。
 
-### Q: 没有 API 凭证怎么办？
+口径必须与后台核对：订单量按付款日，GMV 为实际支付金额的合计；当日退款包含可能来自以前订单的退款。具体退款率定义写在返回数据里，不能换成另一种口径后仍直接比较。
 
-使用 `example-data.json` 中的示例数据体验模板效果。等有真实凭证后再接入。
+## 4. 生成文字日报
 
-### Q: 模板支持哪些 AI Agent？
+将 build_daily_report 的完整返回填入 [daily-report/prompt.md](../templates/daily-report/prompt.md)。模型必须遵守：
 
-支持所有支持 MCP 协议的 Agent：Claude Code、Cowork、Kimi Work、通义、Cursor 等。
+- 不把 null 转成零，不把 observed_summary 冒充完整店铺数据。
+- 明确日期、时区、统计口径、覆盖范围和错误。
+- 用已计算的 total_summary，不重新猜测跨店汇总。
+- 商品级支付 GMV、新老客和库存没有证据时保留未知。
 
-### Q: 如何自定义模板？
-
-直接修改 `prompt.md` 中的角色定义、任务说明和输出格式。
+原有 example-data.json 只是展示用汇总样例，不是实时平台响应。没有凭证时可以体验模板，但不能称为真实经营数据。

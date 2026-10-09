@@ -1,209 +1,173 @@
-# CLI Reference
+# CLI reference
 
-The `mcp-cn-commerce` CLI provides commands to manage and interact with Chinese e-commerce MCP servers.
-
-## Installation
+Install all eight platforms from the single root distribution:
 
 ```bash
-pip install -e .
+pip install mcp-cn-commerce
+# Development checkout, using the verified runtime dependency constraints:
+make install
 ```
 
-This installs the `mcp-cn-commerce` command globally.
-
-## Usage
-
-```
-mcp-cn-commerce [--verbose] [--config PATH] COMMAND [ARGS]
-```
-
-### Global Options
-
-| Option | Description |
-|--------|-------------|
-| `--version` | Show version and exit |
-| `--config PATH` | Path to configuration file (JSON) |
-| `--verbose`, `-v` | Enable verbose/debug output |
-
-## Commands
-
-### `start` - Start MCP Servers
-
-Start one or more MCP servers over stdio.
+## Start one platform per connection
 
 ```bash
-# Start a single server
 mcp-cn-commerce start oceanengine
-
-# Start multiple servers
-mcp-cn-commerce start oceanengine jd taobao
+mcp-cn-commerce start weixin_store
+# Equivalent standalone console script:
+mcp-cn-weixin-store
+# From a source checkout:
+python -m shared.cli start jd
 ```
 
-**Behavior:**
-- Single server: runs in foreground (blocking)
-- Multiple servers: last server runs in foreground, others in background
-- Press `Ctrl+C` to stop all servers
-
-**Environment variables** must be set before starting. See [Platforms](platforms.md) for required variables per platform.
-
-**Example with credentials:**
-
-```bash
-export OCEANENGINE_APP_KEY="your_key"
-export OCEANENGINE_APP_SECRET="your_secret"
-export OCEANENGINE_ACCESS_TOKEN="your_token"
-mcp-cn-commerce start oceanengine
-```
-
-### `health` - Health Check
-
-Check the health and readiness of MCP servers.
-
-```bash
-# Check all servers
-mcp-cn-commerce health
-
-# Check specific servers
-mcp-cn-commerce health oceanengine jd
-
-# JSON output
-mcp-cn-commerce health --json
-```
-
-**Status indicators:**
-- `[READY]` - Module importable and credentials configured
-- `[NO CREDS]` - Module importable but credentials missing
-- `[NOT READY]` - Module not importable
-- `[ERROR]` - Platform unknown or other error
-
-**JSON output structure:**
-
-```json
-[
-  {
-    "platform": "oceanengine",
-    "description": "Ocean Engine advertising platform",
-    "module": "mcp_oceanengine.server",
-    "status": "ready",
-    "env_configured": true,
-    "importable": true,
-    "env_vars": {
-      "OCEANENGINE_APP_KEY": "set",
-      "OCEANENGINE_APP_SECRET": "set",
-      "OCEANENGINE_ACCESS_TOKEN": "set"
-    }
-  }
-]
-```
-
-### `info` - Version and Environment Info
-
-Show detailed version and environment information.
-
-```bash
-# Human-readable output
-mcp-cn-commerce info
-
-# JSON output
-mcp-cn-commerce info --json
-```
-
-**Output includes:**
-- CLI version
-- Python version
-- Platform (OS)
-- Repository root path
-- Available server modules and their status
-
-### `list` - List Available Platforms
-
-List all supported MCP server platforms.
-
-```bash
-mcp-cn-commerce list
-```
-
-**Output:**
-
-```
-Available MCP servers:
-
-Platform         Module                       Description
---------------------------------------------------------------------------------
-oceanengine      mcp_oceanengine.server       Ocean Engine advertising platform
-doudian          mcp_doudian.server           Douyin Shop e-commerce platform
-jd               mcp_jd.server                JD.com e-commerce platform
-taobao           mcp_taobao.server            Taobao e-commerce platform
-pinduoduo        mcp_pinduoduo.server         Pinduoduo e-commerce platform
-kuaishou         mcp_kuaishou.server          Kuaishou e-commerce platform
-xiaohongshu      mcp_xiaohongshu.server       Xiaohongshu e-commerce platform
-weixin-store     mcp_weixin_store.server      Weixin Store e-commerce platform
-
-Total: 8 platforms
-```
-
-## Configuration File
-
-The CLI supports JSON configuration files. Use `--config PATH` to specify a file, or place `mcp-cn-commerce.json` in the current directory or `~/.config/mcp-cn-commerce/config.json`.
+A stdio connection carries one MCP server. Starting two platforms in one CLI
+invocation is rejected before any child is launched. For several platforms,
+configure separate client entries; each gets independent stdin/stdout and
+credentials. All diagnostic logging goes to stderr.
 
 ```json
 {
-  "servers": ["oceanengine", "jd"],
-  "verbose": false,
-  "log_level": "info"
+  "mcpServers": {
+    "jd": {
+      "command": "mcp-cn-commerce",
+      "args": ["start", "jd"],
+      "env": {
+        "JD_APP_KEY": "your_app_key",
+        "JD_APP_SECRET": "your_app_secret",
+        "JD_ACCESS_TOKEN": "your_authorized_shop_token"
+      }
+    },
+    "oceanengine": {
+      "command": "mcp-cn-commerce",
+      "args": ["start", "oceanengine"],
+      "env": {"OCEANENGINE_ACCESS_TOKEN": "your_authorized_token"}
+    }
+  }
 }
 ```
 
-## Environment Variables
-
-Each platform requires its own set of environment variables. The CLI checks for these during health checks.
-
-| Platform | Required Variables |
-|----------|-------------------|
-| oceanengine | `OCEANENGINE_APP_KEY`, `OCEANENGINE_APP_SECRET`, `OCEANENGINE_ACCESS_TOKEN` |
-| doudian | `DOUDIAN_APP_KEY`, `DOUDIAN_APP_SECRET`, `DOUDIAN_ACCESS_TOKEN` |
-| jd | `JD_APP_KEY`, `JD_APP_SECRET`, `JD_ACCESS_TOKEN` |
-| taobao | `TAOBAO_APP_KEY`, `TAOBAO_APP_SECRET`, `TAOBAO_ACCESS_TOKEN` |
-| pinduoduo | `PINDUODUO_APP_KEY`, `PINDUODUO_APP_SECRET`, `PINDUODUO_ACCESS_TOKEN` |
-| kuaishou | `KUAISHOU_APP_KEY`, `KUAISHOU_APP_SECRET`, `KUAISHOU_ACCESS_TOKEN` |
-| xiaohongshu | `XIAOHONGSHU_APP_KEY`, `XIAOHONGSHU_APP_SECRET`, `XIAOHONGSHU_ACCESS_TOKEN` |
-| weixin-store | `WEIXIN_STORE_APP_KEY`, `WEIXIN_STORE_APP_SECRET`, `WEIXIN_STORE_ACCESS_TOKEN` |
-
-## Running Without Installation
-
-You can also run the CLI directly using Python:
+## Configuration and precedence
 
 ```bash
-PYTHONPATH=shared python -m cli list
-PYTHONPATH=shared python -m cli start oceanengine
+mcp-cn-commerce --config /absolute/path/config.json start
+mcp-cn-commerce --config /absolute/path/config.json health --json
 ```
 
-## Examples
+Without `--config`, the first existing file wins:
 
-### Pre-flight Check
+1. `./mcp-cn-commerce.json`
+2. `~/.config/mcp-cn-commerce/config.json`
 
-Before starting servers, verify everything is configured:
+Files are not merged. An explicitly missing, malformed, or unsupported
+configuration fails visibly. This prevents accidental use of a different
+account. Supported fields are `servers`, `env`, `verbose`, and `log_level`.
+
+```json
+{
+  "servers": ["jd"],
+  "env": {
+    "JD_APP_KEY": "your_app_key",
+    "JD_APP_SECRET": "your_app_secret",
+    "JD_ACCESS_TOKEN": "your_authorized_shop_token"
+  },
+  "verbose": false,
+  "log_level": "INFO"
+}
+```
+
+| Setting | Precedence |
+|---|---|
+| Platforms | Command arguments, then `servers` from the file; `health` otherwise checks all platforms |
+| Credentials/environment | Existing process environment, then `env` file defaults; even an explicitly empty environment variable wins |
+| Logging | `--verbose`, then file `verbose: true`, then file `log_level`, then `INFO` |
+
+`start` requires exactly one effective platform. `health` can inspect several.
+`env` accepts string values. Secret values are not printed in diagnostics.
+Configuration files containing credentials should stay outside version control.
+
+## Local health inspection
 
 ```bash
-mcp-cn-commerce health --json | jq '.[] | select(.status != "ready")'
+mcp-cn-commerce health
+mcp-cn-commerce health jd weixin_store --json
 ```
 
-### Starting with Docker Compose
+`health` checks the actual platform module and required configuration fields.
+It makes no platform request and does not validate token validity, scopes,
+shop authorization, or network reachability. `ready` means local configuration
+is present and the module imports; it does not mean live authorization works.
+The JSON fields `protocol_status` and `authorization_status` explicitly remain
+`not_checked`. Missing or invalid configuration is listed without exposing values.
 
-```yaml
-services:
-  oceanengine:
-    build: .
-    command: mcp-cn-commerce start oceanengine
-    environment:
-      - OCEANENGINE_APP_KEY=${OCEANENGINE_APP_KEY}
-      - OCEANENGINE_APP_SECRET=${OCEANENGINE_APP_SECRET}
-      - OCEANENGINE_ACCESS_TOKEN=${OCEANENGINE_ACCESS_TOKEN}
-```
+| Platform argument | Required environment variables |
+|---|---|
+| `oceanengine` | `OCEANENGINE_ACCESS_TOKEN`; App Key/Secret are used externally when obtaining the token |
+| `doudian` | `DOUDIAN_APP_KEY`, `DOUDIAN_APP_SECRET`, `DOUDIAN_SHOP_ID`, `DOUDIAN_ACCESS_TOKEN` |
+| `jd` | `JD_APP_KEY`, `JD_APP_SECRET`, `JD_ACCESS_TOKEN` |
+| `taobao` | `TAOBAO_APP_KEY`, `TAOBAO_APP_SECRET`, `TAOBAO_ACCESS_TOKEN` |
+| `pinduoduo` | `PINDUODUO_CLIENT_ID`, `PINDUODUO_CLIENT_SECRET`, `PINDUODUO_ACCESS_TOKEN` |
+| `kuaishou` | `KUAISHOU_APP_KEY`, `KUAISHOU_APP_SECRET`, `KUAISHOU_SIGN_SECRET`, `KUAISHOU_ACCESS_TOKEN` |
+| `xiaohongshu` | `XHS_CLIENT_ID`, `XHS_CLIENT_SECRET`, `XHS_ACCESS_TOKEN` |
+| `weixin_store` | Static: `WX_ACCESS_TOKEN`. Managed: `WX_APP_ID` and `WX_APP_SECRET`. Optional `WX_TOKEN_MODE=static` or `managed` |
 
-### Debugging
+With no explicit Weixin mode, an existing `WX_ACCESS_TOKEN` selects static mode;
+otherwise managed mode is selected. Explicit managed mode needs the app
+credentials even if a static token is present.
 
-Use `--verbose` to see detailed logs:
+Servers support MCP initialization, tool discovery and local operational tools
+without merchant credentials. A business tool returns a configuration error
+before making a network request when required credentials are missing.
+
+## Information commands
 
 ```bash
-mcp-cn-commerce --verbose health oceanengine
+mcp-cn-commerce --version
+mcp-cn-commerce info --json
+mcp-cn-commerce list
+mcp-cn-commerce --verbose health jd
 ```
+
+`info` reports installed package directories. The legacy JSON key `src_found`
+is retained for compatibility and now reflects the actual platform package;
+there are no per-platform `src/` installations.
+
+## Docker
+
+```bash
+docker build -t mcp-cn-commerce .
+docker run --rm -i --env-file .env mcp-cn-commerce mcp-cn-commerce start jd
+# Equivalent Compose connection; -T disables the terminal:
+docker compose run --rm -T jd
+# Tests need no merchant .env file:
+docker build --target development -t mcp-cn-commerce-dev .
+docker run --rm mcp-cn-commerce-dev make test
+```
+
+Do not allocate a TTY for MCP connections. The Compose file requires version 2.24 or newer and treats `.env` as optional.
+Each Compose platform service runs
+its own stdio process with `tty: false`. The development image contains test
+and quality tools; the default runtime image installs only the root package
+and its runtime dependencies.
+
+## Installation and release gates
+
+The locked dependency CI installs the root package with
+`-c requirements-lock.txt`; a separate job tests the latest versions permitted
+by the package's dependency ranges. The distribution smoke test runs from a
+neutral directory after installing the wheel and sdist into clean environments.
+It launches all eight standalone commands and the CLI commands resolved from
+`server.json`, then exercises MCP initialization, tool listing, operational
+success, tool errors, and missing-credential business errors. Docker uses the
+same stdio protocol test against the built runtime image.
+
+`server.json` specifies the executable package's `start` argument and an explicit
+platform choice. Its default is `oceanengine`; each additional platform needs a
+separate connection. Conditional credentials for all eight choices are described
+in the manifest.
+
+Release order is explicit: quality gates → build and version validation → PyPI
+upload → GitHub release → reusable Registry publishing workflow. The Registry
+job checks that the exact PyPI version is available before publishing. It does
+not rely on a `release:published` event emitted by `GITHUB_TOKEN`. Update
+`shared.__version__`, the manifest version and package version together before
+creating a new matching `vVERSION` tag. A manual release takes an existing tag
+and tests that same ref.

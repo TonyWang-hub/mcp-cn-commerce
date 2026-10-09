@@ -2,77 +2,26 @@
 products, shop info, after-sale, logistics, reviews, marketing, inventory, and billing data.
 
 Auth via env vars: XHS_CLIENT_ID, XHS_CLIENT_SECRET, XHS_ACCESS_TOKEN.
-API endpoint: https://open.xiaohongshu.com
-Sign method: MD5 (params sorted, secret+string+secret → MD5 → uppercase)
+API endpoint: https://ark.xiaohongshu.com/ark/open_api/v3/common_controller
+Sign method: official OAuth v2 system-field MD5 (lowercase)
 """
 
 from __future__ import annotations
 
 import json
 import os
-import time
+from contextlib import asynccontextmanager
 
-import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
+from servers.xiaohongshu.client import XiaohongshuMCP
 from shared.cn_commerce_base import (
-    CommerceAPIError,
-    CommerceMCPBase,
     ConfigValidationError,
-    SignMethod,
     register_common_tools,
 )
+from shared.platform_clients import mcp_capability_tool
 
 # ── Xiaohongshu client ────────────────────────────────────────────────────────
-
-
-class XiaohongshuMCP(CommerceMCPBase):
-    """Xiaohongshu-specific client.
-
-    XHS uses OAuth 2.0 (client_id + client_secret), standard MD5 signing,
-    and RESTful API paths under the open platform gateway.
-    """
-
-    BASE_URL = "https://open.xiaohongshu.com"
-    sign_method = SignMethod.MD5
-
-    async def _call(self, method: str, path: str, biz_params: dict | None = None) -> dict:
-        """Make a XHS API call.
-
-        Builds system params (client_id, timestamp, sign_method, access_token),
-        merges business params, signs with MD5, and sends the request.
-        """
-        biz_params = biz_params or {}
-
-        params: dict[str, str] = {
-            "client_id": self.app_key,
-            "timestamp": str(int(time.time() * 1000)),
-            "sign_method": self.sign_method,
-        }
-        if self.access_token:
-            params["access_token"] = self.access_token
-
-        # Merge business params (convert all values to strings for signing)
-        for k, v in biz_params.items():
-            params[k] = str(v)
-
-        # Sign (base-class MD5: secret + sorted_kv + secret → md5 → upper)
-        params["sign"] = self._sign(params)
-
-        url = f"{self.BASE_URL}{path}"
-        async with httpx.AsyncClient(timeout=30) as client:
-            if method == "GET":
-                resp = await client.get(url, params=params)
-            else:
-                resp = await client.post(url, params=params, json=biz_params)
-
-        result = resp.json()
-        if "error_response" in result:
-            raise CommerceAPIError(
-                code=result["error_response"].get("code", result["error_response"].get("error_code", -1)),
-                msg=result["error_response"].get("msg", result["error_response"].get("error_msg", "unknown")),
-            )
-        return result
 
 
 # ── Instantiate client from env ────────────────────────────────────────────
@@ -96,7 +45,19 @@ xhs = _create_xiaohongshu_client()
 
 # ── MCP server ─────────────────────────────────────────────────────────────────
 
-mcp = FastMCP("mcp-cn-xiaohongshu")
+
+@asynccontextmanager
+async def _lifespan(_server):
+    try:
+        yield {}
+    finally:
+        client = xhs
+        if client is not None:
+            await client.close()
+
+
+mcp = MCPServer("mcp-cn-xiaohongshu", lifespan=_lifespan)
+business_tool = mcp_capability_tool(mcp.tool, "xiaohongshu")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -104,30 +65,38 @@ mcp = FastMCP("mcp-cn-xiaohongshu")
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_order_list(
     start_time: str,
     end_time: str,
     order_status: str = "",
     page: int = 1,
     page_size: int = 20,
+    time_type: int = 1,
 ) -> str:
-    """Query order list by time range and optional status.
+    """Query one order page using native integer query times.
+
+    Query time units require platform confirmation; date strings are rejected.
+    Official windows are 24 hours for creation and 30 minutes for update.
+    For update scans use maxPageNo and read from the last page to the first.
 
     Args:
-        start_time: Order start time, e.g. "2024-01-01 00:00:00"
-        end_time: Order end time, e.g. "2024-01-31 23:59:59"
+        start_time: Platform-confirmed native integer start time, as a string.
+        end_time: Platform-confirmed native integer end time, as a string.
         order_status: Status filter. Common values:
-            1 (待发货), 2 (已发货), 3 (已签收), 4 (退款中), 5 (已退款).
+            1 (待付款), 2 (处理中), 3 (清关中), 4 (待发货), 5 (部分发货),
+            6 (待收货), 7 (已完成), 8 (已关闭), 9 (已取消), 10 (换货申请中).
             Empty string means all statuses.
         page: Page number, starting from 1.
         page_size: Number of orders per page (max 100).
+        time_type: 1 for creation time; 2 for update time.
     """
     biz_params: dict = {
         "start_time": start_time,
         "end_time": end_time,
         "page": str(page),
         "page_size": str(page_size),
+        "time_type": time_type,
     }
     if order_status:
         biz_params["order_status"] = str(order_status)
@@ -136,7 +105,7 @@ async def get_order_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_order_detail(order_id: str) -> str:
     """Get full details of a single order.
 
@@ -153,7 +122,7 @@ async def get_order_detail(order_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_product_list(
     page: int = 1,
     page_size: int = 20,
@@ -172,7 +141,7 @@ async def get_product_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_product_detail(product_id: str) -> str:
     """Get full details of a single product by product ID.
 
@@ -189,30 +158,36 @@ async def get_product_detail(product_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_refund_list(
     start_time: str,
     end_time: str,
     refund_status: str = "",
     page: int = 1,
     page_size: int = 20,
+    time_type: int = 1,
 ) -> str:
-    """Query refund (after-sale) list by time range.
+    """Query one after-sale page with inclusive millisecond time boundaries.
+
+    Maximum window: 24 hours for creation, 30 minutes for update.
 
     Args:
-        start_time: Query start time, e.g. "2024-01-01 00:00:00"
-        end_time: Query end time, e.g. "2024-01-31 23:59:59"
+        start_time: Native milliseconds or ISO time including a timezone.
+        end_time: Native milliseconds or ISO time including a timezone.
         refund_status: Status filter. Common values:
-            1 (待处理), 2 (处理中), 3 (已退款), 4 (已拒绝).
+            1 (待审核), 2 (待寄回), 3 (待收货), 4 (已完成), 5 (已取消),
+            6 (已关闭), 9 (审核拒绝); comma-separated official status codes are accepted.
             Empty string means all statuses.
         page: Page number, starting from 1.
         page_size: Number of records per page (max 100).
+        time_type: 1 for creation time; 2 for update time.
     """
     biz_params = {
         "start_time": start_time,
         "end_time": end_time,
         "page": str(page),
         "page_size": str(page_size),
+        "time_type": time_type,
     }
     if refund_status:
         biz_params["refund_status"] = str(refund_status)
@@ -221,7 +196,7 @@ async def get_refund_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_refund_detail(refund_id: str) -> str:
     """Get full details of a single refund record.
 
@@ -238,7 +213,7 @@ async def get_refund_detail(refund_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_logistics_tracking(order_id: str) -> str:
     """Get logistics tracking information for an order.
 
@@ -255,13 +230,13 @@ async def get_logistics_tracking(order_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_review_list(
     product_id: str,
     page: int = 1,
     page_size: int = 20,
 ) -> str:
-    """Query product review (comment) list by product ID.
+    """Unavailable: no verified official review API mapping; returns an explicit error.
 
     Args:
         product_id: The XHS product ID (e.g. "5f8a9b2c3d4e5f6a7b8c9d0e").
@@ -282,9 +257,9 @@ async def get_review_list(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_shop_info() -> str:
-    """Get shop basic information for the authenticated merchant."""
+    """Unavailable: no verified official shop-info API mapping; returns an explicit error."""
     result = await xhs._call("GET", "/api/shop/info")
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -294,12 +269,12 @@ async def get_shop_info() -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def list_promotions(
     page: int = 1,
     page_size: int = 20,
 ) -> str:
-    """List promotion activities for the authenticated shop.
+    """Unavailable: no verified official promotion API mapping; returns an explicit error.
 
     Args:
         page: Page number, starting from 1.
@@ -313,13 +288,13 @@ async def list_promotions(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def list_coupons(
     status: str = "",
     page: int = 1,
     page_size: int = 20,
 ) -> str:
-    """List coupon templates for the authenticated shop.
+    """Unavailable: no verified official marketing-coupon API mapping; returns an explicit error.
 
     Args:
         status: Coupon status filter. Common values:
@@ -344,18 +319,18 @@ async def list_coupons(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_inventory(
     product_id: str = "",
     sku_id: str = "",
     page: int = 1,
     page_size: int = 20,
 ) -> str:
-    """Query inventory information for products.
+    """Query one SKU using the official inventory V2 API. sku_id is required.
 
     Args:
-        product_id: Optional product ID filter.
-        sku_id: Optional SKU ID filter.
+        product_id: Unsupported by the official SKU inventory endpoint; leave empty.
+        sku_id: Required official SKU ID.
         page: Page number, starting from 1.
         page_size: Number of records per page (max 100).
     """
@@ -377,7 +352,7 @@ async def get_inventory(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_bill_list(
     start_time: str,
     end_time: str,
@@ -385,13 +360,14 @@ async def get_bill_list(
     page: int = 1,
     page_size: int = 20,
 ) -> str:
-    """Query bill list by time range.
+    """Query account transaction records by time range (Asia/Shanghai for naive dates).
 
     Args:
         start_time: Bill start time, e.g. "2024-01-01 00:00:00"
         end_time: Bill end time, e.g. "2024-01-31 23:59:59"
         bill_type: Bill type filter. Common values:
-            1 (订单结算), 2 (退款), 3 (佣金), 4 (保证金).
+            STATEMENT_IN (结算入账), STATEMENT_REFUND (退款), RECHARGE (充值).
+            Use comma-separated official tradeTypes names; legacy numeric codes are unsupported.
             Empty string means all types.
         page: Page number, starting from 1.
         page_size: Number of records per page (max 100).

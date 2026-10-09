@@ -44,8 +44,10 @@ def _mock_response(data: dict) -> dict:
 
 
 @pytest.fixture
-def mock_request():
+def mock_request(monkeypatch):
     """Patch taobao._request with an AsyncMock, reset after each test."""
+    for name in ("app_key", "app_secret", "access_token"):
+        monkeypatch.setattr(taobao, name, "test-value")
     with patch.object(taobao, "_request", new_callable=AsyncMock) as mock:
         yield mock
 
@@ -56,7 +58,7 @@ def mock_request():
 @pytest.fixture
 def order_list_payload() -> dict:
     return {
-        "taobao_trades_sold_get_response": {
+        "trades_sold_get_response": {
             "total_results": 2,
             "trades": {
                 "trade": [
@@ -93,7 +95,7 @@ def order_list_payload() -> dict:
 @pytest.fixture
 def order_detail_payload() -> dict:
     return {
-        "taobao_trade_fullinfo_get_response": {
+        "trade_fullinfo_get_response": {
             "trade": {
                 "tid": "123456789012345678",
                 "status": "WAIT_SELLER_SEND_GOODS",
@@ -123,7 +125,7 @@ def order_detail_payload() -> dict:
 @pytest.fixture
 def increment_orders_payload() -> dict:
     return {
-        "taobao_trades_sold_increment_get_response": {
+        "trades_sold_increment_get_response": {
             "total_results": 1,
             "trades": {
                 "trade": [
@@ -213,12 +215,12 @@ def product_detail_payload() -> dict:
 @pytest.fixture
 def refund_list_payload() -> dict:
     return {
-        "taobao_refunds_receive_get_response": {
+        "refunds_receive_get_response": {
             "total_results": 2,
             "refunds": {
                 "refund": [
                     {
-                        "refund_id": "RF12345678901",
+                        "refund_id": "12345678901",
                         "tid": "123456789012345678",
                         "oid": "1000000100001",
                         "status": "WAIT_SELLER_AGREE",
@@ -230,7 +232,7 @@ def refund_list_payload() -> dict:
                         "refund_fee": "99.00",
                     },
                     {
-                        "refund_id": "RF12345678902",
+                        "refund_id": "12345678902",
                         "tid": "876543210987654321",
                         "oid": "1000000200001",
                         "status": "SUCCESS",
@@ -250,9 +252,9 @@ def refund_list_payload() -> dict:
 @pytest.fixture
 def refund_detail_payload() -> dict:
     return {
-        "taobao_refund_get_response": {
+        "refund_get_response": {
             "refund": {
-                "refund_id": "RF12345678901",
+                "refund_id": "12345678901",
                 "tid": "123456789012345678",
                 "oid": "1000000100001",
                 "status": "WAIT_SELLER_AGREE",
@@ -488,8 +490,8 @@ async def test_get_order_list_returns_orders_with_correct_fields(mock_request, o
     )
     result = json.loads(result_json)
 
-    assert "taobao_trades_sold_get_response" in result
-    response = result["taobao_trades_sold_get_response"]
+    assert "trades_sold_get_response" in result
+    response = result["trades_sold_get_response"]
     assert response["total_results"] == 2
     trades = response["trades"]["trade"]
     assert len(trades) == 2
@@ -559,7 +561,7 @@ async def test_get_order_detail_returns_single_order_with_all_fields(mock_reques
     result_json = await get_order_detail(tid="123456789012345678")
     result = json.loads(result_json)
 
-    trade = result["taobao_trade_fullinfo_get_response"]["trade"]
+    trade = result["trade_fullinfo_get_response"]["trade"]
     assert trade["tid"] == "123456789012345678"
     assert trade["status"] == "WAIT_SELLER_SEND_GOODS"
     assert trade["payment"] == "99.00"
@@ -594,7 +596,7 @@ async def test_get_increment_orders_returns_modified_orders(mock_request, increm
     )
     result = json.loads(result_json)
 
-    response = result["taobao_trades_sold_increment_get_response"]
+    response = result["trades_sold_increment_get_response"]
     assert response["total_results"] == 1
     trades = response["trades"]["trade"]
     assert len(trades) == 1
@@ -715,7 +717,7 @@ async def test_get_refund_list_returns_refunds_with_expected_fields(mock_request
     )
     result = json.loads(result_json)
 
-    response = result["taobao_refunds_receive_get_response"]
+    response = result["refunds_receive_get_response"]
     assert response["total_results"] == 2
     refunds = response["refunds"]["refund"]
     assert len(refunds) == 2
@@ -747,11 +749,11 @@ async def test_get_refund_detail_returns_full_record(mock_request, refund_detail
     """get_refund_detail should return a single refund record with full details."""
     mock_request.return_value = refund_detail_payload
 
-    result_json = await get_refund_detail(refund_id="RF12345678901")
+    result_json = await get_refund_detail(refund_id="12345678901")
     result = json.loads(result_json)
 
-    refund = result["taobao_refund_get_response"]["refund"]
-    assert refund["refund_id"] == "RF12345678901"
+    refund = result["refund_get_response"]["refund"]
+    assert refund["refund_id"] == "12345678901"
     assert refund["tid"] == "123456789012345678"
     assert refund["status"] == "WAIT_SELLER_AGREE"
     assert refund["reason"] == "商品质量问题"
@@ -763,7 +765,7 @@ async def test_get_refund_detail_returns_full_record(mock_request, refund_detail
     _, kwargs = mock_request.call_args
     params = kwargs["params"]
     assert params["method"] == "taobao.refund.get"
-    assert params["refund_id"] == "RF12345678901"
+    assert params["refund_id"] == "12345678901"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -1031,7 +1033,7 @@ async def test_pagination_custom_page_and_size(mock_request, order_list_payload)
 async def test_pagination_empty_result_set(mock_request):
     """An empty order list should be handled gracefully."""
     empty_response = {
-        "taobao_trades_sold_get_response": {
+        "trades_sold_get_response": {
             "total_results": 0,
             "trades": {"trade": []},
         },
@@ -1044,7 +1046,7 @@ async def test_pagination_empty_result_set(mock_request):
     )
     result = json.loads(result_json)
 
-    response = result["taobao_trades_sold_get_response"]
+    response = result["trades_sold_get_response"]
     assert response["total_results"] == 0
     assert response["trades"]["trade"] == []
 
@@ -1081,48 +1083,29 @@ async def test_pagination_review_list_custom(mock_request, review_list_payload):
 
 
 @pytest.mark.asyncio
-async def test_commerce_api_error_returns_error_response_dict(mock_request):
-    """When _request raises CommerceAPIError, _call catches it and returns error dict."""
+async def test_commerce_api_error_propagates(mock_request):
     mock_request.side_effect = CommerceAPIError(code=15, msg="remote service error")
-
-    result_json = await get_order_detail(tid="999999999999999999")
-    result = json.loads(result_json)
-
-    assert "error_response" in result
-    assert result["error_response"]["code"] == 15
-    assert "remote service error" in result["error_response"]["msg"]
+    with pytest.raises(CommerceAPIError, match="remote service error") as caught:
+        await get_order_detail(tid="999999999999999999")
+    assert caught.value.code == 15
 
 
 @pytest.mark.asyncio
-async def test_timeout_error_returns_error_response_dict(mock_request):
-    """When _request raises TimeoutError, _call catches it and returns error dict."""
+async def test_timeout_error_propagates(mock_request):
     mock_request.side_effect = TimeoutError("Connection timed out")
-
-    result_json = await get_product_list()
-    result = json.loads(result_json)
-
-    assert "error_response" in result
-    assert result["error_response"]["code"] == -1
-    assert "Connection timed out" in result["error_response"]["msg"]
+    with pytest.raises(TimeoutError, match="Connection timed out"):
+        await get_product_list()
 
 
 @pytest.mark.asyncio
-async def test_refund_api_error_returns_error_response_dict(mock_request):
-    """Error from refund tool should return error dict."""
+async def test_refund_api_error_propagates(mock_request):
     mock_request.side_effect = CommerceAPIError(code=27, msg="refund not found")
-
-    result_json = await get_refund_detail(refund_id="RF99999999999")
-    result = json.loads(result_json)
-
-    assert "error_response" in result
-    assert result["error_response"]["code"] == 27
-    assert "refund not found" in result["error_response"]["msg"]
-
-    # Verify _request was called with the correct refund_id
-    _, kwargs = mock_request.call_args
-    params = kwargs["params"]
+    with pytest.raises(CommerceAPIError, match="refund not found") as caught:
+        await get_refund_detail(refund_id="99999999999")
+    assert caught.value.code == 27
+    params = mock_request.call_args.kwargs["params"]
     assert params["method"] == "taobao.refund.get"
-    assert params["refund_id"] == "RF99999999999"
+    assert params["refund_id"] == "99999999999"
 
 
 @pytest.mark.asyncio
@@ -1159,7 +1142,7 @@ async def test_output_is_valid_json_string(mock_request, order_list_payload):
     assert isinstance(result, str)
     parsed = json.loads(result)
     assert isinstance(parsed, dict)
-    assert "taobao_trades_sold_get_response" in parsed
+    assert "trades_sold_get_response" in parsed
 
 
 @pytest.mark.asyncio
@@ -1169,13 +1152,13 @@ async def test_increment_orders_output_is_valid_json(mock_request, increment_ord
 
     result = await get_increment_orders(
         start_time="2024-01-01 00:00:00",
-        end_time="2024-01-31 23:59:59",
+        end_time="2024-01-01 23:59:59",
     )
 
     assert isinstance(result, str)
     parsed = json.loads(result)
     assert isinstance(parsed, dict)
-    assert "taobao_trades_sold_increment_get_response" in parsed
+    assert "trades_sold_increment_get_response" in parsed
 
 
 @pytest.mark.asyncio
@@ -1227,12 +1210,12 @@ async def test_request_refund_api_method_verification(mock_request):
     """Verify _request receives correct Taobao API method for refund detail."""
     mock_request.return_value = _mock_response({"ok": True})
 
-    await get_refund_detail(refund_id="RF001")
+    await get_refund_detail(refund_id="1001")
 
     _, kwargs = mock_request.call_args
     params = kwargs["params"]
     assert params["method"] == "taobao.refund.get"
-    assert params["refund_id"] == "RF001"
+    assert params["refund_id"] == "1001"
 
 
 @pytest.mark.asyncio

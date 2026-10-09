@@ -1,0 +1,120 @@
+{
+  "date": "2026-09-10",
+  "timezone": "Asia/Shanghai",
+  "shops": [
+    {
+      "platform": "doudian",
+      "shop_id": "demo-douyin",
+      "shop_name": "demo-douyin",
+      "input_format": "normalized",
+      "orders": [
+        {
+          "order_id": "demo-douyin-2026-09-10",
+          "platform": "doudian",
+          "shop_id": "demo-douyin",
+          "status": "paid",
+          "paid_at": "2026-09-10T10:30:00+08:00",
+          "amount_paid": 1999,
+          "items": [
+            {
+              "product_id": "demo-product",
+              "product_name": "示例商品",
+              "quantity": 1,
+              "price": 1999
+            }
+          ]
+        },
+        {
+          "order_id": "demo-douyin-2026-09-09",
+          "platform": "doudian",
+          "shop_id": "demo-douyin",
+          "status": "paid",
+          "paid_at": "2026-09-09T10:30:00+08:00",
+          "amount_paid": 1500,
+          "items": [
+            {
+              "product_id": "demo-product",
+              "product_name": "示例商品",
+              "quantity": 1,
+              "price": 1500
+            }
+          ]
+        }
+      ],
+      "refunds": [],
+      "coverage": {
+        "2026-09-10": {
+          "orders": true,
+          "refunds": true
+        },
+        "2026-09-09": {
+          "orders": true,
+          "refunds": true
+        }
+      },
+      "errors": []
+    },
+    {
+      "platform": "pinduoduo",
+      "shop_id": "demo-pdd",
+      "shop_name": "demo-pdd",
+      "input_format": "normalized",
+      "orders": [
+        {
+          "order_id": "demo-pdd-2026-09-10",
+          "platform": "pinduoduo",
+          "shop_id": "demo-pdd",
+          "status": "paid",
+          "paid_at": "2026-09-10T10:30:00+08:00",
+          "amount_paid": 2900,
+          "items": [
+            {
+              "product_id": "demo-product",
+              "product_name": "示例商品",
+              "quantity": 1,
+              "price": 2900
+            }
+          ]
+        },
+        {
+          "order_id": "demo-pdd-2026-09-09",
+          "platform": "pinduoduo",
+          "shop_id": "demo-pdd",
+          "status": "paid",
+          "paid_at": "2026-09-09T10:30:00+08:00",
+          "amount_paid": 3000,
+          "items": [
+            {
+              "product_id": "demo-product",
+              "product_name": "示例商品",
+              "quantity": 1,
+              "price": 3000
+            }
+          ]
+        }
+      ],
+      "refunds": [
+        {
+          "refund_id": "demo-refund",
+          "order_id": "demo-pdd-2026-09-10",
+          "platform": "pinduoduo",
+          "shop_id": "demo-pdd",
+          "status": "completed",
+          "completed_at": "2026-09-10T13:00:00+08:00",
+          "amount": 100
+        }
+      ],
+      "coverage": {
+        "2026-09-10": {
+          "orders": true,
+          "refunds": true
+        },
+        "2026-09-09": {
+          "orders": true,
+          "refunds": true
+        }
+      },
+      "errors": []
+    }
+  ]
+}

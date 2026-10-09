@@ -32,7 +32,6 @@ import pytest
 # ── Path setup ───────────────────────────────────────────────────
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_SHARED_DIR = _REPO_ROOT / "shared"
 
 _ALL_PLATFORMS = [
     "oceanengine",
@@ -45,30 +44,8 @@ _ALL_PLATFORMS = [
     "weixin_store",
 ]
 
-for _p in _ALL_PLATFORMS:
-    _src = _REPO_ROOT / "servers" / _p / "src"
-    if _src.is_dir() and str(_src) not in sys.path:
-        sys.path.insert(0, str(_src))
-if str(_SHARED_DIR) not in sys.path:
-    sys.path.insert(0, str(_SHARED_DIR))
-
-# ── MCP compat shim ─────────────────────────────────────────────
-
-import mcp.server  # noqa: E402
-
-_orig_server_cls = mcp.server.Server
-if not hasattr(_orig_server_cls, "tool"):
-
-    def _mock_tool(self, *args, **kwargs):
-        def decorator(func):
-            return func
-
-        return decorator
-
-    _orig_server_cls.tool = _mock_tool  # type: ignore[attr-defined]
-
-from cli import SERVER_REGISTRY, check_all_health, check_server_health  # noqa: E402
-from cn_commerce_base import (  # noqa: E402
+from shared.cli import SERVER_REGISTRY, check_all_health, check_server_health  # noqa: E402
+from shared.cn_commerce_base import (  # noqa: E402
     CommerceAPIError,
     CommerceMCPBase,
     ConfigValidationError,
@@ -192,10 +169,10 @@ class TestModuleImportability:
 
     @pytest.mark.parametrize("platform", _ALL_PLATFORMS)
     def test_platform_has_server_or_mcp_instance(self, platform):
-        """Each platform module must expose a 'server' MCP Server or FastMCP instance."""
+        """Each platform module must expose an 'MCPServer' or lowlevel Server instance."""
         module = _safe_import_module(platform)
         module_name = _PLATFORM_MODULE_MAP[platform]
-        # Some modules use mcp.server.Server, others use FastMCP
+        # Some modules name the instance 'server', others 'mcp'
         has_server = hasattr(module, "server") or hasattr(module, "mcp")
         assert has_server, f"{module_name} missing 'server' or 'mcp' attribute"
 
@@ -332,34 +309,23 @@ class TestFullRequestFlowAutomation:
 
     @pytest.mark.asyncio
     async def test_jd_full_flow(self, mock_http_response):
-        """JD: tool -> _call -> _request -> mock HTTP -> JSON response."""
-        from servers.jd.server import JDMCP
+        """Known incompatible legacy JD contract must fail before network I/O."""
+        from mcp.server.mcpserver.exceptions import ToolError
+
+        from servers.jd.server import JDMCP, get_order_list
 
         client = JDMCP(app_key="jd_key", app_secret="jd_secret", access_token="jd_tok")
-
         mock_http = AsyncMock()
-        mock_http_response.json.return_value = {
-            "jd_pop_order_search_response": {
-                "searchorderinfo_result": {
-                    "orderInfoList": [{"order_id": "30001"}],
-                    "orderTotal": 1,
-                }
-            }
-        }
-        mock_http.post.return_value = mock_http_response
         mock_http.is_closed = False
-
         with patch("servers.jd.server.jd", client):
             with patch.object(client, "_ensure_client", return_value=mock_http):
-                from servers.jd.server import get_order_list
-
-                result = await get_order_list(
-                    start_time="2024-01-01 00:00:00",
-                    end_time="2024-01-31 23:59:59",
-                )
-
-        data = json.loads(result)
-        assert "jd_pop_order_search_response" in data
+                with pytest.raises(ToolError, match="JD POP"):
+                    await get_order_list(
+                        start_time="2024-01-01 00:00:00",
+                        end_time="2024-01-31 23:59:59",
+                    )
+        mock_http.post.assert_not_awaited()
+        await client.close()
 
     @pytest.mark.asyncio
     async def test_taobao_full_flow(self, mock_http_response):
@@ -392,12 +358,12 @@ class TestFullRequestFlowAutomation:
         """DouDian: tool -> request -> mock HTTP -> parsed response."""
         from servers.doudian.server import DouDianClient
 
-        client = DouDianClient(app_key="dd_key", app_secret="dd_secret", access_token="tok")
+        client = DouDianClient(app_key="dd_key", app_secret="dd_secret", access_token="tok", shop_id="shop")
 
         mock_http = AsyncMock()
         mock_http_response.json.return_value = {
             "code": 10000,
-            "data": {"list": [{"order_id": "DD001", "order_status": 2}], "total": 1},
+            "data": {"shop_order_list": [{"order_id": "DD001", "order_status": 2}], "total": 1},
         }
         mock_http.post.return_value = mock_http_response
 
@@ -412,26 +378,24 @@ class TestFullRequestFlowAutomation:
 
     @pytest.mark.asyncio
     async def test_kuaishou_full_flow(self, mock_http_response):
-        """Kuaishou: tool -> _call -> mock HTTP -> JSON response."""
-        from servers.kuaishou.server import get_order_list, ks
+        """Current Kuaishou CLI reaches the signed GET protocol."""
+        from servers.kuaishou.server import KuaishouMCP, get_order_list
 
+        client = KuaishouMCP(app_key="key", app_secret="secret", sign_secret="sign", access_token="token")
         mock_http_response.json.return_value = {
             "result": 1,
-            "data": {"orderList": [{"order_id": "KS001"}], "totalCount": 1},
+            "data": {"orderList": [{"orderBaseInfo": {"oid": 123}}], "cursor": "nomore"},
         }
-
-        with patch.object(ks, "_call", new_callable=AsyncMock) as mock_call:
-            mock_call.return_value = {
-                "result": 1,
-                "data": {"orderList": [{"order_id": "KS001"}], "totalCount": 1},
-            }
-            result = await get_order_list(
-                start_time="2024-01-01 00:00:00",
-                end_time="2024-01-31 23:59:59",
-            )
-
-        data = json.loads(result)
-        assert "orderList" in data.get("data", data)
+        http = AsyncMock()
+        http.get.return_value = mock_http_response
+        http.is_closed = False
+        with patch("servers.kuaishou.server.ks", client):
+            with patch.object(client, "_ensure_client", return_value=http):
+                result = await get_order_list("2026-09-01 00:00:00", "2026-09-02 00:00:00")
+        assert json.loads(result)["data"]["cursor"] == "nomore"
+        assert http.get.call_args.args == ("https://openapi.kwaixiaodian.com/open/order/cursor/list",)
+        assert http.get.call_args.kwargs["params"]["method"] == "open.order.cursor.list"
+        await client.close()
 
 
 # ====================================================================
@@ -505,27 +469,46 @@ class TestErrorPropagationAutomation:
         assert documented_tool.__doc__ == "This tool is documented."
 
     @pytest.mark.asyncio
-    async def test_platform_tool_error_handling_consistency(self):
-        """All platform tool functions must use handle_tool_errors or equivalent error handling."""
-        for platform in _ALL_PLATFORMS:
-            module = _safe_import_module(platform)
-            module_name = _PLATFORM_MODULE_MAP[platform]
-
-            async_funcs = [
-                (name, obj)
-                for name, obj in inspect.getmembers(module, inspect.isfunction)
-                if inspect.iscoroutinefunction(obj) and not name.startswith("_")
-            ]
-
-            for name, func in async_funcs:
-                # Check that the function is wrapped (by handle_tool_errors or similar)
-                # A wrapped function will have __wrapped__ attribute from functools.wraps
-                is_wrapped = hasattr(func, "__wrapped__")
-                # Also check if it's a decorated function (not the raw function)
-                # We consider it safe if it's been decorated at all
-                assert (
-                    is_wrapped or not inspect.isfunction(func) or True
-                ), f"{module_name}.{name} may not have error handling decorator"
+    @pytest.mark.parametrize("platform", _ALL_PLATFORMS)
+    async def test_platform_tool_error_handling_consistency(self, platform):
+        """A real platform tool must expose an API failure, never fabricate success."""
+        module = _safe_import_module(platform)
+        if platform in {"oceanengine", "doudian"}:
+            client = MagicMock()
+            method = "_request" if platform == "oceanengine" else "request"
+            error_type = CommerceAPIError if platform == "oceanengine" else module.DouDianAPIError
+            request = AsyncMock(side_effect=error_type(40001, "test API failure"))
+            setattr(client, method, request)
+            with patch.object(module, "_get_client", return_value=client):
+                if platform == "oceanengine":
+                    result = json.loads(await module.get_advertiser_info("123"))
+                    assert result["error"]["code"] == 40001
+                else:
+                    result = await module.get_order_detail(order_id="test-order")
+                    assert result["error"]
+                    assert result["code"] == 40001
+        else:
+            client_name = {
+                "jd": "jd",
+                "taobao": "taobao",
+                "pinduoduo": "pdd",
+                "kuaishou": "ks",
+                "xiaohongshu": "xhs",
+                "weixin_store": "_wx",
+            }[platform]
+            method = "_request" if platform == "weixin_store" else "_call"
+            request = AsyncMock(side_effect=CommerceAPIError(40001, "test API failure"))
+            with patch.object(getattr(module, client_name), method, request):
+                with pytest.raises(CommerceAPIError) as caught:
+                    if platform == "xiaohongshu":
+                        await module.get_order_detail(order_id="test-order")
+                    elif platform in {"pinduoduo", "jd"}:
+                        # Read-contract migrations are gated; retain the transport error regression.
+                        await module.get_product_list()
+                    else:
+                        await module.get_shop_info()
+            assert caught.value.code == 40001
+        request.assert_awaited_once()
 
 
 # ====================================================================
@@ -900,41 +883,41 @@ class TestSecurityAutomation:
     def test_sql_injection_detection(self):
         """validate_api_param must detect SQL injection patterns."""
         with pytest.raises(ValueError, match="suspicious SQL"):
-            from cn_commerce_base import validate_api_param
+            from shared.cn_commerce_base import validate_api_param
 
             validate_api_param("query", "'; DROP TABLE users; --")
 
     def test_path_traversal_detection(self):
         """validate_api_param must detect path traversal patterns."""
         with pytest.raises(ValueError, match="path traversal"):
-            from cn_commerce_base import validate_api_param
+            from shared.cn_commerce_base import validate_api_param
 
             validate_api_param("file", "../../etc/passwd")
 
     def test_xss_detection(self):
         """validate_api_param must detect XSS patterns."""
         with pytest.raises(ValueError, match="suspicious script"):
-            from cn_commerce_base import validate_api_param
+            from shared.cn_commerce_base import validate_api_param
 
             validate_api_param("content", "<script>alert('xss')</script>")
 
     def test_normal_values_pass(self):
         """Normal values must pass validation."""
-        from cn_commerce_base import validate_api_param
+        from shared.cn_commerce_base import validate_api_param
 
         assert validate_api_param("name", "John Doe") == "John Doe"
         assert validate_api_param("id", "12345") == "12345"
 
     def test_sensitive_data_masking(self):
         """mask_sensitive_value must mask middle of long strings."""
-        from cn_commerce_base import mask_sensitive_value
+        from shared.cn_commerce_base import mask_sensitive_value
 
         result = mask_sensitive_value("abcdefghijklmnop")
         assert result == "abcd****mnop"
 
     def test_jwt_masking_in_logs(self):
         """mask_log_message must mask JWT tokens."""
-        from cn_commerce_base import mask_log_message
+        from shared.cn_commerce_base import mask_log_message
 
         msg = "Token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
         masked = mask_log_message(msg)
@@ -942,7 +925,7 @@ class TestSecurityAutomation:
 
     def test_dict_sensitive_key_masking(self):
         """mask_dict_sensitive_keys must mask known sensitive fields."""
-        from cn_commerce_base import mask_dict_sensitive_keys
+        from shared.cn_commerce_base import mask_dict_sensitive_keys
 
         data = {
             "app_key": "my_app_key_12345",
@@ -1050,9 +1033,9 @@ class TestPaginationAutomation:
             call_count += 1
             return {"result": [{"id": i} for i in range(page_size)]}
 
-        results = await client._paginate(fetch_fn, page_size=5, max_pages=3)
+        with pytest.raises(RuntimeError, match="result may be incomplete"):
+            await client._paginate(fetch_fn, page_size=5, max_pages=3)
         assert call_count == 3
-        assert len(results) == 15
 
     @pytest.mark.asyncio
     async def test_paginate_list_key_fallback(self):
@@ -1121,7 +1104,7 @@ class TestBatchRequestAutomation:
     @pytest.mark.asyncio
     async def test_batch_request_success(self):
         """_batch_request must handle multiple successful requests."""
-        from cn_commerce_base import BatchRequestItem
+        from shared.cn_commerce_base import BatchRequestItem
 
         client = CommerceMCPBase(app_key="k", app_secret="s")
         with patch.object(client, "_request", new_callable=AsyncMock) as mock_req:
@@ -1136,7 +1119,7 @@ class TestBatchRequestAutomation:
     @pytest.mark.asyncio
     async def test_batch_request_partial_failure(self):
         """_batch_request must handle mixed success/failure."""
-        from cn_commerce_base import BatchRequestItem
+        from shared.cn_commerce_base import BatchRequestItem
 
         client = CommerceMCPBase(app_key="k", app_secret="s")
         call_count = 0

@@ -2,10 +2,10 @@
 
 Item 3B verifies that ``register_common_tools`` (defined in
 ``shared.cn_commerce_base``) is correctly hooked into all eight platform
-servers, exposing the four operational tools ``get_metrics``, ``get_traces``,
-``get_alerts`` and ``export_data`` on each one.
+servers, exposing ``get_metrics``, ``get_traces``, ``get_alerts``,
+``export_data`` and ``build_daily_report`` on each one.
 
-All eight servers expose a FastMCP instance (named ``mcp`` on six of them,
+All eight servers expose an MCPServer instance (named ``mcp`` on six of them,
 ``server`` on doudian/oceanengine) whose registered tools are introspectable
 via ``await <instance>.list_tools()``.
 """
@@ -16,9 +16,10 @@ import json
 import os
 
 import pytest
+from mcp.types import TextContent
 
 # ── Environment: every server reads credentials at import time (the six
-# FastMCP servers build their client eagerly). Set placeholder creds for all
+# MCPServer servers build their client eagerly). Set placeholder creds for all
 # platforms up front so importing any server module never raises. ───────────
 
 _ENV = {
@@ -65,11 +66,11 @@ import servers.weixin_store.server as weixin_store_server  # noqa: E402
 import servers.xiaohongshu.server as xiaohongshu_server  # noqa: E402
 from shared.cn_commerce_base import CommerceMCPBase  # noqa: E402
 
-COMMON_TOOLS = {"get_metrics", "get_traces", "get_alerts", "export_data"}
+COMMON_TOOLS = {"get_metrics", "get_traces", "get_alerts", "export_data", "build_daily_report"}
 
-# All servers expose a FastMCP instance; the attribute is ``mcp`` on six of
+# All servers expose an MCPServer instance; the attribute is ``mcp`` on six of
 # them and ``server`` on doudian/oceanengine.
-FASTMCP_SERVERS = [
+MCP_SERVERS = [
     pytest.param(jd_server, id="jd"),
     pytest.param(kuaishou_server, id="kuaishou"),
     pytest.param(pinduoduo_server, id="pinduoduo"),
@@ -81,33 +82,44 @@ FASTMCP_SERVERS = [
 ]
 
 
-def _fastmcp(module):
-    """Return the module's FastMCP instance regardless of its attribute name."""
+def _mcp_server(module):
+    """Return the module's MCPServer instance regardless of its attribute name."""
     return getattr(module, "mcp", None) or module.server
 
 
-# ── FastMCP servers: introspect via list_tools() ────────────────────────────
+# ── MCPServer servers: introspect via list_tools() ────────────────────────────
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("module", FASTMCP_SERVERS)
-async def test_fastmcp_server_registers_common_tools(module):
-    """Each FastMCP server exposes all four common operational tools."""
-    tools = await _fastmcp(module).list_tools()
+@pytest.mark.parametrize("module", MCP_SERVERS)
+async def test_mcpserver_registers_common_tools(module):
+    """Each MCPServer exposes all five common operational tools."""
+    tools = await _mcp_server(module).list_tools()
     names = {t.name for t in tools}
     missing = COMMON_TOOLS - names
     assert not missing, f"{module.__name__} missing common tools: {sorted(missing)}"
 
 
-@pytest.mark.parametrize("module", FASTMCP_SERVERS)
-def test_fastmcp_server_keeps_platform_tools(module):
+@pytest.mark.parametrize("module", MCP_SERVERS)
+def test_mcpserver_keeps_platform_tools(module):
     """Wiring common tools must not drop a server's existing platform tools."""
-    registered = set(_fastmcp(module)._tool_manager._tools.keys())
-    # Every server has more than just the four common tools.
+    registered = set(_mcp_server(module)._tool_manager._tools.keys())
+    # Every server has more than just the five common tools.
     assert len(registered - COMMON_TOOLS) > 0
 
 
-# ── End-to-end: invoke the registered FastMCP tools against a real client ────
+# ── End-to-end: invoke the registered MCPServer tools against a real client ────
+
+
+async def _call_tool_text(server, name, args=None):
+    """Invoke a registered tool through the public API and return its text payload.
+
+    ``MCPServer.call_tool()`` answers with a ``CallToolResult``; every tool in
+    this project returns a JSON string, so the payload is its text content.
+    """
+    result = await server.call_tool(name, args or {})
+    assert not result.is_error, f"{name} returned an error: {result.content}"
+    return "".join(block.text for block in result.content if isinstance(block, TextContent))
 
 
 @pytest.mark.asyncio
@@ -115,8 +127,7 @@ async def test_get_metrics_tool_returns_metrics_summary():
     """Calling the registered get_metrics tool yields a JSON metrics summary."""
     tool = jd_server.mcp._tool_manager.get_tool("get_metrics")
     assert tool is not None
-    raw = await jd_server.mcp._tool_manager.call_tool("get_metrics", {})
-    payload = json.loads(raw)
+    payload = json.loads(await _call_tool_text(jd_server.mcp, "get_metrics"))
     # Shape produced by CommerceMCPBase.get_metrics_summary().
     assert "global" in payload
     assert "endpoints" in payload
@@ -126,7 +137,7 @@ async def test_get_metrics_tool_returns_metrics_summary():
 @pytest.mark.asyncio
 async def test_export_data_tool_returns_serialized_records():
     """Calling export_data with one record returns a non-empty string carrying it."""
-    raw = await jd_server.mcp._tool_manager.call_tool("export_data", {"records_json": json.dumps([{"a": 1}])})
+    raw = await _call_tool_text(jd_server.mcp, "export_data", {"records_json": json.dumps([{"a": 1}])})
     assert isinstance(raw, str)
     assert raw.strip()
     # The single record's field name and value must both survive the round-trip,
@@ -138,13 +149,11 @@ async def test_export_data_tool_returns_serialized_records():
 @pytest.mark.asyncio
 async def test_get_alerts_and_traces_tools_return_json():
     """get_alerts / get_traces tools return JSON with their documented shape."""
-    alerts_raw = await jd_server.mcp._tool_manager.call_tool("get_alerts", {})
-    alerts = json.loads(alerts_raw)
+    alerts = json.loads(await _call_tool_text(jd_server.mcp, "get_alerts"))
     assert "firing" in alerts
     assert "stats" in alerts
 
-    traces_raw = await jd_server.mcp._tool_manager.call_tool("get_traces", {})
-    traces = json.loads(traces_raw)
+    traces = json.loads(await _call_tool_text(jd_server.mcp, "get_traces"))
     assert isinstance(traces, dict)
 
 
@@ -156,21 +165,109 @@ async def test_register_common_tools_with_callable_client():
     """register_common_tools accepts a zero-arg callable (the lazy-getter form).
 
     doudian / oceanengine pass ``_get_client`` (a callable) rather than an
-    instance; exercise that resolution path end-to-end on a fresh FastMCP.
+    instance; exercise that resolution path end-to-end on a fresh MCPServer.
     """
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
     from shared.cn_commerce_base import register_common_tools
 
     client = CommerceMCPBase(app_key="k", app_secret="s", access_token="t")
-    mcp = FastMCP("probe")
+    mcp = MCPServer("probe")
     register_common_tools(mcp, lambda: client)
 
     names = {t.name for t in await mcp.list_tools()}
     assert COMMON_TOOLS <= names
 
-    raw = await mcp._tool_manager.call_tool("get_metrics", {})
-    assert "global" in json.loads(raw)
+    assert "global" in json.loads(await _call_tool_text(mcp, "get_metrics"))
 
-    export_raw = await mcp._tool_manager.call_tool("export_data", {"records_json": json.dumps([{"a": 1}])})
+    export_raw = await _call_tool_text(mcp, "export_data", {"records_json": json.dumps([{"a": 1}])})
     assert isinstance(export_raw, str) and export_raw.strip()
+
+
+def _report_shops():
+    """Synthetic normalized records: amounts are integer fen, dates have offsets."""
+    shops = []
+    for platform, shop_id, amount in (("doudian", "one", 1999), ("jd", "two", 3001)):
+        shops.append(
+            {
+                "platform": platform,
+                "shop_id": shop_id,
+                "input_format": "normalized",
+                "coverage": {day: {"orders": True, "refunds": True} for day in ("2026-09-09", "2026-09-10")},
+                "orders": [
+                    {
+                        "order_id": "same-id-in-different-shops",
+                        "platform": platform,
+                        "shop_id": shop_id,
+                        "status": "paid",
+                        "amount_paid": amount,
+                        "paid_at": "2026-09-10T10:00:00+08:00",
+                        "items": [
+                            {
+                                "product_id": "product-one",
+                                "product_name": "Synthetic product",
+                                "price": amount,
+                                "quantity": 1,
+                            }
+                        ],
+                    }
+                ],
+                "refunds": [],
+            }
+        )
+    return shops
+
+
+def _report_mcp_server():
+    """Register the real common tool without credentials or platform clients."""
+    from mcp.server.mcpserver import MCPServer
+
+    from shared.cn_commerce_base import register_common_tools
+
+    server = MCPServer("daily-report-contract")
+    register_common_tools(server, CommerceMCPBase())
+    return server
+
+
+@pytest.mark.asyncio
+async def test_build_daily_report_through_mcp_returns_complete_scoped_totals():
+    payload = json.loads(
+        await _call_tool_text(
+            _report_mcp_server(),
+            "build_daily_report",
+            {
+                "shops_json": json.dumps(_report_shops()),
+                "report_date": "2026-09-10",
+            },
+        )
+    )
+    assert payload["complete"] is True
+    assert payload["money_unit"] == "fen"
+    assert payload["total_summary"]["order_count"] == 2
+    assert payload["total_summary"]["gmv"] == 5000
+    assert payload["total_summary"]["avg_order_value"] == 2500
+    assert payload["total_summary"]["refund_amount"] == 0
+    assert payload["yesterday_summary"]["gmv"] == 0
+
+
+@pytest.mark.asyncio
+async def test_build_daily_report_through_mcp_keeps_missing_coverage_unknown():
+    shops = _report_shops()
+    del shops[0]["coverage"]["2026-09-10"]["orders"]
+    payload = json.loads(
+        await _call_tool_text(
+            _report_mcp_server(),
+            "build_daily_report",
+            {
+                "shops_json": json.dumps(shops),
+                "report_date": "2026-09-10",
+            },
+        )
+    )
+    assert payload["complete"] is False
+    assert payload["total_summary"]["gmv"] is None
+    assert payload["total_summary"]["order_count"] is None
+    partial = next(shop for shop in payload["shops"] if shop["shop_id"] == "one")
+    assert partial["observed_summary"]["gmv"] == 1999
+    assert any(error["code"] == "coverage_unconfirmed" for error in partial["errors"])
+    assert payload["yesterday_complete"] is True

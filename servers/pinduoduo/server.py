@@ -10,67 +10,19 @@ from __future__ import annotations
 
 import json
 import os
-import time
+from contextlib import asynccontextmanager
 
-import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
+from servers.pinduoduo.client import PinduoduoMCP
 from shared.cn_commerce_base import (
-    CommerceAPIError,
-    CommerceMCPBase,
     ConfigValidationError,
-    SignMethod,
     register_common_tools,
 )
+from shared.platform_clients import mcp_capability_tool
 
 # ── Pinduoduo client ────────────────────────────────────────────────────────
-
-
-class PinduoduoMCP(CommerceMCPBase):
-    """Pinduoduo-specific client.
-
-    PDD uses 'type' param for the API method name, 'client_id' for app key,
-    and sends all params as POST form data to a single router endpoint.
-    Signing is standard MD5 (provided by the base class).
-    """
-
-    BASE_URL = "https://gw-api.pinduoduo.com/api/router"
-    sign_method = SignMethod.MD5
-
-    async def _call(self, api_type: str, biz_params: dict | None = None) -> dict:
-        """Make a PDD API call.
-
-        Builds system params (type, client_id, timestamp, data_type,
-        access_token), merges business params, signs with MD5, and POSTs
-        as form data.
-        """
-        params: dict[str, str] = {
-            "type": api_type,
-            "client_id": self.app_key,
-            "timestamp": str(int(time.time() * 1000)),
-            "data_type": "JSON",
-        }
-        if self.access_token:
-            params["access_token"] = self.access_token
-
-        # Merge business params (convert all values to strings)
-        if biz_params:
-            for k, v in biz_params.items():
-                params[k] = str(v)
-
-        # Sign (base-class MD5: secret + sorted_kv + secret → md5 → upper)
-        params["sign"] = self._sign(params)
-
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(self.BASE_URL, data=params)
-
-        result = resp.json()
-        if "error_response" in result:
-            raise CommerceAPIError(
-                code=result["error_response"].get("error_code", result["error_response"].get("code", -1)),
-                msg=result["error_response"].get("error_msg", result["error_response"].get("msg", "unknown")),
-            )
-        return result
 
 
 # ── Instantiate client from env ────────────────────────────────────────────
@@ -94,7 +46,19 @@ pdd = _create_pinduoduo_client()
 
 # ── MCP server ─────────────────────────────────────────────────────────────
 
-mcp = FastMCP("mcp-cn-pinduoduo")
+
+@asynccontextmanager
+async def _lifespan(_server):
+    try:
+        yield {}
+    finally:
+        client = pdd
+        if client is not None:
+            await client.close()
+
+
+mcp = MCPServer("mcp-cn-pinduoduo", lifespan=_lifespan)
+business_tool = mcp_capability_tool(mcp.tool, "pinduoduo", unavailable_error=ToolError)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -102,7 +66,7 @@ mcp = FastMCP("mcp-cn-pinduoduo")
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_order_list(
     start_time: str,
     end_time: str,
@@ -110,40 +74,22 @@ async def get_order_list(
     page: int = 1,
     page_size: int = 20,
 ) -> str:
-    """Query order list by time range and optional status.
+    """Unavailable until the official PDD read schema can be verified.
 
-    Args:
-        start_time: Order start time, e.g. "2024-01-01 00:00:00"
-        end_time: Order end time, e.g. "2024-01-31 23:59:59"
-        order_status: Status filter. Common values:
-            1 (待发货), 2 (已发货), 3 (已签收), 4 (退款中), 5 (已退款).
-            Empty string means all statuses.
-        page: Page number, starting from 1.
-        page_size: Number of orders per page (max 100).
+    Existing input names are retained for MCP discovery compatibility.
+    See docs/pinduoduo-contract.md for verified sources and missing fields.
     """
-    biz_params: dict = {
-        "start_created_at": start_time,
-        "end_created_at": end_time,
-        "page": str(page),
-        "page_size": str(page_size),
-    }
-    if order_status:
-        biz_params["order_status"] = order_status
-
-    result = await pdd._call("pdd.order.list.get", biz_params)
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    raise ToolError("PDD read schema unavailable; see docs/pinduoduo-contract.md")
 
 
-@mcp.tool()
+@business_tool()
 async def get_order_detail(order_sn: str) -> str:
-    """Get full details of a single order.
+    """Unavailable until the official PDD read schema can be verified.
 
-    Args:
-        order_sn: The PDD order serial number (e.g. "231215-1234567890123").
+    Existing input names are retained for MCP discovery compatibility.
+    See docs/pinduoduo-contract.md for verified sources and missing fields.
     """
-    biz_params = {"order_sn": order_sn}
-    result = await pdd._call("pdd.order.information.get", biz_params)
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    raise ToolError("PDD read schema unavailable; see docs/pinduoduo-contract.md")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -151,7 +97,7 @@ async def get_order_detail(order_sn: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_product_list(
     page: int = 1,
     page_size: int = 20,
@@ -170,7 +116,7 @@ async def get_product_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_product_detail(goods_id: str) -> str:
     """Get full details of a single product by goods ID.
 
@@ -182,7 +128,7 @@ async def get_product_detail(goods_id: str) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def search_products(
     keyword: str,
     page: int = 1,
@@ -209,41 +155,29 @@ async def search_products(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_refund_list(
     start_time: str,
     end_time: str,
     page: int = 1,
     page_size: int = 20,
 ) -> str:
-    """Query refund (after-sale) list by time range.
+    """Unavailable until the official PDD read schema can be verified.
 
-    Args:
-        start_time: Query start time, e.g. "2024-01-01 00:00:00"
-        end_time: Query end time, e.g. "2024-01-31 23:59:59"
-        page: Page number, starting from 1.
-        page_size: Number of records per page (max 100).
+    Existing input names are retained for MCP discovery compatibility.
+    See docs/pinduoduo-contract.md for verified sources and missing fields.
     """
-    biz_params = {
-        "start_created_at": start_time,
-        "end_created_at": end_time,
-        "page": str(page),
-        "page_size": str(page_size),
-    }
-    result = await pdd._call("pdd.refund.list.get", biz_params)
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    raise ToolError("PDD read schema unavailable; see docs/pinduoduo-contract.md")
 
 
-@mcp.tool()
+@business_tool()
 async def get_refund_detail(refund_id: str) -> str:
-    """Get full details of a single refund record.
+    """Unavailable until the official PDD read schema can be verified.
 
-    Args:
-        refund_id: The refund/after-sale record ID (e.g. "RF123456789").
+    Existing input names are retained for MCP discovery compatibility.
+    See docs/pinduoduo-contract.md for verified sources and missing fields.
     """
-    biz_params = {"refund_id": refund_id}
-    result = await pdd._call("pdd.refund.information.get", biz_params)
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    raise ToolError("PDD read schema unavailable; see docs/pinduoduo-contract.md")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -251,7 +185,7 @@ async def get_refund_detail(refund_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_logistics_tracking(order_sn: str) -> str:
     """Get logistics tracking information for an order.
 
@@ -263,7 +197,7 @@ async def get_logistics_tracking(order_sn: str) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def list_logistics_companies() -> str:
     """List all available logistics companies on Pinduoduo platform."""
     result = await pdd._call("pdd.logistics.companies.get", {})
@@ -275,7 +209,7 @@ async def list_logistics_companies() -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_review_list(
     goods_id: str,
     page: int = 1,
@@ -302,11 +236,14 @@ async def get_review_list(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_shop_info() -> str:
-    """Get mall/shop basic information for the authenticated merchant."""
-    result = await pdd._call("pdd.mall.info.get", {})
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    """Unavailable until the official PDD read schema can be verified.
+
+    Existing input names are retained for MCP discovery compatibility.
+    See docs/pinduoduo-contract.md for verified sources and missing fields.
+    """
+    raise ToolError("PDD read schema unavailable; see docs/pinduoduo-contract.md")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -314,7 +251,7 @@ async def get_shop_info() -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def list_promotions(
     page: int = 1,
     page_size: int = 20,
@@ -338,7 +275,7 @@ async def list_promotions(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def search_affiliate_goods(
     keyword: str,
     page: int = 1,

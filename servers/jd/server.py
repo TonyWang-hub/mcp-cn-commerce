@@ -20,6 +20,7 @@ from shared.cn_commerce_base import (
     ConfigValidationError,
     register_common_tools,
 )
+from shared.platform_clients import mcp_capability_tool
 
 # ── JD client ───────────────────────────────────────────────────────────────
 
@@ -57,13 +58,14 @@ async def _lifespan(_server):
 
 
 mcp = MCPServer("mcp-cn-jd", lifespan=_lifespan)
+business_tool = mcp_capability_tool(mcp.tool, "jd", unavailable_error=ToolError)
 
 
 def _require_official_read_contract() -> None:
     raise ToolError("JD POP after-sale service is not a verified completed-refund contract. See docs/jd-contract.md")
 
 
-@mcp.tool()
+@business_tool()
 async def get_order_list(
     start_time: str,
     end_time: str,
@@ -102,7 +104,7 @@ async def get_order_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_order_detail(order_id: str, source_id: str = "", optional_fields: str = "") -> str:
     """Read one POP order, requiring explicit caller origin and selected fields."""
     try:
@@ -116,7 +118,7 @@ async def get_order_detail(order_id: str, source_id: str = "", optional_fields: 
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_product_list(
     page: int = 1,
     page_size: int = 20,
@@ -142,7 +144,7 @@ async def get_product_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_shop_info(shop_id: str = "") -> str:
     """Read the token's POP shop; optional shop_id verifies the returned identity."""
     result = await jd._call(SHOP_INFO, {})
@@ -158,7 +160,7 @@ async def get_shop_info(shop_id: str = "") -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_after_sale_list(
     start_time: str,
     end_time: str,
@@ -195,7 +197,7 @@ async def get_after_sale_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_after_sale_detail(after_sale_id: str) -> str:
     """Get full details of a single after-sale (return/refund/exchange) record.
 
@@ -213,7 +215,7 @@ async def get_after_sale_detail(after_sale_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_logistics_tracking(order_id: str) -> str:
     """Get logistics tracking information for an order.
 
@@ -230,7 +232,7 @@ async def get_logistics_tracking(order_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_review_list(
     product_id: str,
     page: int = 1,
@@ -253,7 +255,7 @@ async def get_review_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_review_detail(review_id: str) -> str:
     """Get full details of a single review.
 
@@ -270,7 +272,7 @@ async def get_review_detail(review_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_price_info(sku_ids: str) -> str:
     """Get real-time price information for given SKUs, including promotion overlay.
 
@@ -289,7 +291,7 @@ async def get_price_info(sku_ids: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_inventory(ware_ids: str) -> str:
     """Query current inventory/stock levels for given ware IDs.
 
@@ -308,7 +310,7 @@ async def get_inventory(ware_ids: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def list_promotions(
     status: str = "",
     page: int = 1,
@@ -334,7 +336,7 @@ async def list_promotions(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def list_coupons(
     status: str = "",
     page: int = 1,
@@ -365,7 +367,7 @@ async def list_coupons(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def list_categories(parent_id: str = "0") -> str:
     """List product categories under a given parent category.
 
@@ -383,7 +385,7 @@ async def list_categories(parent_id: str = "0") -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_shop_score() -> str:
     """Get shop DSR (Detail Seller Rating) scores including product description,
     service attitude, and delivery speed ratings.

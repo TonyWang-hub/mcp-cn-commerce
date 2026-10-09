@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 
 # Repo root, used by tests that probe the on-disk project layout (e.g. .env).
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -174,170 +175,26 @@ class TestGetAdvertiserInfo:
         assert data["error"]["message"] == "Internal server error"
 
 
-class TestGetCampaignReport:
-    """Tests for get_campaign_report."""
+class TestUnsupportedReportContracts:
+    """Unmigrated report tools remain discoverable but cannot reach a client."""
 
     @pytest.mark.asyncio
-    async def test_returns_report_with_correct_fields(self, mock_client, mock_request):
-        """Report response includes impressions, clicks, cost, and CTR."""
-        mock_request.return_value = {
-            "code": 0,
-            "data": {
-                "list": [
-                    {
-                        "campaign_id": 1001,
-                        "campaign_name": "春节促销",
-                        "show_cnt": 152000,
-                        "click_cnt": 3800,
-                        "stat_cost": 12500.50,
-                        "ctr": 2.5,
-                        "convert_cnt": 120,
-                        "cpc": 3.29,
-                    }
-                ],
-                "page_info": {"page": 1, "page_size": 20, "total": 1},
-            },
-        }
+    @pytest.mark.parametrize(
+        "tool_name",
+        ["get_campaign_report", "get_ad_detail_report"],
+    )
+    async def test_unmigrated_report_fails_before_request(self, mock_client, mock_request, tool_name):
+        import importlib
 
+        tool = getattr(importlib.import_module("servers.oceanengine.server"), tool_name)
         with _patch_get_client(mock_client):
-            from servers.oceanengine.server import get_campaign_report
-
-            result = await get_campaign_report(
-                advertiser_id="123456",
-                start_date="2024-01-01",
-                end_date="2024-01-31",
-            )
-
-        data = json.loads(result)
-        report = data["data"]["list"][0]
-
-        # Verify the key metric fields mentioned in the docstring
-        assert "show_cnt" in report  # impressions
-        assert "click_cnt" in report  # clicks
-        assert "stat_cost" in report  # cost
-        assert "ctr" in report  # CTR
-        assert "cpc" in report
-        assert report["campaign_id"] == 1001
-
-    @pytest.mark.asyncio
-    async def test_page_size_capped_at_100(self, mock_client, mock_request):
-        """When page_size > 100 is passed it is capped to 100 via min()."""
-        mock_request.return_value = {"code": 0, "data": {"list": []}}
-
-        with _patch_get_client(mock_client):
-            from servers.oceanengine.server import get_campaign_report
-
-            await get_campaign_report(
-                advertiser_id="123",
-                start_date="2024-01-01",
-                end_date="2024-01-31",
-                page_size=200,
-            )
-
-        # _request was called; extract the params it received.
-        call_kwargs = mock_request.call_args[1]
-        assert call_kwargs["params"]["page_size"] == 100
-
-    @pytest.mark.asyncio
-    async def test_api_error_handling(self, mock_client, mock_request):
-        """A CommerceAPIError is caught and returned as error JSON."""
-        mock_request.side_effect = CommerceAPIError(40100, "Advertiser not found")
-
-        with _patch_get_client(mock_client):
-            from servers.oceanengine.server import get_campaign_report
-
-            result = await get_campaign_report(
-                advertiser_id="999",
-                start_date="2024-01-01",
-                end_date="2024-01-31",
-            )
-
-        data = json.loads(result)
-        assert data["error"]["code"] == 40100
-        assert "not found" in data["error"]["message"]
-
-
-class TestGetAdDetailReport:
-    """Tests for get_ad_detail_report."""
-
-    @pytest.mark.asyncio
-    async def test_returns_ad_level_data(self, mock_client, mock_request):
-        """Response includes per-ad performance metrics."""
-        mock_request.return_value = {
-            "code": 0,
-            "data": {
-                "list": [
-                    {
-                        "ad_id": 50001,
-                        "ad_name": "信息流广告-A",
-                        "show_cnt": 88000,
-                        "click_cnt": 2200,
-                        "stat_cost": 6400.00,
-                        "ctr": 2.5,
-                        "convert_cnt": 85,
-                    },
-                    {
-                        "ad_id": 50002,
-                        "ad_name": "开屏广告-B",
-                        "show_cnt": 120000,
-                        "click_cnt": 3600,
-                        "stat_cost": 9800.00,
-                        "ctr": 3.0,
-                        "convert_cnt": 140,
-                    },
-                ]
-            },
-        }
-
-        with _patch_get_client(mock_client):
-            from servers.oceanengine.server import get_ad_detail_report
-
-            result = await get_ad_detail_report(
-                advertiser_id="123456",
-                start_date="2024-02-01",
-                end_date="2024-02-15",
-            )
-
-        data = json.loads(result)
-        assert len(data["data"]["list"]) == 2
-        assert data["data"]["list"][0]["ad_id"] == 50001
-        assert data["data"]["list"][1]["ad_name"] == "开屏广告-B"
-
-    @pytest.mark.asyncio
-    async def test_page_size_capped_at_100(self, mock_client, mock_request):
-        """page_size > 100 is silently reduced to 100."""
-        mock_request.return_value = {"code": 0, "data": {"list": []}}
-
-        with _patch_get_client(mock_client):
-            from servers.oceanengine.server import get_ad_detail_report
-
-            await get_ad_detail_report(
-                advertiser_id="123",
-                start_date="2024-01-01",
-                end_date="2024-01-31",
-                page_size=500,
-            )
-
-        call_kwargs = mock_request.call_args[1]
-        assert call_kwargs["params"]["page_size"] == 100
-
-    @pytest.mark.asyncio
-    async def test_api_error_handling(self, mock_client, mock_request):
-        """CommerceAPIError is formatted as error JSON."""
-        mock_request.side_effect = CommerceAPIError(40100, "Date range too wide")
-
-        with _patch_get_client(mock_client):
-            from servers.oceanengine.server import get_ad_detail_report
-
-            result = await get_ad_detail_report(
-                advertiser_id="123",
-                start_date="2024-01-01",
-                end_date="2024-12-31",
-            )
-
-        data = json.loads(result)
-        assert data["error"]["code"] == 40100
-        assert data["error"]["message"] == "Date range too wide"
+            with pytest.raises(ToolError, match="migration"):
+                await tool(
+                    advertiser_id="123",
+                    start_date="2024-01-01",
+                    end_date="2024-01-31",
+                )
+        mock_request.assert_not_awaited()
 
 
 class TestListCampaigns:
@@ -512,82 +369,20 @@ class TestGetAccountBalance:
 
 
 class TestGetQianchuanReport:
-    """Tests for get_qianchuan_report."""
+    """The pending Qianchuan report migration fails before transport."""
 
     @pytest.mark.asyncio
-    async def test_returns_qianchuan_report(self, mock_client, mock_request):
-        """Returns Qianchuan ecommerce ad report with GMV and ROI fields."""
-        mock_request.return_value = {
-            "code": 0,
-            "data": {
-                "list": [
-                    {
-                        "ad_id": 70001,
-                        "ad_name": "千川直播引流",
-                        "show_cnt": 320000,
-                        "click_cnt": 9600,
-                        "stat_cost": 28500.00,
-                        "ctr": 3.0,
-                        "convert_cnt": 580,
-                        "gmv": 152000.00,
-                        "roi": 5.33,
-                    }
-                ],
-                "page_info": {"page": 1, "page_size": 20, "total": 1},
-            },
-        }
+    async def test_unmigrated_report_fails_before_request(self, mock_client, mock_request):
+        from servers.oceanengine.server import get_qianchuan_report
 
         with _patch_get_client(mock_client):
-            from servers.oceanengine.server import get_qianchuan_report
-
-            result = await get_qianchuan_report(
-                advertiser_id="123",
-                start_date="2024-03-01",
-                end_date="2024-03-31",
-            )
-
-        data = json.loads(result)
-        report = data["data"]["list"][0]
-        assert report["ad_id"] == 70001
-        assert "gmv" in report
-        assert "roi" in report
-        assert report["roi"] == 5.33
-
-    @pytest.mark.asyncio
-    async def test_page_size_capped_at_100(self, mock_client, mock_request):
-        """page_size > 100 is capped."""
-        mock_request.return_value = {"code": 0, "data": {"list": []}}
-
-        with _patch_get_client(mock_client):
-            from servers.oceanengine.server import get_qianchuan_report
-
-            await get_qianchuan_report(
-                advertiser_id="123",
-                start_date="2024-01-01",
-                end_date="2024-01-31",
-                page_size=500,
-            )
-
-        call_kwargs = mock_request.call_args[1]
-        assert call_kwargs["params"]["page_size"] == 100
-
-    @pytest.mark.asyncio
-    async def test_api_error_handling(self, mock_client, mock_request):
-        """CommerceAPIError is caught and formatted."""
-        mock_request.side_effect = CommerceAPIError(40100, "Qianchuan report not available")
-
-        with _patch_get_client(mock_client):
-            from servers.oceanengine.server import get_qianchuan_report
-
-            result = await get_qianchuan_report(
-                advertiser_id="123",
-                start_date="2024-01-01",
-                end_date="2024-01-31",
-            )
-
-        data = json.loads(result)
-        assert data["error"]["code"] == 40100
-        assert "Qianchuan" in data["error"]["message"]
+            with pytest.raises(ToolError, match="migration"):
+                await get_qianchuan_report(
+                    advertiser_id="123",
+                    start_date="2024-01-01",
+                    end_date="2024-01-31",
+                )
+        mock_request.assert_not_awaited()
 
 
 class TestGetQianchuanCampaignList:
@@ -1513,20 +1308,8 @@ class TestPaginationCapping:
         "tool_name, call_kwargs",
         [
             (
-                "get_campaign_report",
-                {"advertiser_id": "1", "start_date": "2024-01-01", "end_date": "2024-01-31", "page_size": 300},
-            ),
-            (
-                "get_ad_detail_report",
-                {"advertiser_id": "1", "start_date": "2024-01-01", "end_date": "2024-01-31", "page_size": 300},
-            ),
-            (
                 "list_campaigns",
                 {"advertiser_id": "1", "page_size": 300},
-            ),
-            (
-                "get_qianchuan_report",
-                {"advertiser_id": "1", "start_date": "2024-01-01", "end_date": "2024-01-31", "page_size": 300},
             ),
             (
                 "get_qianchuan_campaign_list",

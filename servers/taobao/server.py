@@ -19,6 +19,7 @@ from shared.cn_commerce_base import (
     ConfigValidationError,
     register_common_tools,
 )
+from shared.platform_clients import mcp_capability_tool
 
 # ── Taobao client ───────────────────────────────────────────────────────────────
 
@@ -56,6 +57,7 @@ async def _lifespan(_server):
 
 
 mcp = MCPServer("mcp-cn-taobao", lifespan=_lifespan)
+business_tool = mcp_capability_tool(mcp.tool, "taobao")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -63,7 +65,7 @@ mcp = MCPServer("mcp-cn-taobao", lifespan=_lifespan)
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_order_list(
     start_time: str,
     end_time: str,
@@ -100,7 +102,7 @@ async def get_order_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_order_detail(tid: str) -> str:
     """Get full details of a single order.
 
@@ -112,7 +114,7 @@ async def get_order_detail(tid: str) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_increment_orders(
     start_time: str,
     end_time: str,
@@ -148,7 +150,7 @@ async def get_increment_orders(
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_product_list(
     page: int = 1,
     page_size: int = 20,
@@ -173,7 +175,7 @@ async def get_product_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_product_detail(num_iid: str) -> str:
     """Get full details of a single product by item ID.
 
@@ -190,7 +192,7 @@ async def get_product_detail(num_iid: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_refund_list(
     start_time: str,
     end_time: str,
@@ -227,7 +229,7 @@ async def get_refund_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_refund_detail(refund_id: str) -> str:
     """Get full details of a single refund/return record.
 
@@ -244,7 +246,7 @@ async def get_refund_detail(refund_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_logistics_tracking(tid: str) -> str:
     """Get logistics tracking information for an order.
 
@@ -261,7 +263,7 @@ async def get_logistics_tracking(tid: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_review_list(
     num_iid: str,
     page: int = 1,
@@ -289,7 +291,7 @@ async def get_review_list(
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_shop_info(nick: str = "") -> str:
     """Get shop basic information.
 
@@ -304,7 +306,7 @@ async def get_shop_info(nick: str = "") -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_seller_info() -> str:
     """Get authenticated seller (user) information including seller credit and profile."""
     result = await taobao._call("taobao.user.seller.get", {})
@@ -316,7 +318,7 @@ async def get_seller_info() -> str:
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def list_promotions(
     status: str = "",
     page: int = 1,
@@ -347,7 +349,7 @@ async def list_promotions(
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def list_categories(parent_cid: str = "0") -> str:
     """List product categories under a given parent category.
 

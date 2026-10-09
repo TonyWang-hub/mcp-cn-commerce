@@ -9,6 +9,20 @@ updates:
       - "dependencies"
       - "auto-merge"
     open-pull-requests-limit: 10
+    groups:
+      mcp-sdk:
+        patterns:
+          - "mcp"
+          - "mcp-types"
+      httpx2-stack:
+        patterns:
+          - "httpx2"
+          - "httpcore2"
+      pydantic-stack:
+        patterns:
+          - "pydantic"
+          - "pydantic-core"
+          - "pydantic_core"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -18,5 +32,3 @@ updates:
     labels:
       - "dependencies"
       - "ci"
-    # 自动合并补丁版本更新
-    auto-merge: true

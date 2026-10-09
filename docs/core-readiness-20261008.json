@@ -1,0 +1,321 @@
+{
+  "result": "passed",
+  "scope": "local isolated distribution validation; no Docker, merchant API calls, or remote publishing",
+  "source": {
+    "baseline_commit": "1449f494aa68d5261fc0c57c44bfce6a409a5611",
+    "source_fingerprint_file": "<validation-dir>/runtime-source-fingerprint.json",
+    "runtime_source_fingerprint": {
+      "algorithm": "sha256(path + nul + content + nul), sorted POSIX paths",
+      "files": 50,
+      "sha256": "fe0f45d6e2426c6cc92734ae450a24c61f819ce16f4645d64f550b28bff6e02f"
+    },
+    "computed_runtime_source_fingerprint": {
+      "files": 50,
+      "sha256": "fe0f45d6e2426c6cc92734ae450a24c61f819ce16f4645d64f550b28bff6e02f",
+      "matches_runtime_source_fingerprint_json": true
+    },
+    "fingerprint_matches": true,
+    "artifact_source_match_report": "<validation-dir>/artifact-source-match.json",
+    "artifact_source_match": {
+      "wheel_runtime_files": 50,
+      "sdist_source_and_document_files": 51,
+      "wheel_readme_metadata_matches": true,
+      "new_regressions_in_sdist": true,
+      "artifacts": {
+        "mcp_cn_commerce-0.1.6-py3-none-any.whl": "00486a90ddda7885b0f7a06dae586c3a75d40462a3858acbd30d6155844e1da3",
+        "mcp_cn_commerce-0.1.6.tar.gz": "12b50da6cd2623042564d4a8fa7add1744801c6e12e0e27c9d7a447328ca9f9a"
+      }
+    },
+    "uncommitted_worktree_at_validation": true
+  },
+  "tools": {
+    "build_environment_python": "3.12.3",
+    "build_environment_pip": "24.0",
+    "build": "1.6.1",
+    "twine": "7.0.0",
+    "uv": "0.11.14",
+    "install_environment_python": "3.12.13"
+  },
+  "artifacts": [
+    {
+      "path": "<validation-dir>/dist/mcp_cn_commerce-0.1.6-py3-none-any.whl",
+      "filename": "mcp_cn_commerce-0.1.6-py3-none-any.whl",
+      "size_bytes": 229575,
+      "sha256": "00486a90ddda7885b0f7a06dae586c3a75d40462a3858acbd30d6155844e1da3",
+      "format": "wheel",
+      "version": "0.1.6"
+    },
+    {
+      "path": "<validation-dir>/dist/mcp_cn_commerce-0.1.6.tar.gz",
+      "filename": "mcp_cn_commerce-0.1.6.tar.gz",
+      "size_bytes": 343808,
+      "sha256": "12b50da6cd2623042564d4a8fa7add1744801c6e12e0e27c9d7a447328ca9f9a",
+      "format": "sdist",
+      "version": "0.1.6"
+    }
+  ],
+  "commands": [
+    {
+      "name": "build",
+      "command": "<validation-dir>/venv/bin/python -m build --outdir <validation-dir>/dist",
+      "exit_code": 0,
+      "log": "logs/build-final.log"
+    },
+    {
+      "name": "twine_check",
+      "command": "<validation-dir>/venv/bin/python -m twine check <validation-dir>/dist/*",
+      "exit_code": 0,
+      "log": "logs/twine-check-final.log"
+    },
+    {
+      "name": "public_boundary",
+      "command": "<validation-dir>/venv/bin/python scripts/check_public_boundary.py --dist <validation-dir>/dist",
+      "exit_code": 0,
+      "log": "logs/public-boundary-final.log"
+    },
+    {
+      "name": "install_wheel-locked",
+      "command": "uv pip install --reinstall-package mcp-cn-commerce --python <validation-dir>/wheel-locked/bin/python -c requirements-lock.txt <validation-dir>/dist/mcp_cn_commerce-0.1.6-py3-none-any.whl",
+      "exit_code": 0,
+      "log": "logs/install-final-wheel-locked.log"
+    },
+    {
+      "name": "pip_check_wheel-locked",
+      "command": "<validation-dir>/wheel-locked/bin/python -m pip check",
+      "exit_code": 0,
+      "log": "logs/pip-check-final-wheel-locked.log"
+    },
+    {
+      "name": "smoke_wheel-locked",
+      "command": "env -u PYTHONPATH PATH=<validation-dir>/wheel-locked/bin:$PATH <validation-dir>/wheel-locked/bin/python scripts/smoke_install.py",
+      "exit_code": 0,
+      "log": "logs/smoke-final-wheel-locked.log",
+      "scenarios_passed": 24
+    },
+    {
+      "name": "install_wheel-latest",
+      "command": "uv pip install --reinstall-package mcp-cn-commerce --python <validation-dir>/wheel-latest/bin/python <validation-dir>/dist/mcp_cn_commerce-0.1.6-py3-none-any.whl",
+      "exit_code": 0,
+      "log": "logs/install-final-wheel-latest.log"
+    },
+    {
+      "name": "pip_check_wheel-latest",
+      "command": "<validation-dir>/wheel-latest/bin/python -m pip check",
+      "exit_code": 0,
+      "log": "logs/pip-check-final-wheel-latest.log"
+    },
+    {
+      "name": "smoke_wheel-latest",
+      "command": "env -u PYTHONPATH PATH=<validation-dir>/wheel-latest/bin:$PATH <validation-dir>/wheel-latest/bin/python scripts/smoke_install.py",
+      "exit_code": 0,
+      "log": "logs/smoke-final-wheel-latest.log",
+      "scenarios_passed": 24
+    },
+    {
+      "name": "install_sdist-locked",
+      "command": "uv pip install --reinstall-package mcp-cn-commerce --python <validation-dir>/sdist-locked/bin/python -c requirements-lock.txt <validation-dir>/dist/mcp_cn_commerce-0.1.6.tar.gz",
+      "exit_code": 0,
+      "log": "logs/install-final-sdist-locked.log"
+    },
+    {
+      "name": "pip_check_sdist-locked",
+      "command": "<validation-dir>/sdist-locked/bin/python -m pip check",
+      "exit_code": 0,
+      "log": "logs/pip-check-final-sdist-locked.log"
+    },
+    {
+      "name": "smoke_sdist-locked",
+      "command": "env -u PYTHONPATH PATH=<validation-dir>/sdist-locked/bin:$PATH <validation-dir>/sdist-locked/bin/python scripts/smoke_install.py",
+      "exit_code": 0,
+      "log": "logs/smoke-final-sdist-locked.log",
+      "scenarios_passed": 24
+    }
+  ],
+  "environments": {
+    "wheel-locked": {
+      "python": "3.12.13",
+      "pip": "25.0.1",
+      "installed_from": "<validation-dir>/dist/mcp_cn_commerce-0.1.6-py3-none-any.whl",
+      "constraints": "requirements-lock.txt",
+      "forced_reinstall": true,
+      "installed_versions": {
+        "annotated-types": "0.8.0",
+        "anyio": "4.15.1",
+        "attrs": "26.1.0",
+        "certifi": "2026.7.22",
+        "cffi": "2.1.1",
+        "click": "8.5.0",
+        "cryptography": "50.0.2",
+        "h11": "0.16.0",
+        "httpcore": "1.0.9",
+        "httpcore2": "2.13.1",
+        "httpx": "0.28.1",
+        "httpx2": "2.13.1",
+        "idna": "3.20",
+        "jsonschema": "4.26.0",
+        "jsonschema-specifications": "2025.9.1",
+        "mcp": "2.2.0",
+        "mcp-cn-commerce": "0.1.6",
+        "mcp-types": "2.2.0",
+        "opentelemetry-api": "1.45.0",
+        "pycparser": "3.0",
+        "pydantic": "2.13.5",
+        "pydantic-core": "2.46.5",
+        "pyjwt": "2.15.1",
+        "python-multipart": "0.0.32",
+        "referencing": "0.37.0",
+        "rpds-py": "2026.6.3",
+        "sse-starlette": "3.5.0",
+        "starlette": "1.7.0",
+        "truststore": "0.10.4",
+        "typing-extensions": "4.16.0",
+        "typing-inspection": "0.4.4",
+        "uvicorn": "0.54.0"
+      },
+      "pip_check": {
+        "exit_code": 0,
+        "output": "No broken requirements found.",
+        "log": "logs/pip-check-final-wheel-locked.log"
+      },
+      "stdio_smoke": {
+        "exit_code": 0,
+        "scenarios_passed": 24,
+        "passed_marker": true,
+        "log": "logs/smoke-final-wheel-locked.log"
+      }
+    },
+    "wheel-latest": {
+      "python": "3.12.13",
+      "pip": "25.0.1",
+      "installed_from": "<validation-dir>/dist/mcp_cn_commerce-0.1.6-py3-none-any.whl",
+      "constraints": null,
+      "forced_reinstall": true,
+      "installed_versions": {
+        "annotated-types": "0.8.0",
+        "anyio": "4.15.1",
+        "attrs": "26.1.0",
+        "certifi": "2026.7.22",
+        "cffi": "2.1.1",
+        "click": "8.5.0",
+        "cryptography": "50.0.2",
+        "h11": "0.16.0",
+        "httpcore": "1.0.9",
+        "httpcore2": "2.13.1",
+        "httpx": "0.28.1",
+        "httpx2": "2.13.1",
+        "idna": "3.20",
+        "jsonschema": "4.26.0",
+        "jsonschema-specifications": "2025.9.1",
+        "mcp": "2.3.0",
+        "mcp-cn-commerce": "0.1.6",
+        "mcp-types": "2.3.0",
+        "opentelemetry-api": "1.45.1",
+        "pycparser": "3.0",
+        "pydantic": "2.13.5",
+        "pydantic-core": "2.46.5",
+        "pyjwt": "2.15.1",
+        "python-multipart": "0.0.32",
+        "referencing": "0.37.0",
+        "rpds-py": "2026.9.1",
+        "sse-starlette": "3.5.0",
+        "starlette": "1.7.0",
+        "truststore": "0.10.4",
+        "typing-extensions": "4.16.0",
+        "typing-inspection": "0.4.4",
+        "uvicorn": "0.54.0"
+      },
+      "pip_check": {
+        "exit_code": 0,
+        "output": "No broken requirements found.",
+        "log": "logs/pip-check-final-wheel-latest.log"
+      },
+      "stdio_smoke": {
+        "exit_code": 0,
+        "scenarios_passed": 24,
+        "passed_marker": true,
+        "log": "logs/smoke-final-wheel-latest.log"
+      }
+    },
+    "sdist-locked": {
+      "python": "3.12.13",
+      "pip": "25.0.1",
+      "installed_from": "<validation-dir>/dist/mcp_cn_commerce-0.1.6.tar.gz",
+      "constraints": "requirements-lock.txt",
+      "forced_reinstall": true,
+      "installed_versions": {
+        "annotated-types": "0.8.0",
+        "anyio": "4.15.1",
+        "attrs": "26.1.0",
+        "certifi": "2026.7.22",
+        "cffi": "2.1.1",
+        "click": "8.5.0",
+        "cryptography": "50.0.2",
+        "h11": "0.16.0",
+        "httpcore": "1.0.9",
+        "httpcore2": "2.13.1",
+        "httpx": "0.28.1",
+        "httpx2": "2.13.1",
+        "idna": "3.20",
+        "jsonschema": "4.26.0",
+        "jsonschema-specifications": "2025.9.1",
+        "mcp": "2.2.0",
+        "mcp-cn-commerce": "0.1.6",
+        "mcp-types": "2.2.0",
+        "opentelemetry-api": "1.45.0",
+        "pycparser": "3.0",
+        "pydantic": "2.13.5",
+        "pydantic-core": "2.46.5",
+        "pyjwt": "2.15.1",
+        "python-multipart": "0.0.32",
+        "referencing": "0.37.0",
+        "rpds-py": "2026.6.3",
+        "sse-starlette": "3.5.0",
+        "starlette": "1.7.0",
+        "truststore": "0.10.4",
+        "typing-extensions": "4.16.0",
+        "typing-inspection": "0.4.4",
+        "uvicorn": "0.54.0"
+      },
+      "pip_check": {
+        "exit_code": 0,
+        "output": "No broken requirements found.",
+        "log": "logs/pip-check-final-sdist-locked.log"
+      },
+      "stdio_smoke": {
+        "exit_code": 0,
+        "scenarios_passed": 24,
+        "passed_marker": true,
+        "log": "logs/smoke-final-sdist-locked.log"
+      }
+    }
+  },
+  "smoke_coverage": {
+    "scenario_total": 72,
+    "scenarios_per_environment": {
+      "wheel-locked": 24,
+      "wheel-latest": 24,
+      "sdist-locked": 24
+    },
+    "tools_advertised_total": 155,
+    "capability_descriptions_checked": true,
+    "oceanengine_unmigrated_report_rejected_without_credentials": true,
+    "no_merchant_api_requests": true
+  },
+  "previous_pass": {
+    "result": "passed before final README-only snapshot rebuild",
+    "artifacts": [
+      {
+        "filename": "mcp_cn_commerce-0.1.6-py3-none-any.whl",
+        "sha256": "9f580c39b7a7ac9dda0a92ae64bc9926c3fb9e62e9db8f68a84d7f2749fa1d9d"
+      },
+      {
+        "filename": "mcp_cn_commerce-0.1.6.tar.gz",
+        "sha256": "1b54f420378694c806789ec8019fc033ac8f6154dea2f462de3f5bb903b71504"
+      }
+    ],
+    "stdio_scenarios_passed": 72,
+    "logs_directory": "<validation-dir>/logs"
+  },
+  "recorded_date": "2026-10-08",
+  "evidence_state": "pre-commit local validation; commands use portable path placeholders; no remote CI or release assertion"
+}

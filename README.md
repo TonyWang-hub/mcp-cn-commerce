@@ -15,7 +15,7 @@
 
 [English](README_en.md) | **简体中文**
 
-> **2026-09-11 状态**：修复代码和文档已合入公开 `main`。Core **0.1.6 工程候选**的源码与 main CI 已通过；**PyPI / 公开稳定 Release 仍是 0.1.5**，普通 `pip install` 不会取得本轮全部修复。体验新候选请使用下方固定提交安装。真实店铺验收尚未执行。
+> **2026-10-08 状态**：截至该日核对的公开 `main` 快照为 `1449f49`、包版本 `0.1.6`；PyPI 和公开稳定 Release 仍为 `0.1.5`，`0.1.6` Release 仍是草稿。先前已验的 `0.1.6` 候选固定在 `c32e004`；其 CI 证据只对应该提交。本轮工作区改动已通过本地工程验收、尚未发布，见[本轮验收记录](docs/release-readiness.md#2026-10-08-本轮本地变更验收)；真实商家验收仍未执行。
 >
 > [项目与咨询进展](docs/project-status.md) · [工程/发布证据](docs/release-readiness.md) · [更新记录](CHANGELOG.md)
 
@@ -82,15 +82,17 @@
 
 本表是 SDK 摘要，不将历史 MCP 商品、库存、物流等入口全部标为当前已核合同。工具注册、合同已读、SDK 可调用、真实店铺通过分别记录；所有 SDK `live_verified` 仍为 false。当前证据见[平台说明](docs/platforms.md)、[官方接入核查](docs/official-access-status.md)与[候选验收状态](docs/release-readiness.md)。CI 配置覆盖 Python 3.11/3.12/3.13，实际结果绑定具体提交。
 
+本轮源码为各平台业务工具的 MCP `tools/list` 描述增加 `contract_status`、`supported` 和 `live_verified`。`supported=false` 的操作在发送平台请求前拒绝；历史兼容工具保留调用入口，明确标为 `unverified`。`supported=true` 只表示保留了调用映射，实际权限、合同范围和真店验收仍需分别确认。五项共享工具保持原有用途和描述，155 个注册工具的名称及输入输出结构不变；上述变化尚未包含在公开稳定版和历史固定候选中。
+
 ## 快速开始
 
 ### 安装
 
-#### 体验已验证的 0.1.6 候选源码
+#### 复现先前通过验收的 0.1.6 固定候选
 
-使用 Python 3.11+；以下以已有 Python 3.12 为例，在项目虚拟环境安装。固定提交
+使用 Python 3.11+；以下以已有 Python 3.12 为例，在项目虚拟环境安装。此前通过工程验收的固定提交
 [`c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e)
-已经完成工程验收，不代表商家 API live 通过：
+可复现对应的历史工程结果，不代表 2026-10-08 核对的公开 main 快照或商家 API live 已通过：
 
 ```bash
 git clone https://github.com/TonyWang-hub/mcp-cn-commerce.git
@@ -112,9 +114,11 @@ python -m pip install -c requirements-lock.txt -e ".[dev]"
 
 #### 安装当前 PyPI 稳定版 0.1.5
 
-[PyPI 0.1.5](https://pypi.org/project/mcp-cn-commerce/0.1.5/) 是历史公开版本，**不含上面 0.1.6 候选的全部协议与稳定性修复**。需要该版本时，在单独的项目虚拟环境中安装：
+[PyPI 0.1.5](https://pypi.org/project/mcp-cn-commerce/0.1.5/) 是当前公开稳定版，**不含后续 0.1.6 源码快照的全部变更**。需要该版本时，在单独目录和项目虚拟环境中安装：
 
 ```bash
+mkdir -p mcp-cn-commerce-0.1.5
+cd mcp-cn-commerce-0.1.5
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install "mcp-cn-commerce==0.1.5"
@@ -122,9 +126,9 @@ python -m pip install "mcp-cn-commerce==0.1.5"
 
 #### GitHub Releases 与 main
 
-[公开稳定 Release v0.1.5](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.5) 与 `releases/latest` 仍指向历史稳定版本。0.1.6 当前按工程候选准备发布草稿，尚未正式发布到 PyPI / MCP Registry；草稿不是公开可下载安装的稳定版。后续发布状态以[项目进展](docs/project-status.md)及实际 Release 为准。
+[公开稳定 Release v0.1.5](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.5) 与 `releases/latest` 仍指向当前公开稳定版。2026-10-08 核对的公开 Core `main` 快照 `1449f49` 版本为 `0.1.6`，比已验的 `c32e004` 更新；不要把 `c32e004` 的 CI 结果归给后续提交。本轮本地改动已通过本地工程验收、尚未发布，见[本轮验收记录](docs/release-readiness.md#2026-10-08-本轮本地变更验收)。0.1.6 尚未正式发布到 PyPI / MCP Registry；草稿不是公开可下载安装的稳定版。后续发布状态以[项目进展](docs/project-status.md)及实际 Release 为准。
 
-`main` 已包含候选修复和后续文档，但会继续变化。复现实测版本使用上面的完整 SHA；不要把未固定的 Git 安装、最新 main 或旧 PyPI 包称为同一个候选构建。
+复现已验候选时使用上面的完整 SHA。当前 `main` 和 HEAD 会继续变化；每个新提交都需绑定自己的验收证据，不要把未固定的 Git 安装、后续 main 或旧 PyPI 包称为同一个候选构建。
 
 ### 配置凭证
 
@@ -150,6 +154,8 @@ export JD_ACCESS_TOKEN="你的 Access Token"
 
 本项目是标准 stdio MCP server，所有支持 MCP 协议的客户端都能直接接入。下面给出主流客户端的配置方式（凭证可在 shell 里 `export`，也可写进客户端配置的 `env` 段，两种都行）。
 
+将下方 `/absolute/path/to/mcp-cn-commerce` 替换为所选安装目录的绝对路径；安装稳定版时使用该版本目录。桌面客户端还需在自己的 `env` 配置中设置凭证；终端中的 `export` 仅对继承该环境的进程生效。
+
 #### Claude Desktop / Cherry Studio / Cline / Continue / Kimi Work（`mcpServers` JSON）
 
 这类客户端用同一套 `mcpServers` 配置格式（Cline 写在 `cline_mcp_settings.json`，Claude Desktop 写在 `claude_desktop_config.json`）：
@@ -158,15 +164,15 @@ export JD_ACCESS_TOKEN="你的 Access Token"
 {
   "mcpServers": {
     "oceanengine": {
-      "command": "mcp-cn-oceanengine",
+      "command": "/absolute/path/to/mcp-cn-commerce/.venv/bin/mcp-cn-oceanengine",
       "env": {
         "OCEANENGINE_APP_KEY": "你的 App Key",
         "OCEANENGINE_APP_SECRET": "你的 App Secret",
         "OCEANENGINE_ACCESS_TOKEN": "你的 Access Token"
       }
     },
-    "doudian": { "command": "mcp-cn-doudian" },
-    "jd": { "command": "mcp-cn-jd" }
+    "doudian": { "command": "/absolute/path/to/mcp-cn-commerce/.venv/bin/mcp-cn-doudian" },
+    "jd": { "command": "/absolute/path/to/mcp-cn-commerce/.venv/bin/mcp-cn-jd" }
   }
 }
 ```
@@ -178,20 +184,20 @@ claude mcp add oceanengine \
   --env OCEANENGINE_APP_KEY=你的Key \
   --env OCEANENGINE_APP_SECRET=你的Secret \
   --env OCEANENGINE_ACCESS_TOKEN=你的Token \
-  -- mcp-cn-oceanengine
+  -- /absolute/path/to/mcp-cn-commerce/.venv/bin/mcp-cn-oceanengine
 ```
 
 #### Codex（CLI）
 
 ```bash
-codex mcp add oceanengine -- mcp-cn-oceanengine
+codex mcp add oceanengine -- /absolute/path/to/mcp-cn-commerce/.venv/bin/mcp-cn-oceanengine
 ```
 
 或写进 `~/.codex/config.toml`：
 
 ```toml
 [mcp_servers.oceanengine]
-command = "mcp-cn-oceanengine"
+command = "/absolute/path/to/mcp-cn-commerce/.venv/bin/mcp-cn-oceanengine"
 env = { OCEANENGINE_APP_KEY = "你的Key", OCEANENGINE_APP_SECRET = "你的Secret", OCEANENGINE_ACCESS_TOKEN = "你的Token" }
 ```
 
@@ -204,7 +210,7 @@ env = { OCEANENGINE_APP_KEY = "你的Key", OCEANENGINE_APP_SECRET = "你的Secre
   "mcp": {
     "oceanengine": {
       "type": "local",
-      "command": ["mcp-cn-oceanengine"],
+      "command": ["/absolute/path/to/mcp-cn-commerce/.venv/bin/mcp-cn-oceanengine"],
       "enabled": true,
       "environment": {
         "OCEANENGINE_APP_KEY": "你的Key",
@@ -364,6 +370,8 @@ mcp-cn-commerce/
 ## 💼 Pro 版（内测招募中）
 
 开源版永久免费，MIT 许可和已经公开的能力保持不变：平台适配、显式凭证 SDK、金额/时间归一化，以及 `build_daily_report` 的多店确定性日报计算都属于 Core。多店算法无需 Pro；宿主需提供已采集记录和准确的完整性声明。**代运营公司 / 电商 SaaS / 多店铺商家**可参加 Pro 内测，验证授权治理和持续运行能力；平台范围按当前合同逐操作确认。
+
+当前私有工程候选为 Pro `0.1.5b1` / Core `0.1.6` / Client `0.1.0b1`，工程 CI 已通过，所有商家 `live_verified` 仍为 false。历史 Pro `v0.1.1b1` Release 不代表当前候选。正式客户制品还需正式签名密钥、许可和接收方信息；工程候选或历史安装包不构成正式客户交付。
 
 | 能力 | 开源版 | Pro 版 |
 |---|---|---|

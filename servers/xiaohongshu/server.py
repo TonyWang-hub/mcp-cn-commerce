@@ -19,6 +19,7 @@ from shared.cn_commerce_base import (
     ConfigValidationError,
     register_common_tools,
 )
+from shared.platform_clients import mcp_capability_tool
 
 # ── Xiaohongshu client ────────────────────────────────────────────────────────
 
@@ -56,6 +57,7 @@ async def _lifespan(_server):
 
 
 mcp = MCPServer("mcp-cn-xiaohongshu", lifespan=_lifespan)
+business_tool = mcp_capability_tool(mcp.tool, "xiaohongshu")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -63,7 +65,7 @@ mcp = MCPServer("mcp-cn-xiaohongshu", lifespan=_lifespan)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_order_list(
     start_time: str,
     end_time: str,
@@ -103,7 +105,7 @@ async def get_order_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_order_detail(order_id: str) -> str:
     """Get full details of a single order.
 
@@ -120,7 +122,7 @@ async def get_order_detail(order_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_product_list(
     page: int = 1,
     page_size: int = 20,
@@ -139,7 +141,7 @@ async def get_product_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_product_detail(product_id: str) -> str:
     """Get full details of a single product by product ID.
 
@@ -156,7 +158,7 @@ async def get_product_detail(product_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_refund_list(
     start_time: str,
     end_time: str,
@@ -194,7 +196,7 @@ async def get_refund_list(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def get_refund_detail(refund_id: str) -> str:
     """Get full details of a single refund record.
 
@@ -211,7 +213,7 @@ async def get_refund_detail(refund_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_logistics_tracking(order_id: str) -> str:
     """Get logistics tracking information for an order.
 
@@ -228,7 +230,7 @@ async def get_logistics_tracking(order_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_review_list(
     product_id: str,
     page: int = 1,
@@ -255,7 +257,7 @@ async def get_review_list(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_shop_info() -> str:
     """Unavailable: no verified official shop-info API mapping; returns an explicit error."""
     result = await xhs._call("GET", "/api/shop/info")
@@ -267,7 +269,7 @@ async def get_shop_info() -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def list_promotions(
     page: int = 1,
     page_size: int = 20,
@@ -286,7 +288,7 @@ async def list_promotions(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@business_tool()
 async def list_coupons(
     status: str = "",
     page: int = 1,
@@ -317,7 +319,7 @@ async def list_coupons(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_inventory(
     product_id: str = "",
     sku_id: str = "",
@@ -350,7 +352,7 @@ async def get_inventory(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@business_tool()
 async def get_bill_list(
     start_time: str,
     end_time: str,

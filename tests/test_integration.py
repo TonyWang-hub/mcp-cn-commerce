@@ -88,7 +88,7 @@ class TestOceanEngineFullRequestFlow:
         assert data["data"]["list"][0]["advertiser_id"] == 123
 
     @pytest.mark.asyncio
-    async def test_get_campaign_report_oauth_header_passed(self, oe_client):
+    async def test_get_account_balance_oauth_header_passed(self, oe_client):
         """OceanEngine uses OAuth headers and sends only business query fields."""
         mock_response = MagicMock()
         mock_response.json.return_value = {"code": 0, "data": {"list": []}}
@@ -98,15 +98,11 @@ class TestOceanEngineFullRequestFlow:
         mock_http.get.return_value = mock_response
         mock_http.is_closed = False
 
-        from servers.oceanengine.server import get_campaign_report
+        from servers.oceanengine.server import get_account_balance
 
         with patch("servers.oceanengine.server._get_client", return_value=oe_client):
             with patch.object(oe_client, "_ensure_client", return_value=mock_http):
-                await get_campaign_report(
-                    advertiser_id="456",
-                    start_date="2024-01-01",
-                    end_date="2024-01-31",
-                )
+                await get_account_balance(advertiser_id="456")
 
         # Inspect the params passed to httpx.get
         call_args = mock_http.get.call_args
@@ -988,9 +984,9 @@ class TestEndToEndScenarios:
     """End-to-end integration tests simulating real usage patterns."""
 
     @pytest.mark.asyncio
-    async def test_full_advertiser_report_workflow(self):
-        """Simulate: get advertiser info → get campaign report → format results."""
-        from servers.oceanengine.server import OceanEngine, get_advertiser_info, get_campaign_report
+    async def test_full_advertiser_account_workflow(self):
+        """Simulate two documented advertiser reads through one client."""
+        from servers.oceanengine.server import OceanEngine, get_account_balance, get_advertiser_info
 
         client = OceanEngine(app_key="key", app_secret="secret", access_token="tok")
 
@@ -1011,13 +1007,10 @@ class TestEndToEndScenarios:
                     "data": {"list": [{"advertiser_id": 123, "name": "Test Shop"}]},
                 }
             else:
-                # Second call: campaign report
+                # Second call: account balance
                 resp.json.return_value = {
                     "code": 0,
-                    "data": {
-                        "list": [{"campaign_id": 1, "show_cnt": 10000, "click_cnt": 500}],
-                        "page_info": {"page": 1, "total": 1},
-                    },
+                    "data": {"balance": 10000},
                 }
             return resp
 
@@ -1031,15 +1024,11 @@ class TestEndToEndScenarios:
                 assert info["code"] == 0
                 assert info["data"]["list"][0]["advertiser_id"] == 123
 
-                # Step 2: Get campaign report
-                report_result = await get_campaign_report(
-                    advertiser_id="123",
-                    start_date="2024-01-01",
-                    end_date="2024-01-31",
-                )
-                report = json.loads(report_result)
-                assert report["code"] == 0
-                assert report["data"]["list"][0]["show_cnt"] == 10000
+                # Step 2: Get account balance
+                balance_result = await get_account_balance(advertiser_id="123")
+                balance = json.loads(balance_result)
+                assert balance["code"] == 0
+                assert balance["data"]["balance"] == 10000
 
         assert call_count == 2
 

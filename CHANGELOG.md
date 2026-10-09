@@ -6,15 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased] — 0.1.6 engineering candidate
 
-Status as of 2026-09-11: the repairs and documentation are merged into public `main`.
-The verified source revision is [`c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e),
-with the merged main snapshot at `67c8fc9c0eb0e83cd8f819a686fe8c092f0d9f7c`.
+Status checked on 2026-10-08: public `main` is at `1449f494aa68d5261fc0c57c44bfce6a409a5611`.
+The historically verified source revision is [`c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e),
+with its merged main snapshot at `67c8fc9c0eb0e83cd8f819a686fe8c092f0d9f7c`.
+The current local changes and their acceptance record are tracked separately in
+[release readiness](docs/release-readiness.md#2026-10-08-本轮本地变更验收).
 **PyPI and the public stable release remain 0.1.5.** Version 0.1.6 is an engineering
 candidate for a release draft, not a completed stable PyPI/Registry publication.
 See [installation choices](README.md#安装) and [release evidence](docs/release-readiness.md).
 
 ### Added
 
+- Capability descriptions for platform business tools across all eight MCP servers, sharing SDK operation evidence and explicitly labelling historical transports as unverified. Existing 155 tool names and input/output schemas are preserved.
 - A no-network public-package gate rejects accidental Pro/Client imports, dependencies and wheel/sdist payloads before CI installation or public upload. Core's MIT license, normalization and multi-shop report calculations remain unchanged; [Core/Pro guidance](docs/core-pro-boundary.md) explains the separate governance and persistence capabilities.
 - An explicit-credential platform SDK: immutable per-authorization snapshots, an operation catalogue, isolated routing, injected/owned HTTP resource handling, and rejection of credential/protocol overrides. Hosts own token refresh, tenant authorization and output privacy.
 - Youzan SDK-only order/refund/shop reads, without adding a ninth environment-backed MCP CLI.
@@ -24,6 +27,9 @@ See [installation choices](README.md#安装) and [release evidence](docs/release
 
 ### Fixed
 
+- The three unmigrated OceanEngine reports now reject through MCP before creating a client, matching the SDK's unsupported boundary.
+- Coupled runtime upgrades: MCP/mcp-types `2.2.0` and httpx2/httpcore2 `2.13.1`; the valid Pydantic `2.13.5` / pydantic_core `2.46.5` pair is retained. Dependabot groups keep future coupled updates together.
+- The synthetic Doudian daily-report example supplies an explicit zero payment-promotion amount instead of implying an unknown amount is zero.
 - Single-package CLI/config priority, health checks, stdio platform startup, shared HTTP lifecycle and credential-free diagnostics. Removed test shims that hid actual MCP SDK behavior.
 - Default HTTPX log redaction and safe missing-configuration/tool errors; credential/PII handling, trace retention, repeated alerts, queue cancellation, fail-fast/circuit recovery and pagination/error contracts.
 - The Pydantic/core runtime lock mismatch found during real dependency installation; Excel export test dependency, typing and stale test contracts.
@@ -41,7 +47,7 @@ See [installation choices](README.md#安装) and [release evidence](docs/release
 - SDK metadata keeps `live_verified=false`. Generic JD refunds remain unsupported; XHS Source timestamp units, JD cancellation/after-sale funds coverage, Pro Kuaishou identity and shared WeChat component delegation still have explicit gaps.
 - Bilingual installation instructions separate the pinned, tested 0.1.6 source candidate from PyPI 0.1.5 and use project virtual environments. The free Pro seed-user beta commitment is preserved.
 
-### Engineering verification
+### Historical engineering verification
 
 - [Candidate Core CI](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/34572407075) and [merged main CI](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/34572676414) passed on their exact revisions: **2225 tests + 20 subtests** (2245 JUnit cases), with Python matrix, formatting, typing and static checks.
 - Actual wheel/sdist installation, locked/latest-supported dependencies, real MCP stdio smoke, manifest validation and hosted container jobs passed. Merchant API contract tests used controlled responses; no merchant live acceptance is claimed.

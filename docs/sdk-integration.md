@@ -112,8 +112,9 @@ transport or closes it through reconnect/close paths.
 
 ## Catalogue and evidence status
 
-Current catalogue checked against Core `6b6a7f9fbe336273e331ec70aa3322f37ae51580` on
-2026-09-11. This table describes explicit SDK operations, not every historical MCP
+Catalogue originally checked against Core `6b6a7f9fbe336273e331ec70aa3322f37ae51580` on
+2026-09-11 and rechecked against the local worktree based on `1449f49` on 2026-10-08.
+This table describes explicit SDK operations, not every historical MCP
 tool. Registration, documented contract, callable SDK mapping and merchant live
 acceptance are separate states. See [release readiness](release-readiness.md).
 
@@ -149,6 +150,24 @@ See [official access status](official-access-status.md) for original official UR
 retrieval dates and precise remaining live credential requirements. Adding this
 SDK does not close those gates. Response schema normalization and tenant-level
 PII masking remain host responsibilities.
+
+### MCP discovery and unsupported calls
+
+The 2026-10-08 local changes also use this catalogue for the eight MCP servers.
+Each platform business tool's `tools/list` description starts with
+`[Capability: contract_status=...; supported=...; live_verified=false]`.
+Historical MCP operations outside the SDK catalogue retain their transport
+entry points with `contract_status=unverified`; their `supported=true` does not
+add them to the SDK or establish a documented contract. Known unavailable XHS
+and legacy JD entries have explicit unsupported metadata.
+
+All explicitly unsupported MCP operations reject before a platform HTTP
+request. Existing error responses remain compatible; the three unmigrated
+OceanEngine report tools now raise MCP `ToolError` before client creation.
+The five common tools are not platform operations and retain their existing
+descriptions. Tool names, input/output schemas and the total of 155 registrations
+remain unchanged. These local changes have not been published; their validation
+is recorded separately in [release readiness](release-readiness.md#2026-10-08-本轮本地变更验收).
 
 ## Compatibility and validation
 

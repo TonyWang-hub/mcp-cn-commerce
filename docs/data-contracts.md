@@ -60,6 +60,7 @@ shops = [{
         "order_id": "order-001",
         "order_status": 2,
         "pay_amount": 1999,
+        "promotion_pay_amount": 0,  # 合成样例的显式零值；真实记录必须使用接口返回值
         "pay_time": "2026-09-10 09:00:00",
         "product_info": {"list": [{
             "product_id": "product-001", "product_name": "示例商品",
@@ -76,12 +77,14 @@ shops = [{
 }]
 report = build_daily_report("2026-09-10", shops, timezone="Asia/Shanghai")
 assert report["total_summary"]["gmv"] == 1999
+assert report["total_summary"]["order_count"] == 1
+assert report["complete"] is True
 ```
 
 ## 输出与指标口径
 
 输出可供 `templates/daily-report` 使用：`date`、`shops[].summary`、`shops[].yesterday`、`shops[].top_products`。
-同时提供 `total_summary`、`yesterday_summary`、`completeness`、`errors` 和 `warnings`。
+同时提供 `total_summary`、`yesterday_summary`、`complete` 和 `yesterday_complete`；每店的细项位于 `shops[].completeness`、`shops[].errors` 和 `shops[].warnings`。
 
 | 字段 | 确定含义 |
 | --- | --- |

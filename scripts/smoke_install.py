@@ -52,6 +52,7 @@ _DUMMY_ENV = {
 }
 
 # Five common tools per server, including the deterministic report builder.
+COMMON_TOOLS = {"get_metrics", "get_traces", "get_alerts", "export_data", "build_daily_report"}
 EXPECTED_TOOLS = {
     "oceanengine": 23,
     "doudian": 25,
@@ -155,6 +156,14 @@ async def exercise(command: list[str], platform: str, *, missing_credentials=Fal
                 names = {tool["name"] for tool in listed["tools"]}
                 assert len(names) == EXPECTED_TOOLS[platform], (platform, len(names))
                 assert {"get_metrics", "export_data", "build_daily_report"} <= names
+                for tool in listed["tools"]:
+                    if tool["name"] in COMMON_TOOLS:
+                        continue
+                    description = tool.get("description", "")
+                    assert description.startswith("[Capability: "), (platform, tool["name"], description)
+                    assert all(
+                        field in description for field in ("contract_status=", "supported=", "live_verified=")
+                    ), (platform, tool["name"], description)
                 metrics = await _send(proc, "tools/call", {"name": "get_metrics", "arguments": {}}, 3)
                 assert not metrics.get("isError", False), metrics
                 assert metrics.get("content") or metrics.get("structuredContent"), metrics
@@ -165,6 +174,22 @@ async def exercise(command: list[str], platform: str, *, missing_credentials=Fal
                     # isError. In both cases require the actual config failure.
                     failure_text = json.dumps(failure).lower()
                     assert "missing" in failure_text and "environment" in failure_text, failure
+                    if platform == "oceanengine":
+                        unsupported = await _send(
+                            proc,
+                            "tools/call",
+                            {
+                                "name": "get_qianchuan_report",
+                                "arguments": {
+                                    "advertiser_id": "1",
+                                    "start_date": "2026-10-01",
+                                    "end_date": "2026-10-02",
+                                },
+                            },
+                            5,
+                        )
+                        assert unsupported.get("isError") is True, unsupported
+                        assert "migration" in json.dumps(unsupported).lower(), unsupported
                 else:
                     exported = await _send(
                         proc,

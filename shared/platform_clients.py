@@ -6,9 +6,10 @@ server module is imported here; adapters accept one fixed credential snapshot.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import wraps
 from importlib import import_module
 from types import MappingProxyType
 from typing import Any
@@ -133,6 +134,56 @@ _OPERATIONS = {
     },
 }
 
+
+@dataclass(frozen=True)
+class MCPToolCapability:
+    """Discovery and guard metadata for one registered platform business tool."""
+
+    operation: Operation
+    enforce_before_call: bool
+
+
+_MCP_CAPABILITY_OVERRIDES = {
+    "jd": {
+        name: Operation(
+            "",
+            "partial",
+            supported=False,
+            reason="JD POP after-sale service is not a verified completed-refund contract; see docs/jd-contract.md",
+        )
+        for name in ("get_after_sale_list", "get_after_sale_detail")
+    },
+    "xiaohongshu": {
+        name: Operation(
+            "",
+            "unverified",
+            supported=False,
+            reason="No verified official Xiaohongshu API mapping; no request is allowed",
+        )
+        for name in ("get_review_list", "list_promotions", "list_coupons")
+    },
+}
+
+# These tools already preserve a public, pre-network unsupported response or
+# exception contract. Discovery still comes from this catalogue, while their
+# existing implementation remains responsible for the exact public error type.
+_MCP_DELEGATED_UNSUPPORTED = frozenset(
+    {
+        ("doudian", "get_shop_info"),
+        ("jd", "get_after_sale_list"),
+        ("jd", "get_after_sale_detail"),
+        ("pinduoduo", "get_order_list"),
+        ("pinduoduo", "get_order_detail"),
+        ("pinduoduo", "get_refund_list"),
+        ("pinduoduo", "get_refund_detail"),
+        ("pinduoduo", "get_shop_info"),
+        ("xiaohongshu", "get_review_list"),
+        ("xiaohongshu", "get_shop_info"),
+        ("xiaohongshu", "list_promotions"),
+        ("xiaohongshu", "list_coupons"),
+    }
+)
+
 _CLASSES = {
     "youzan": "YouzanClient",
     "doudian": "DouDianClient",
@@ -198,6 +249,96 @@ def operation_catalog(platform: str) -> Mapping[str, Operation]:
     return MappingProxyType(dict(_OPERATIONS[platform]))
 
 
+def require_supported_operation(platform: str, operation: str) -> Operation:
+    """Return supported SDK metadata or reject before client/network access."""
+    operations = operation_catalog(platform)
+    if not isinstance(operation, str) or operation not in operations:
+        raise ValueError(f"Unsupported read-only operation for {platform}")
+    metadata = operations[operation]
+    if not metadata.supported:
+        raise ValueError(f"Unsupported read-only operation: {metadata.reason}")
+    return metadata
+
+
+def mcp_tool_capability(platform: str, tool_name: str) -> MCPToolCapability:
+    """Classify one MCP business tool without promoting legacy names to SDK contracts."""
+    operations = operation_catalog(platform)
+    overrides = _MCP_CAPABILITY_OVERRIDES.get(platform, {})
+    if tool_name in overrides:
+        operation = overrides[tool_name]
+    elif tool_name in operations:
+        operation = operations[tool_name]
+    else:
+        operation = Operation(
+            "",
+            "unverified",
+            supported=True,
+            reason=(
+                "Historical MCP transport compatibility only; official contract verification "
+                "and live merchant acceptance are incomplete"
+            ),
+        )
+    return MCPToolCapability(
+        operation=operation,
+        enforce_before_call=not operation.supported and (platform, tool_name) not in _MCP_DELEGATED_UNSUPPORTED,
+    )
+
+
+def _capability_description(capability: MCPToolCapability, original: str | None) -> str:
+    operation = capability.operation
+    header = (
+        "[Capability: "
+        f"contract_status={operation.contract_status}; "
+        f"supported={str(operation.supported).lower()}; "
+        f"live_verified={str(operation.live_verified).lower()}]"
+    )
+    if operation.reason:
+        boundary = operation.reason.rstrip(".") + "."
+    elif operation.contract_status == "documented":
+        boundary = "Official contract is documented; live merchant acceptance is incomplete."
+    elif operation.contract_status == "transport_only":
+        boundary = (
+            "Transport compatibility is retained; response-contract and live merchant verification are incomplete."
+        )
+    else:
+        boundary = "Official contract and live merchant verification are incomplete."
+    return f"{header}\n{boundary}" + (f"\n\n{original.strip()}" if original else "")
+
+
+def mcp_capability_tool(
+    register_tool: Callable[..., Callable[[Callable[..., Any]], Callable[..., Any]]],
+    platform: str,
+    *,
+    unavailable_error: type[Exception] = ValueError,
+) -> Callable[..., Callable[[Callable[..., Any]], Callable[..., Any]]]:
+    """Wrap an MCP ``tool`` registrar with capability metadata and fail-closed guards.
+
+    The helper deliberately accepts a registrar rather than importing MCP, so
+    SDK/catalogue code cannot form an import cycle with server modules.
+    """
+    operation_catalog(platform)  # validate once during server construction
+
+    def tool(*args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        register = register_tool(*args, **kwargs)
+
+        def decorate(function: Callable[..., Any]) -> Callable[..., Any]:
+            capability = mcp_tool_capability(platform, function.__name__)
+
+            @wraps(function)
+            async def guarded(*function_args: Any, **function_kwargs: Any) -> Any:
+                if capability.enforce_before_call:
+                    raise unavailable_error(f"Unsupported read-only operation: {capability.operation.reason}")
+                return await function(*function_args, **function_kwargs)
+
+            guarded.__doc__ = _capability_description(capability, function.__doc__)
+            guarded.__mcp_capability__ = capability  # type: ignore[attr-defined]
+            return register(guarded)
+
+        return decorate
+
+    return tool
+
+
 class PlatformClient:
     """One authorization snapshot with an explicit read-only operation catalogue."""
 
@@ -219,10 +360,7 @@ class PlatformClient:
         """Call a named read operation with low-level platform business parameters."""
         if self._closed:
             raise RuntimeError("Platform client is closed")
-        if not isinstance(operation, str) or operation not in self._operations:
-            raise ValueError(f"Unsupported read-only operation for {self.platform}")
-        if not self._operations[operation].supported:
-            raise ValueError(f"Unsupported read-only operation: {self._operations[operation].reason}")
+        metadata = require_supported_operation(self.platform, operation)
         if not isinstance(params, dict) or any(not isinstance(key, str) for key in params):
             raise ValueError("Business parameters must be a dictionary with string keys")
         for key in params:
@@ -232,7 +370,7 @@ class PlatformClient:
             if normalized in _PROTOCOL_FIELDS:
                 raise ValueError(f"Business parameter {key!r} cannot override platform protocol fields")
         business = deepcopy(params)
-        endpoint = self._operations[operation].endpoint
+        endpoint = metadata.endpoint
         if self.platform == "doudian":
             result = await self._adapter.request(endpoint, business)
         elif self.platform == "xiaohongshu":

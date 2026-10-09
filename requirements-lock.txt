@@ -37,7 +37,7 @@ pydantic_core==2.46.5
 PyJWT==2.15.1
 python-multipart==0.0.32
 referencing==0.37.0
-rpds-py==2026.6.3
+rpds-py==2026.9.1
 sse-starlette==3.5.0
 starlette==1.7.0
 truststore==0.10.4

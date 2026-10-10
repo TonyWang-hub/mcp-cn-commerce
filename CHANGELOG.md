@@ -6,11 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased] — 0.1.6 engineering candidate
 
-Status checked on 2026-10-08: public `main` is at `1449f494aa68d5261fc0c57c44bfce6a409a5611`.
-The historically verified source revision is [`c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e),
-with its merged main snapshot at `67c8fc9c0eb0e83cd8f819a686fe8c092f0d9f7c`.
-The current local changes and their acceptance record are tracked separately in
-[release readiness](docs/release-readiness.md#2026-10-08-本轮本地变更验收).
+Status checked on 2026-10-10: the accepted Core source snapshot is
+[`34082f0c17149bc054306f382ee2d33934da7ff7`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/34082f0c17149bc054306f382ee2d33934da7ff7).
+Capability-boundary, dependency and CI fixes are merged into `main`; [all 11 CI checks
+for this commit passed](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/37914052744). See the
+[merged-source engineering record](docs/release-readiness.md#2026-10-09-已合入源码的工程验收).
+The historical `c32e004` and `67c8fc9` CI results and the 2026-10-08 pre-commit
+local acceptance remain separately scoped in [release readiness](docs/release-readiness.md).
+The `0.1.6` release draft still targets `c32e004` and does not establish publication
+of the newer source snapshot.
 **PyPI and the public stable release remain 0.1.5.** Version 0.1.6 is an engineering
 candidate for a release draft, not a completed stable PyPI/Registry publication.
 See [installation choices](README.md#安装) and [release evidence](docs/release-readiness.md).
@@ -28,7 +32,8 @@ See [installation choices](README.md#安装) and [release evidence](docs/release
 ### Fixed
 
 - The three unmigrated OceanEngine reports now reject through MCP before creating a client, matching the SDK's unsupported boundary.
-- Coupled runtime upgrades: MCP/mcp-types `2.2.0` and httpx2/httpcore2 `2.13.1`; the valid Pydantic `2.13.5` / pydantic_core `2.46.5` pair is retained. Dependabot groups keep future coupled updates together.
+- Coupled runtime upgrades: MCP/mcp-types `2.3.0` and httpx2/httpcore2 `2.13.1`. Pydantic `2.13.5` metadata pins `pydantic-core==2.46.5`; removing the redundant direct child pin prevents incompatible standalone Dependabot updates. The resolved 31-package runtime closure passed clean installation and strict vulnerability auditing. Dependabot groups keep future MCP and HTTP updates together.
+- All nine `actions/setup-python` references in Test, Publish and MCP Registry workflows now use v7.
 - The synthetic Doudian daily-report example supplies an explicit zero payment-promotion amount instead of implying an unknown amount is zero.
 - Single-package CLI/config priority, health checks, stdio platform startup, shared HTTP lifecycle and credential-free diagnostics. Removed test shims that hid actual MCP SDK behavior.
 - Default HTTPX log redaction and safe missing-configuration/tool errors; credential/PII handling, trace retention, repeated alerts, queue cancellation, fail-fast/circuit recovery and pagination/error contracts.

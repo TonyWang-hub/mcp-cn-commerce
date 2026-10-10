@@ -15,7 +15,7 @@
 
 [English](README_en.md) | **简体中文**
 
-> **2026-10-08 状态**：截至该日核对的公开 `main` 快照为 `1449f49`、包版本 `0.1.6`；PyPI 和公开稳定 Release 仍为 `0.1.5`，`0.1.6` Release 仍是草稿。先前已验的 `0.1.6` 候选固定在 `c32e004`；其 CI 证据只对应该提交。本轮工作区改动已通过本地工程验收、尚未发布，见[本轮验收记录](docs/release-readiness.md#2026-10-08-本轮本地变更验收)；真实商家验收仍未执行。
+> **2026-10-10 状态**：Core `0.1.6` 的已验收源码快照为 [`34082f0`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/34082f0c17149bc054306f382ee2d33934da7ff7)，相关能力边界、依赖和 CI 修复已合入 `main`；该提交的 [11 项 CI 检查全部通过](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/37914052744)。PyPI 和公开稳定 Release 仍为 `0.1.5`，`0.1.6` Release 仍是草稿，尚未正式发布。真实商家验收仍未执行，详见[工程与发布记录](docs/release-readiness.md#2026-10-09-已合入源码的工程验收)。
 >
 > [项目与咨询进展](docs/project-status.md) · [工程/发布证据](docs/release-readiness.md) · [更新记录](CHANGELOG.md)
 
@@ -82,22 +82,22 @@
 
 本表是 SDK 摘要，不将历史 MCP 商品、库存、物流等入口全部标为当前已核合同。工具注册、合同已读、SDK 可调用、真实店铺通过分别记录；所有 SDK `live_verified` 仍为 false。当前证据见[平台说明](docs/platforms.md)、[官方接入核查](docs/official-access-status.md)与[候选验收状态](docs/release-readiness.md)。CI 配置覆盖 Python 3.11/3.12/3.13，实际结果绑定具体提交。
 
-本轮源码为各平台业务工具的 MCP `tools/list` 描述增加 `contract_status`、`supported` 和 `live_verified`。`supported=false` 的操作在发送平台请求前拒绝；历史兼容工具保留调用入口，明确标为 `unverified`。`supported=true` 只表示保留了调用映射，实际权限、合同范围和真店验收仍需分别确认。五项共享工具保持原有用途和描述，155 个注册工具的名称及输入输出结构不变；上述变化尚未包含在公开稳定版和历史固定候选中。
+已合入的 Core 源码为各平台业务工具的 MCP `tools/list` 描述增加 `contract_status`、`supported` 和 `live_verified`。`supported=false` 的操作在发送平台请求前拒绝；历史兼容工具保留调用入口，明确标为 `unverified`。`supported=true` 只表示保留了调用映射，实际权限、合同范围和真店验收仍需分别确认。五项共享工具保持原有用途和描述，155 个注册工具的名称及输入输出结构不变；上述变化已包含在已验收源码快照中，公开稳定版 `0.1.5` 尚不包含这些变化。
 
 ## 快速开始
 
 ### 安装
 
-#### 复现先前通过验收的 0.1.6 固定候选
+#### 安装已验收的 0.1.6 固定源码候选
 
-使用 Python 3.11+；以下以已有 Python 3.12 为例，在项目虚拟环境安装。此前通过工程验收的固定提交
-[`c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e)
-可复现对应的历史工程结果，不代表 2026-10-08 核对的公开 main 快照或商家 API live 已通过：
+使用 Python 3.11+；以下以已有 Python 3.12 为例，在项目虚拟环境安装。2026-10-10 核对的已验收源码快照固定为
+[`34082f0c17149bc054306f382ee2d33934da7ff7`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/34082f0c17149bc054306f382ee2d33934da7ff7)。
+该提交的工程 CI 已通过；源码候选尚不是 PyPI 稳定版，也不代表商家 API live 已通过：
 
 ```bash
 git clone https://github.com/TonyWang-hub/mcp-cn-commerce.git
 cd mcp-cn-commerce
-git checkout --detach c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e
+git checkout --detach 34082f0c17149bc054306f382ee2d33934da7ff7
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -c requirements-lock.txt .
@@ -126,7 +126,7 @@ python -m pip install "mcp-cn-commerce==0.1.5"
 
 #### GitHub Releases 与 main
 
-[公开稳定 Release v0.1.5](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.5) 与 `releases/latest` 仍指向当前公开稳定版。2026-10-08 核对的公开 Core `main` 快照 `1449f49` 版本为 `0.1.6`，比已验的 `c32e004` 更新；不要把 `c32e004` 的 CI 结果归给后续提交。本轮本地改动已通过本地工程验收、尚未发布，见[本轮验收记录](docs/release-readiness.md#2026-10-08-本轮本地变更验收)。0.1.6 尚未正式发布到 PyPI / MCP Registry；草稿不是公开可下载安装的稳定版。后续发布状态以[项目进展](docs/project-status.md)及实际 Release 为准。
+[公开稳定 Release v0.1.5](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.5) 与 `releases/latest` 仍指向当前公开稳定版。Core `0.1.6` 的修复已合入 `main`；已验收快照 `34082f0` 有独立的 [CI 证据](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/37914052744)和[工程记录](docs/release-readiness.md#2026-10-09-已合入源码的工程验收)。`0.1.6` 尚未正式发布到 PyPI；Release 草稿仍指向历史候选 `c32e004`，不能据此认为草稿已包含新修复。正式发布前须核对实际 tag、制品哈希、CI、PyPI 和 MCP Registry 状态；后续以[项目进展](docs/project-status.md)及实际 Release 为准。
 
 复现已验候选时使用上面的完整 SHA。当前 `main` 和 HEAD 会继续变化；每个新提交都需绑定自己的验收证据，不要把未固定的 Git 安装、后续 main 或旧 PyPI 包称为同一个候选构建。
 
@@ -371,7 +371,7 @@ mcp-cn-commerce/
 
 开源版永久免费，MIT 许可和已经公开的能力保持不变：平台适配、显式凭证 SDK、金额/时间归一化，以及 `build_daily_report` 的多店确定性日报计算都属于 Core。多店算法无需 Pro；宿主需提供已采集记录和准确的完整性声明。**代运营公司 / 电商 SaaS / 多店铺商家**可参加 Pro 内测，验证授权治理和持续运行能力；平台范围按当前合同逐操作确认。
 
-当前私有工程候选为 Pro `0.1.5b1` / Core `0.1.6` / Client `0.1.0b1`，工程 CI 已通过，所有商家 `live_verified` 仍为 false。历史 Pro `v0.1.1b1` Release 不代表当前候选。正式客户制品还需正式签名密钥、许可和接收方信息；工程候选或历史安装包不构成正式客户交付。
+配套私有提交候选为 Pro `0.1.5b2` / Core `0.1.6` / Client `0.1.0b1`，固定 Core `4e9309f`，自身 9 项工程 CI 检查通过，尚未合入 Pro `main`；该候选未对 Core `34082f0` 复验，所有商家 `live_verified` 仍为 false。历史 Pro `v0.1.1b1` Release 不代表当前候选。正式客户制品还需正式签名密钥、许可和接收方信息；工程候选或历史安装包不构成正式客户交付。
 
 | 能力 | 开源版 | Pro 版 |
 |---|---|---|

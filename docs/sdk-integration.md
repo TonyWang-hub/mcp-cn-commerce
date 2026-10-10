@@ -113,7 +113,9 @@ transport or closes it through reconnect/close paths.
 ## Catalogue and evidence status
 
 Catalogue originally checked against Core `6b6a7f9fbe336273e331ec70aa3322f37ae51580` on
-2026-09-11 and rechecked against the local worktree based on `1449f49` on 2026-10-08.
+2026-09-11 and rechecked against the pre-commit worktree based on `1449f49` on
+2026-10-08. The capability changes are now merged into `main`; the accepted
+source snapshot `34082f0` was checked on 2026-10-10 and has its own CI evidence.
 This table describes explicit SDK operations, not every historical MCP
 tool. Registration, documented contract, callable SDK mapping and merchant live
 acceptance are separate states. See [release readiness](release-readiness.md).
@@ -153,7 +155,7 @@ PII masking remain host responsibilities.
 
 ### MCP discovery and unsupported calls
 
-The 2026-10-08 local changes also use this catalogue for the eight MCP servers.
+The merged Core source also uses this catalogue for the eight MCP servers.
 Each platform business tool's `tools/list` description starts with
 `[Capability: contract_status=...; supported=...; live_verified=false]`.
 Historical MCP operations outside the SDK catalogue retain their transport
@@ -166,8 +168,9 @@ request. Existing error responses remain compatible; the three unmigrated
 OceanEngine report tools now raise MCP `ToolError` before client creation.
 The five common tools are not platform operations and retain their existing
 descriptions. Tool names, input/output schemas and the total of 155 registrations
-remain unchanged. These local changes have not been published; their validation
-is recorded separately in [release readiness](release-readiness.md#2026-10-08-本轮本地变更验收).
+remain unchanged. These changes are included in the accepted source snapshot,
+but not in the public stable release `0.1.5`. Commit-specific CI evidence is
+recorded in [release readiness](release-readiness.md#2026-10-09-已合入源码的工程验收).
 
 ## Compatibility and validation
 

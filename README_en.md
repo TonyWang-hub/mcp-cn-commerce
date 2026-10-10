@@ -14,7 +14,7 @@
 
 **English** | [简体中文](README.md)
 
-> **Status — 2026-10-08:** The public Core `main` snapshot checked on that date is `1449f49`, package version `0.1.6`. PyPI and the public stable release are still `0.1.5`, and the `0.1.6` release remains a draft. The previously accepted candidate is pinned at `c32e004`; its CI evidence belongs to that commit only. This worktree's current changes passed local engineering validation and remain unpublished; see the [current acceptance record](docs/release-readiness.md#2026-10-08-本轮本地变更验收). Merchant live acceptance has not been performed.
+> **Status — 2026-10-10:** The accepted Core `0.1.6` source snapshot is [`34082f0`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/34082f0c17149bc054306f382ee2d33934da7ff7). Capability-boundary, dependency and CI fixes are merged into `main`, and [all 11 CI checks for this commit passed](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/37914052744). PyPI and the public stable release remain `0.1.5`; the `0.1.6` release remains a draft and has not been formally published. Merchant live acceptance has not been performed. See the [engineering and release record](docs/release-readiness.md#2026-10-09-已合入源码的工程验收).
 >
 > [Project and inquiry status](docs/project-status.md) · [Engineering/release evidence](docs/release-readiness.md) · [Changelog](CHANGELOG.md)
 
@@ -78,20 +78,20 @@ The [current SDK operation table](docs/sdk-integration.md#catalogue-and-evidence
 
 Product, inventory, logistics, reviews, marketing and billing registrations are not a claim of complete current API support. See [platform contracts](docs/platforms.md), [official evidence](docs/official-access-status.md) and [release readiness](docs/release-readiness.md).
 
-This worktree adds `contract_status`, `supported` and `live_verified` to each platform business tool's MCP `tools/list` description. Operations marked `supported=false` reject before any platform request. Retained historical tools are labelled `unverified`; `supported=true` only denotes a retained callable mapping, with permissions, contract scope and merchant acceptance checked separately. The five shared tools keep their existing descriptions, and all 155 tool names and input/output schemas remain compatible. These changes are not yet part of the public stable release or the historical pinned candidate.
+The merged Core source adds `contract_status`, `supported` and `live_verified` to each platform business tool's MCP `tools/list` description. Operations marked `supported=false` reject before any platform request. Retained historical tools are labelled `unverified`; `supported=true` only denotes a retained callable mapping, with permissions, contract scope and merchant acceptance checked separately. The five shared tools keep their existing descriptions, and all 155 tool names and input/output schemas remain compatible. These changes are included in the accepted source snapshot; the public stable release `0.1.5` does not include them.
 
 ## Quick Start
 
-### Reproduce the previously accepted pinned 0.1.6 candidate
+### Install the accepted pinned 0.1.6 source candidate
 
-Use Python 3.11+; the commands below use an existing Python 3.12 installation and a project virtual environment. The pinned revision
-[`c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e)
-reproduces its historical engineering acceptance evidence, not acceptance of the public main snapshot checked on 2026-10-08 or merchant live acceptance:
+Use Python 3.11+; the commands below use an existing Python 3.12 installation and a project virtual environment. The accepted source snapshot checked on 2026-10-10 is
+[`34082f0c17149bc054306f382ee2d33934da7ff7`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/34082f0c17149bc054306f382ee2d33934da7ff7).
+This revision has successful engineering CI. This source candidate is not a stable PyPI release and does not establish merchant live acceptance:
 
 ```bash
 git clone https://github.com/TonyWang-hub/mcp-cn-commerce.git
 cd mcp-cn-commerce
-git checkout --detach c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e
+git checkout --detach 34082f0c17149bc054306f382ee2d33934da7ff7
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -c requirements-lock.txt .
@@ -120,9 +120,9 @@ python -m pip install "mcp-cn-commerce==0.1.5"
 
 ### GitHub Releases and main
 
-The [public stable release v0.1.5](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.5) and `releases/latest` still point to the current public stable version. The public Core `main` snapshot checked on 2026-10-08, `1449f49`, is package version `0.1.6` and is newer than the accepted `c32e004` revision; do not attribute older CI results to later commits. This worktree's current changes passed local engineering validation and remain unpublished; see the [current acceptance record](docs/release-readiness.md#2026-10-08-本轮本地变更验收). Version 0.1.6 has not been formally published to PyPI or MCP Registry. A draft is not a publicly downloadable stable release.
+The [public stable release v0.1.5](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.5) and `releases/latest` still point to the current public stable version. Core `0.1.6` fixes are merged into `main`; the accepted snapshot `34082f0` has its own [CI evidence](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/37914052744) and [engineering record](docs/release-readiness.md#2026-10-09-已合入源码的工程验收). Version `0.1.6` has not been formally published to PyPI. Its release draft still targets the historical candidate `c32e004` and does not establish inclusion of the newer fixes. Before publication, verify the actual tag, artifact hashes, CI, PyPI and MCP Registry status.
 
-Public `main` continues to change. Pin the full SHA above to reproduce the previously accepted candidate; each later revision needs its own acceptance evidence. For container deployment in an environment that permits it, see the existing [deployment guide](docs/docker.md); containers are not required for the source installation above.
+Public `main` continues to change. Pin the full SHA above to reproduce the accepted source candidate; each later revision needs its own acceptance evidence. For container deployment in an environment that permits it, see the existing [deployment guide](docs/docker.md); containers are not required for the source installation above.
 
 ### Configuration
 
@@ -301,7 +301,7 @@ Core remains free under the unchanged MIT license. Platform adapters, explicit-c
 
 Pro reuses those public capabilities and adds authorization lifecycle governance, encrypted application/grant storage, tenant/shop ACLs, persistent collection with page evidence and restart recovery, report history, scheduling and audit. It does not make the public multi-shop algorithm exclusive or imply support for every historical MCP registration. Supported providers and collection sources remain subject to their documented limits and merchant acceptance.
 
-The current private engineering candidate is Pro `0.1.5b1` / Core `0.1.6` / Client `0.1.0b1`. Engineering CI has passed, while all merchant `live_verified` values remain false. The historical Pro `v0.1.1b1` release does not represent this candidate. Formal customer artifacts still require the official signing key, a license and recipient details; an engineering candidate or historical installer is not a formal customer delivery.
+The companion private branch candidate is Pro `0.1.5b2` / Core `0.1.6` / Client `0.1.0b1`, pinned to Core `4e9309f`. Its own nine engineering CI checks passed, but it has not merged into Pro `main` or been revalidated against Core `34082f0`. All merchant `live_verified` values remain false. The historical Pro `v0.1.1b1` release does not represent this candidate. Formal customer artifacts still require the official signing key, a license and recipient details; an engineering candidate or historical installer is not a formal customer delivery.
 
 A permitted, registered loopback callback can use the CLI authorization flow; HTTPS partner callbacks and user identity require server integration. Pro does not currently promise Ocean Engine/Qianchuan automatic renewal or reports. Old `shops.yaml` files are not automatically imported. Data flow depends on deployment: platform requests, remote partner APIs and explicitly configured notifications are separate from local storage and offline licensing.
 

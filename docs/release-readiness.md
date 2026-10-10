@@ -1,22 +1,38 @@
 # Core 工程候选与发布状态
 
-更新：2026-10-08。**截至该日核对的公开 Core `main` 快照为 `1449f49`、版本为 `0.1.6`；PyPI / 公开稳定 Release 仍为 `0.1.5`，`0.1.6` Release 仍是草稿。先前通过验收的 Core 候选固定为 `c32e004`，其 CI 结果只对应那个提交。2026-10-08 的提交前工作区改动已通过本地工程验收、尚未发布。真实店铺验收尚未执行。** 本页区分公开快照、历史工程证据、本轮本地改动、正式发布和商家数据验收。
+更新：2026-10-10。**Core `0.1.6` 的已验收源码快照为 [`34082f0`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/34082f0c17149bc054306f382ee2d33934da7ff7)，相关修复已合入 `main`，该提交的 [11 项 CI 检查全部通过](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/37914052744)。PyPI / 公开稳定 Release 仍为 `0.1.5`，`0.1.6` Release 仍是草稿；真实店铺验收尚未执行。** 本页分别记录当前已合入源码、历史工程证据、正式发布与商家数据验收。
 
 ## 版本与公开工程证据
 
 | 对象 | 精确版本 / 提交 | 实际状态 |
 | --- | --- | --- |
-| 2026-10-08 核对的公开 Core `main` 快照 | [`1449f49`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/1449f494aa68d5261fc0c57c44bfce6a409a5611)，版本 `0.1.6` | 比下列已验候选更新；不能套用历史 CI 结果 |
+| 已验收 Core 源码快照（2026-10-10 核对） | [`34082f0`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/34082f0c17149bc054306f382ee2d33934da7ff7)，版本 `0.1.6` | 相关修复已合入 `main`；[CI 37914052744](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/37914052744) 的 11 项检查全部通过 |
+| 2026-10-08 核对的公开 Core `main` 历史快照 | [`1449f49`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/1449f494aa68d5261fc0c57c44bfce6a409a5611)，版本 `0.1.6` | 仅记录该日状态，不能套用其他提交的 CI 结果 |
 | 2026-10-08 提交前的 Core 工作区 | `1449f49` + 当时未提交改动，版本 `0.1.6` | 下述本地回归和安装验收通过；该次验收未包含远程 CI 或公开发行 |
 | 先前已验 Core 候选 | `0.1.6`；[`c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e) | [CI 34572407075](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/34572407075) success；验收结果绑定此完整 SHA |
 | 已验 main 合并快照 | [`67c8fc9c0eb0e83cd8f819a686fe8c092f0d9f7c`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/67c8fc9c0eb0e83cd8f819a686fe8c092f0d9f7c) | [CI 34572676414](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/34572676414) success；[PR116](https://github.com/TonyWang-hub/mcp-cn-commerce/pull/116) 和 [PR117](https://github.com/TonyWang-hub/mcp-cn-commerce/pull/117) 已合并；结果绑定此快照 |
 | PyPI / 公开稳定 Release | `0.1.5` | [PyPI](https://pypi.org/project/mcp-cn-commerce/0.1.5/) 与 [Release](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.5) 是历史公开版本，不含本次候选全部修复 |
-| `0.1.6` 发布阶段 | 当前源码版本；公开 Release 仍为草稿 | 尚未正式发布到 PyPI 或 MCP Registry；发布草稿不等于公开稳定包 |
-| 当前私有 Pro / Client 候选 | Pro `0.1.5b1` / Core `0.1.6` / Client `0.1.0b1` | 最近三项工程 CI 成功；所有商家 `live_verified=false`；正式客户制品需签名密钥、许可和接收方信息 |
+| `0.1.6` 发布阶段 | 已合入的源码候选；Release 草稿仍指向历史 `c32e004` | 尚未正式发布到 PyPI；发布前须核对实际 tag、制品哈希、CI 与 MCP Registry 状态，草稿不等于公开稳定包 |
+| 配套私有 Pro / Client 提交候选 | Pro `0.1.5b2` / Core `0.1.6` / Client `0.1.0b1`；固定 Core `4e9309f` | 自身 9 项 CI 检查成功，尚未合入 Pro `main`，未对 Core `34082f0` 复验；商家 `live_verified=false`，正式客户制品需签名密钥、许可和接收方信息 |
 | 历史 Pro Release | `v0.1.1b1` | 旧 Release / 制品，不代表当前 Pro 源码或候选构建；不将旧验收记录归给新候选 |
 | 商家 live | 全部 SDK `live_verified=false` | 尚无真实商家授权、业务样本和后台对账的通过记录 |
 
-`c32e004` 的历史验收结果可按 [README 的完整 SHA 安装步骤](../README.md#安装)复现，使用项目虚拟环境。普通 `pip install mcp-cn-commerce` 与 `releases/latest` 当前取到的是旧稳定版。2026-10-08 核对的公开 main 快照 `1449f49` 比已验提交更新；本轮工作区结果单独记录在下方[本轮记录](#2026-10-08-本轮本地变更验收)。
+README 的[完整 SHA 安装步骤](../README.md#安装)现在对应已验收源码 `34082f0`。`c32e004` 与 `67c8fc9` 保留为[历史工程证据](#已完成的工程验证)，复现时须分别固定对应完整 SHA；普通 `pip install mcp-cn-commerce` 与 `releases/latest` 仍取到公开稳定版 `0.1.5`。2026-10-08 的提交前本地验收单独保留在[历史记录](#2026-10-08-本轮本地变更验收)中。
+
+## 2026-10-09 已合入源码的工程验收
+
+本节绑定 Core 提交 `34082f0c17149bc054306f382ee2d33934da7ff7`（源码版本 `0.1.6`），2026-10-10 核对时已合入公开 `main`。后续提交须保留各自的验收证据。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| 工程修复合入 | 能力描述与不支持操作守卫、配对依赖更新、9 处 `actions/setup-python@v7` 更新及 Pydantic 子依赖锁定修复均已合入 |
+| 托管 CI | [Test 37914052744](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/37914052744) 的 11 项检查全部通过：Python 3.11/3.12/3.13、锁定与最新支持依赖安装、Docker、lint、typecheck、code-quality、public-boundary、manifest-validate |
+| 最终运行依赖 | MCP/mcp-types `2.3.0`、httpx2/httpcore2 `2.13.1`、Pydantic `2.13.5`；由 Pydantic 元数据精确约束 `pydantic-core==2.46.5`，移除冗余顶层 pin |
+| 独立干净安装 | Python 3.12.3，使用预先获取的缓存离线解析安装；30 项显式锁定全部匹配，实际外部运行依赖 31 项（含隐式 `pydantic-core`），`pip check` 通过 |
+| 漏洞审计 | `pip-audit 2.10.1` 严格审计实际安装的 31 项运行依赖（含隐式 `pydantic-core`），退出码 0、0 项已知漏洞；结果绑定该依赖集合和审计时间 |
+| 发布与商家验收 | 修复已合入源码；PyPI / 公开稳定 Release 仍为 `0.1.5`，`0.1.6` Release 仍是草稿；真实商家验收未执行 |
+
+下方 2026-10-08 的测试数量、源码指纹及制品哈希只属于那次提交前本地验收，不作为 `34082f0` 的新构建哈希。Pro / Client 使用独立提交、Core 固定版本和自身 CI；本节不表示其已对 `34082f0` 复验，也不表示已完成真实商家或正式客户交付验收。
 
 ## 2026-10-08 本轮本地变更验收
 
@@ -42,7 +58,7 @@
 
 - Core 历史候选 `c32e004` 完整回归为 **2225 tests + 20 subtests**，JUnit 汇总为 **2245**；该提交和已验 main 快照 `67c8fc9` 的上述 CI 均成功。数字不代表 2026-10-08 的公开 main 快照或本轮本地改动已验收。
 - 历史 workflow 记录覆盖 Python 版本矩阵、格式/类型/静态检查、锁定与最新支持依赖安装、wheel/sdist、真实 MCP stdio、manifest 校验及托管容器作业。真实进程握手不等于商家 HTTP 已联调，也不替代当前提交的新验收。
-- 当前私有 Pro `0.1.5b1` / Core `0.1.6` / Client `0.1.0b1` 候选最近三项工程 CI 已成功。先前 Pro `v0.1.1b1` 的测试统计只属于对应历史制品；不在此处用旧数字描述当前候选。当前商家 live 仍未验收，正式客户制品还需签名密钥、许可和接收方信息。
+- 配套私有 Pro `0.1.5b2` / Core `0.1.6` / Client `0.1.0b1` 提交候选固定 Core `4e9309f`，自身 9 项工程 CI 检查成功，尚未合入 Pro `main`，未对 Core `34082f0` 复验。先前 Pro `v0.1.1b1` 的测试统计只属于历史制品；商家 live 仍未验收，正式客户制品还需签名密钥、许可和接收方信息。
 - 商家接口合同测试使用受控响应；当前没有真店通过记录。本轮包含实现、依赖与文档修改，其回归和安装结果单独记录在本轮验收项中。
 
 较早的 `6b6a7f9` / Pro `64dc3f5` 等结果保留在[历史验收记录](verification-results.md)中；`c32e004`、`67c8fc9` 与公开 main 快照 `1449f49` 也分别记录。新的包哈希、安装结果和发布状态必须绑定实际发行 manifest；不把旧制品或旧 CI 说成本轮本地改动的验收。

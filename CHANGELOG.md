@@ -6,15 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased] — 0.1.6 engineering candidate
 
-Status checked on 2026-10-10: the accepted Core source snapshot is
-[`34082f0c17149bc054306f382ee2d33934da7ff7`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/34082f0c17149bc054306f382ee2d33934da7ff7).
-Capability-boundary, dependency and CI fixes are merged into `main`; [all 11 CI checks
-for this commit passed](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/37914052744). See the
-[merged-source engineering record](docs/release-readiness.md#2026-10-09-已合入源码的工程验收).
-The historical `c32e004` and `67c8fc9` CI results and the 2026-10-08 pre-commit
+Status checked on 2026-10-10: the Core source snapshot used for this engineering acceptance and local artifact preparation is
+[`7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9), which has merged into public `main`.
+Its own [11 CI checks passed](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38038270963). A wheel and sdist were prepared and checked locally from this exact source; this is preparation evidence, not publication. See the
+[2026-10-10 Core engineering and local release preparation record](docs/release-readiness.md#2026-10-10-core-main-与本地发布准备).
+Later status-document commits have their own SHAs and CI records; the `7e10d2f` CI and local artifact hashes do not transfer to them or imply that `main` still points to `7e10d2f`. The previous accepted Core snapshot `34082f0` and its CI, the historical `c32e004` and `67c8fc9` CI results, and the 2026-10-08 pre-commit
 local acceptance remain separately scoped in [release readiness](docs/release-readiness.md).
 The `0.1.6` release draft still targets `c32e004` and does not establish publication
-of the newer source snapshot.
+of the newer source snapshot. PyPI and the public stable release remain `0.1.5`; the locally prepared wheel and sdist have not been published.
 **PyPI and the public stable release remain 0.1.5.** Version 0.1.6 is an engineering
 candidate for a release draft, not a completed stable PyPI/Registry publication.
 See [installation choices](README.md#安装) and [release evidence](docs/release-readiness.md).

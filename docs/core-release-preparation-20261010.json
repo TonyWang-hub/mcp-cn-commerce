@@ -1,0 +1,124 @@
+{
+  "schema": "commerce-core-release-preparation/v1",
+  "source_sha": "7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9",
+  "source_tree": "61e035590a1f68654b2e8e4aafd3b550cde3692b",
+  "source_export": {
+    "path": "./source",
+    "method": "git archive from the exact source commit",
+    "git_metadata_in_export": false,
+    "meaning": "clean source export for local preparation; not a new commit, tag, or release"
+  },
+  "version": {
+    "shared___version__": "0.1.6",
+    "pyproject_dynamic_attr": "shared.__version__",
+    "server_json_version": "0.1.6",
+    "server_package_version": "0.1.6",
+    "planned_tag": "v0.1.6",
+    "built_wheel_metadata_version": "0.1.6",
+    "built_sdist_metadata_version": "0.1.6",
+    "consistent": true
+  },
+  "tools": {
+    "uv": "0.11.14",
+    "python": "3.12.3",
+    "twine": "7.0.0 (uv offline cache)",
+    "network_install_used": false
+  },
+  "ci": {
+    "url": "https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38038270963",
+    "outcome": "success",
+    "passed_jobs": 11,
+    "source": "independently verified against the exact GitHub Actions head SHA"
+  },
+  "artifacts": [
+    {
+      "name": "mcp_cn_commerce-0.1.6-py3-none-any.whl",
+      "sha256": "f9ea5fcfc8183672e5b73ff65173b27b8e77c174fdcc6a7264ca82b691791dd3",
+      "bytes": 229663
+    },
+    {
+      "name": "mcp_cn_commerce-0.1.6.tar.gz",
+      "sha256": "c1111e1ee421c65289fd709b20f3037ff10f9e8f2e23538d41220d478d162b43",
+      "bytes": 352066
+    }
+  ],
+  "commands": [
+    {
+      "name": "git_archive_export",
+      "exit_code": 0,
+      "details": "source exported to a clean temporary directory"
+    },
+    {
+      "name": "version_consistency",
+      "exit_code": 0,
+      "details": "dynamic attribute, imported package version, server manifest versions and planned tag all agree"
+    },
+    {
+      "name": "uv_build_offline",
+      "exit_code": 0,
+      "command": "uv build --offline --python 3.12 --out-dir <dist> <source>",
+      "log": "./logs/build.log"
+    },
+    {
+      "name": "twine_check",
+      "exit_code": 0,
+      "command": "uv tool run --offline --from twine==7.0.0 twine check <wheel> <sdist>",
+      "log": "./logs/twine-check.log"
+    },
+    {
+      "name": "public_boundary_raw_dist_initial",
+      "exit_code": 1,
+      "details": "uv build left a one-byte .gitignore sentinel in its output folder; the checker tried to parse it as a distribution"
+    },
+    {
+      "name": "public_boundary_clean_dist",
+      "exit_code": 0,
+      "command": "python3.12 scripts/check_public_boundary.py --root <source> --dist <boundary-dist>",
+      "details": "boundary-dist contains only the built wheel and sdist",
+      "log": "./logs/public-boundary.log"
+    },
+    {
+      "name": "source_sensitive_scan",
+      "exit_code": 0,
+      "details": "scanned changed Python source, both READMEs, pyproject.toml, server.json, and wheel/sdist package metadata"
+    },
+    {
+      "name": "local_repo_read_only_check",
+      "exit_code": 0,
+      "details": "HEAD stayed at the requested SHA, worktree clean, no local v0.1.6 tag found"
+    }
+  ],
+  "sensitive_scan": {
+    "scope_items": 50,
+    "changed_python_files": 43,
+    "readmes": [
+      "README.md",
+      "README_en.md"
+    ],
+    "package_metadata_files": 3,
+    "email_hits": 0,
+    "absolute_user_path_hits": 0,
+    "private_key_marker_hits": 0,
+    "known_token_or_key_format_hits": 0,
+    "credential_literal_assignments": {
+      "count": 1,
+      "classification": "short placeholder",
+      "location": "shared/dashboard.py:259",
+      "value_not_recorded": true
+    },
+    "phone_shaped_fixture_hits": {
+      "count": 9,
+      "files": 5,
+      "context": "mock order payloads with placeholder names and XX/YY addresses; scanner does not independently verify phone ownership"
+    },
+    "github_namespace": "TonyWang-hub appears in project URLs and the server namespace; allowed by task instructions"
+  },
+  "release_boundary": {
+    "published": false,
+    "merchant_live_accepted": false,
+    "tag_modified": false,
+    "release_draft_modified": false,
+    "pypi_or_registry_touched": false,
+    "external_messages_sent": false
+  }
+}

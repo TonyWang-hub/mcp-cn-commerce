@@ -15,7 +15,7 @@
 
 [English](README_en.md) | **简体中文**
 
-> **2026-10-10 状态**：Core `0.1.6` 的已验收源码快照为 [`34082f0`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/34082f0c17149bc054306f382ee2d33934da7ff7)，相关能力边界、依赖和 CI 修复已合入 `main`；该提交的 [11 项 CI 检查全部通过](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/37914052744)。PyPI 和公开稳定 Release 仍为 `0.1.5`，`0.1.6` Release 仍是草稿，尚未正式发布。真实商家验收仍未执行，详见[工程与发布记录](docs/release-readiness.md#2026-10-09-已合入源码的工程验收)。
+> **2026-10-10 状态**：Core `0.1.6` 本轮工程验收和本地制品准备使用的固定源码快照为 [`7e10d2f`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9)，该提交已合入公开 `main`，自身的 [11 项 CI 检查全部通过](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38038270963)。wheel/sdist 已按该快照完成本地准备核对，**尚未发布**；PyPI 和公开稳定 Release 仍为 `0.1.5`，`0.1.6` Release 草稿仍指向历史提交。真实商家验收仍未执行，详见[2026-10-10 工程与本地发布准备记录](docs/release-readiness.md#2026-10-10-core-main-与本地发布准备)。后续状态文档提交有各自的 SHA 和 CI 记录，不表示重建了该快照或 main 仍停在 `7e10d2f`。
 >
 > [项目与咨询进展](docs/project-status.md) · [工程/发布证据](docs/release-readiness.md) · [更新记录](CHANGELOG.md)
 
@@ -88,16 +88,16 @@
 
 ### 安装
 
-#### 安装已验收的 0.1.6 固定源码候选
+#### 安装本轮验收与本地准备使用的 0.1.6 固定源码快照
 
-使用 Python 3.11+；以下以已有 Python 3.12 为例，在项目虚拟环境安装。2026-10-10 核对的已验收源码快照固定为
-[`34082f0c17149bc054306f382ee2d33934da7ff7`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/34082f0c17149bc054306f382ee2d33934da7ff7)。
-该提交的工程 CI 已通过；源码候选尚不是 PyPI 稳定版，也不代表商家 API live 已通过：
+使用 Python 3.11+；以下以已有 Python 3.12 为例，在项目虚拟环境安装。本轮验收和本地制品准备使用的源码快照为
+[`7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9)。
+该提交自己的 11 项工程 CI 检查已通过；本地 wheel/sdist 准备核对不表示正式发布。源码尚不是 PyPI 稳定版，也不代表商家 API live 已通过：
 
 ```bash
 git clone https://github.com/TonyWang-hub/mcp-cn-commerce.git
 cd mcp-cn-commerce
-git checkout --detach 34082f0c17149bc054306f382ee2d33934da7ff7
+git checkout --detach 7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -c requirements-lock.txt .
@@ -126,7 +126,7 @@ python -m pip install "mcp-cn-commerce==0.1.5"
 
 #### GitHub Releases 与 main
 
-[公开稳定 Release v0.1.5](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.5) 与 `releases/latest` 仍指向当前公开稳定版。Core `0.1.6` 的修复已合入 `main`；已验收快照 `34082f0` 有独立的 [CI 证据](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/37914052744)和[工程记录](docs/release-readiness.md#2026-10-09-已合入源码的工程验收)。`0.1.6` 尚未正式发布到 PyPI；Release 草稿仍指向历史候选 `c32e004`，不能据此认为草稿已包含新修复。正式发布前须核对实际 tag、制品哈希、CI、PyPI 和 MCP Registry 状态；后续以[项目进展](docs/project-status.md)及实际 Release 为准。
+[公开稳定 Release v0.1.5](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.5) 与 `releases/latest` 仍指向当前公开稳定版。用于本轮工程验收和本地制品准备的固定源码快照 `7e10d2f` 已合入 `main`，有独立的 [CI 证据](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38038270963)和[工程/本地发布准备记录](docs/release-readiness.md#2026-10-10-core-main-与本地发布准备)。本地 wheel/sdist 尚未正式发布到 PyPI；Release 草稿仍指向历史候选 `c32e004`，不能据此认为草稿已包含新修复。后续源码或文档提交各有自己的 SHA 和 CI，不沿用 `7e10d2f` 的 CI 或制品哈希。正式发布前须核对实际 tag、制品哈希、CI、PyPI 和 MCP Registry 状态；后续以[项目进展](docs/project-status.md)及实际 Release 为准。
 
 复现已验候选时使用上面的完整 SHA。当前 `main` 和 HEAD 会继续变化；每个新提交都需绑定自己的验收证据，不要把未固定的 Git 安装、后续 main 或旧 PyPI 包称为同一个候选构建。
 
@@ -371,7 +371,7 @@ mcp-cn-commerce/
 
 开源版永久免费，MIT 许可和已经公开的能力保持不变：平台适配、显式凭证 SDK、金额/时间归一化，以及 `build_daily_report` 的多店确定性日报计算都属于 Core。多店算法无需 Pro；宿主需提供已采集记录和准确的完整性声明。**代运营公司 / 电商 SaaS / 多店铺商家**可参加 Pro 内测，验证授权治理和持续运行能力；平台范围按当前合同逐操作确认。
 
-配套私有提交候选为 Pro `0.1.5b2` / Core `0.1.6` / Client `0.1.0b1`，固定 Core `4e9309f`，自身 9 项工程 CI 检查通过，尚未合入 Pro `main`；该候选未对 Core `34082f0` 复验，所有商家 `live_verified` 仍为 false。历史 Pro `v0.1.1b1` Release 不代表当前候选。正式客户制品还需正式签名密钥、许可和接收方信息；工程候选或历史安装包不构成正式客户交付。
+当前配套组合为 Pro `0.1.5b2` / Core `0.1.6` / Client `0.1.0b1`，固定使用 Core 源码快照 `7e10d2f`。Pro 自身 9 项工程 CI 检查通过，已合入 Pro `main`。真实商家 `live_verified` 仍为 false，业务验收与后台对账尚未完成；合成演练已通过，尚未提供正式客户制品。正式客户制品还需正式签名密钥、许可和接收方信息。历史 Pro `v0.1.1b1` Release 不代表当前组合。
 
 | 能力 | 开源版 | Pro 版 |
 |---|---|---|

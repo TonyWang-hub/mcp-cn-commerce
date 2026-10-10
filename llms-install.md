@@ -24,7 +24,7 @@ The commands below use Python 3.12. If you selected another supported interprete
 
 ## Step 1 — Choose a version and install it
 
-As of 2026-10-10, PyPI and the public stable release remain `0.1.5`. The accepted Core `0.1.6` source snapshot is `34082f0c17149bc054306f382ee2d33934da7ff7`; its capability-boundary, dependency and CI fixes are merged into `main`, and [all 11 CI checks for this commit passed](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/37914052744). The `0.1.6` release remains a draft targeting the historical `c32e004` candidate. Merchant live acceptance has not been performed. See the [engineering and release record](docs/release-readiness.md#2026-10-09-已合入源码的工程验收).
+As of 2026-10-10, PyPI and the public stable release remain `0.1.5`. The fixed Core `0.1.6` source snapshot used for this engineering acceptance and local artifact preparation is `7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9`; it has merged into public `main`, and its [11 CI checks passed](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38038270963). A wheel and sdist were prepared and checked locally from this exact source, but have not been published. The `0.1.6` release draft still points to the historical `c32e004` candidate. Merchant live acceptance has not been performed. See the [engineering and local release preparation record](docs/release-readiness.md#2026-10-10-core-main-与本地发布准备). Later status-document commits have separate SHAs and CI records; this entry does not claim that `main` still points to `7e10d2f`.
 
 Choose one of these installs. Keep each in its own directory and virtual environment.
 
@@ -39,19 +39,19 @@ python -m pip install "mcp-cn-commerce==0.1.5"
 .venv/bin/mcp-cn-commerce --version
 ```
 
-### Accepted pinned source candidate `0.1.6`
+### Pinned engineering acceptance and preparation source snapshot `0.1.6`
 
 ```bash
 git clone https://github.com/TonyWang-hub/mcp-cn-commerce.git
 cd mcp-cn-commerce
-git checkout --detach 34082f0c17149bc054306f382ee2d33934da7ff7
+git checkout --detach 7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -c requirements-lock.txt .
 .venv/bin/mcp-cn-commerce --version
 ```
 
-The source candidate has engineering acceptance evidence tied to this exact commit. It is not a stable PyPI release; later source revisions need their own evidence, and merchant API acceptance remains unverified. Do not use an unqualified `pip install mcp-cn-commerce`: it selects the public stable release, currently `0.1.5`.
+This source snapshot has engineering CI evidence tied to this exact commit. Local wheel/sdist preparation is not publication. It is not a stable PyPI release; later source revisions need their own evidence, and merchant API acceptance remains unverified. Do not use an unqualified `pip install mcp-cn-commerce`: it selects the public stable release, currently `0.1.5`.
 
 The package provides these platform commands:
 

@@ -1,24 +1,25 @@
 # Core 工程候选与发布状态
 
-更新：2026-10-10。**Core `0.1.6` 本轮工程验收与本地制品准备使用的固定源码快照为 [`7e10d2f`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9)，该提交已合入公开 `main`，自身的 [11 项 CI 检查全部通过](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38038270963)。wheel/sdist 已按该 SHA 完成本地准备核对，但尚未正式发布。PyPI / 公开稳定 Release 仍为 `0.1.5`，`0.1.6` Release 草稿仍指向历史 `c32e004`；真实店铺验收尚未执行。** 本页分别记录本轮固定源码、本地准备、历史工程证据、正式发布与商家数据验收；后续状态文档提交有自己的 SHA 和 CI 记录，不表示重建了该快照或 main 仍停在 `7e10d2f`。
+更新：2026-10-10。**Core `0.1.6` 已正式公开发布**，GitHub `v0.1.6` Release、PyPI 和 MCP Registry 的 specific/latest 均为 `0.1.6`。发布源码 tag 指向 [`27be6444d19ab2d46a54d42cd11c5ecf769b6518`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/27be6444d19ab2d46a54d42cd11c5ecf769b6518)，发布时间为 `2026-10-10T10:31:14Z`。提交绑定的 main Test 与 Build & Release 工作流均成功。PyPI 下载 bytes、GitHub Release asset digests 与Release `SHA256SUMS` 三方一致；另已核对 `CORE_ACCEPTANCE` 中的发布源码和 workflow run 记录。Fresh Python 3.12.13 venv 的 PyPI 安装、`pip check`、CLI 和 neutral-cwd 24 个 stdio 情境均通过，详情见[正式发布记录](#2026-10-10-core-v016-publication-receipts)及[机器可读收据](core-release-publication-20261010.json)。** 下方 7e 本地准备、Oct 8/9、`34082f0` 和 `c32e004` 内容记录当时证据；其 CI 和制品哈希只绑定各自历史源码。后续文档提交有自己的 SHA 和 CI，不表示发布源码仍为 `main` HEAD。真实商家 API 和后台对账尚未验收；安装与 stdio 冒烟不代表真店验收，Core 发布不代表 Pro 正式客户交付。
 
 ## 版本与公开工程证据
 
 | 对象 | 精确版本 / 提交 | 实际状态 |
 | --- | --- | --- |
-| 本轮验收/本地准备固定源码快照 | [`7e10d2f`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9)，版本 `0.1.6` | 已合入公开 `main`；[该提交自己的 CI 38038270963](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38038270963) 的 11 项检查全部通过 |
+| 当前公开 `0.1.6` 发布源码 | [`27be644`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/27be6444d19ab2d46a54d42cd11c5ecf769b6518)，tag `v0.1.6` | GitHub Release、PyPI 和 MCP Registry 均已发布并标为 latest；提交绑定的 CI 与制品哈希见下方正式发布记录 |
+| 发布前工程验收/本地准备快照（历史） | [`7e10d2f`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9)，版本 `0.1.6` | 已合入公开 `main`；[该提交自己的 CI 38038270963](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38038270963) 的 11 项检查全部通过 |
 | 先前已验收 Core 源码快照（历史） | [`34082f0`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/34082f0c17149bc054306f382ee2d33934da7ff7)，版本 `0.1.6` | [CI 37914052744](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/37914052744) 的 11 项检查全部通过；结果绑定该提交 |
 | 2026-10-08 核对的公开 Core `main` 历史快照 | [`1449f49`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/1449f494aa68d5261fc0c57c44bfce6a409a5611)，版本 `0.1.6` | 仅记录该日状态，不能套用其他提交的 CI 结果 |
 | 2026-10-08 提交前的 Core 工作区 | `1449f49` + 当时未提交改动，版本 `0.1.6` | 下述本地回归和安装验收通过；该次验收未包含远程 CI 或公开发行 |
 | 先前已验 Core 候选 | `0.1.6`；[`c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/c32e0049b55ed4e600aecd0a862d46ab9ba7ac9e) | [CI 34572407075](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/34572407075) success；验收结果绑定此完整 SHA |
 | 已验 main 合并快照 | [`67c8fc9c0eb0e83cd8f819a686fe8c092f0d9f7c`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/67c8fc9c0eb0e83cd8f819a686fe8c092f0d9f7c) | [CI 34572676414](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/34572676414) success；[PR116](https://github.com/TonyWang-hub/mcp-cn-commerce/pull/116) 和 [PR117](https://github.com/TonyWang-hub/mcp-cn-commerce/pull/117) 已合并；结果绑定此快照 |
-| PyPI / 公开稳定 Release | `0.1.5` | [PyPI](https://pypi.org/project/mcp-cn-commerce/0.1.5/) 与 [Release](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.5) 是历史公开版本，不含本次候选全部修复 |
-| `0.1.6` 发布阶段 | 本轮验收/本地准备固定源码为 `7e10d2f`；wheel/sdist 已按该 SHA 完成本地准备核对；Release 草稿仍指向历史 `c32e004` | 尚未正式发布到 PyPI；发布前须核对实际 tag、制品哈希、CI 与 MCP Registry 状态，草稿不等于公开稳定包 |
+| PyPI / 公开稳定 Release | `0.1.6` | [PyPI](https://pypi.org/project/mcp-cn-commerce/0.1.6/) 与 [GitHub Release](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.6) 为当前稳定版本；MCP Registry specific/latest 也为 `0.1.6` |
+| `0.1.6` 发布阶段 | 已正式发布，tag `v0.1.6` 指向 `27be6444d19ab2d46a54d42cd11c5ecf769b6518`；发布时间 `2026-10-10T10:31:14Z` | 实际发布 wheel/sdist 哈希、CI 和已通过的安装/制品核对见[正式发布记录](#2026-10-10-core-v016-publication-receipts) |
 | 当前配套 Pro / Client 组合 | Pro `0.1.5b2` / Core `0.1.6` / Client `0.1.0b1`；固定 Core 源码快照 `7e10d2f` | Pro 自身 9 项工程 CI 检查通过，已合入 Pro `main`；商家 `live_verified=false`，业务验收与后台对账未完成，合成演练已通过，尚未提供正式客户制品；正式客户制品需正式签名密钥、许可和接收方信息 |
 | 历史 Pro Release | `v0.1.1b1` | 旧 Release / 制品，不代表当前 Pro 源码或候选构建；不将旧验收记录归给新候选 |
 | 商家 live | 全部 SDK `live_verified=false` | 尚无真实商家授权、业务样本和后台对账的通过记录 |
 
-README 的[完整 SHA 安装步骤](../README.md#安装)固定到本轮验收/本地准备源码快照 `7e10d2f`。`34082f0` 及其 CI、`c32e004` 与 `67c8fc9` 均保留为[各自绑定的历史工程证据](#已完成的工程验证)，复现时须固定对应完整 SHA；普通 `pip install mcp-cn-commerce` 与 `releases/latest` 仍取到公开稳定版 `0.1.5`。2026-10-08 的提交前本地验收单独保留在[历史记录](#2026-10-08-本轮本地变更验收)中。
+README 的[源码安装步骤](../README.md#安装)验证并检出 `v0.1.6` tag；该 tag 固定到发布源码 `27be6444d19ab2d46a54d42cd11c5ecf769b6518`。`7e10d2f`、`34082f0`、`c32e004` 与 `67c8fc9` 均保留为[各自绑定的历史工程证据](#已完成的工程验证)，复现时须固定对应完整 SHA；普通 `pip install mcp-cn-commerce` 与 `releases/latest` 取得公开稳定版 `0.1.6`。2026-10-08 的提交前本地验收单独保留在[历史记录](#2026-10-08-本轮本地变更验收)中。
 
 ## 2026-10-10 Core main 与本地发布准备
 
@@ -35,6 +36,24 @@ README 的[完整 SHA 安装步骤](../README.md#安装)固定到本轮验收/�
 | 商家验收 | 所有 SDK `live_verified=false`；没有真实店铺样本和后台对账通过记录 |
 
 逐项命令、来源和边界见[机器可读的本地准备报告](core-release-preparation-20261010.json)。上表制品哈希只属于从 `7e10d2f` 导出的这次本地构建，不是已发布制品的 URL、签名或发行证明；正式发布时须重新核对实际 tag、构建产物、哈希、PyPI 与 MCP Registry 状态。真实商家验收仍需获准的商家样本和后台核对。
+
+## 2026-10-10 Core v016 publication receipts
+
+正式发布的固定源码为 `27be6444d19ab2d46a54d42cd11c5ecf769b6518`，tag `v0.1.6` 指向该提交。GitHub Release 为非草稿、非预发布且标为 latest；发布时间为 `2026-10-10T10:31:14Z`。PyPI 与 MCP Registry 的具体版本及 latest 均核实为 `0.1.6`。后续文档提交具有各自 SHA；此发布 SHA 不表示后续 `main` HEAD 仍停在 `27be644`。
+
+| 检查 / 阶段 | 实际结果 |
+| --- | --- |
+| [PR 149](https://github.com/TonyWang-hub/mcp-cn-commerce/pull/149) | 已合并至发布提交 `27be6444d19ab2d46a54d42cd11c5ecf769b6518`；[PR 自身 CI 38044621959](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38044621959) 的 11 项检查全部成功 |
+| main Test CI | [38045028472](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38045028472) 对发布提交执行，11 项检查全部成功 |
+| Build & Release CI | [38045046835](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38045046835) 对发布提交执行，13 项检查全部成功（11 项 quality、release、registry） |
+| 已发布 wheel | `mcp_cn_commerce-0.1.6-py3-none-any.whl`，229,027 bytes，SHA-256 `8920f1153ac2d0d014ffbc1ea51051298a087a8dc119fcaca969f2bbe4bd4b4b` |
+| 已发布 sdist | `mcp_cn_commerce-0.1.6.tar.gz`，342,454 bytes，SHA-256 `540ea14ecdcfcc1b91d9979d1b8e4cf734cd32908f1c5437d7b86e66496900b1` |
+| 发行制品三方核对 | PyPI 下载的 wheel/sdist 实际 bytes、GitHub Release 实际 asset digests、Release `SHA256SUMS` 完全一致；核对对象为最终发布文件，不以本地 7e 候选制品哈希替代 |
+| CORE_ACCEPTANCE 对照 | 已复核 `CORE_ACCEPTANCE` 中的 source `27be6444d19ab2d46a54d42cd11c5ecf769b6518` 和 workflow run 引用；这是额外的源码/运行记录校验，不属于上述发行制品三方核对 |
+| Fresh PyPI install / smoke | Python 3.12.13 fresh venv，PyPI 安装 `mcp-cn-commerce==0.1.6`（未加 constraints）；`pip check` 无 broken requirements，CLI 显示 `0.1.6`；neutral-cwd `smoke_install` 的 24 个 stdio 情境（8 平台 × registry CLI / standalone / missing credentials）全部通过；属安装与合成 stdio 检查，不是真店 API 验收 |
+| 商家验收 | 所有 SDK `live_verified=false`；发布、安装检查和合成 stdio 冒烟不代表真实商家授权、业务样本或后台对账通过 |
+
+以上发行数据及 API 收据见[机器可读的正式发布报告](core-release-publication-20261010.json)。正式发布 wheel/sdist 的实际哈希优先用于识别发行制品；它们与 `7e10d2f` 本地准备阶段生成的 wheel/sdist 是不同字节，不得互换。
 
 ## 2026-10-10 配套 Pro / Client 状态
 

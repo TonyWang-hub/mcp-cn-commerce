@@ -24,34 +24,38 @@ The commands below use Python 3.12. If you selected another supported interprete
 
 ## Step 1 — Choose a version and install it
 
-As of 2026-10-10, PyPI and the public stable release remain `0.1.5`. The fixed Core `0.1.6` source snapshot used for this engineering acceptance and local artifact preparation is `7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9`; it has merged into public `main`, and its [11 CI checks passed](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38038270963). A wheel and sdist were prepared and checked locally from this exact source, but have not been published. The `0.1.6` release draft still points to the historical `c32e004` candidate. Merchant live acceptance has not been performed. See the [engineering and local release preparation record](docs/release-readiness.md#2026-10-10-core-main-与本地发布准备). Later status-document commits have separate SHAs and CI records; this entry does not claim that `main` still points to `7e10d2f`.
+As of 2026-10-10, `0.1.6` is the published stable release on PyPI and MCP Registry. The `v0.1.6` GitHub Release is latest and targets source commit `27be6444d19ab2d46a54d42cd11c5ecf769b6518`, published at `2026-10-10T10:31:14Z`. The published wheel/sdist bytes match across PyPI downloads, GitHub Release asset digests and Release `SHA256SUMS`. Separately, `CORE_ACCEPTANCE` source/run references match the release source and workflow records. A fresh Python 3.12.13 PyPI venv install passed `pip check`, CLI version verification and all 24 neutral-cwd synthetic stdio scenarios. These checks do not establish merchant API acceptance, which remains unverified. See the [release evidence and artifact hashes](docs/release-readiness.md) and [machine-readable publication receipt](docs/core-release-publication-20261010.json).
 
 Choose one of these installs. Keep each in its own directory and virtual environment.
 
-### Public stable PyPI version `0.1.5`
+### Public stable PyPI release `0.1.6`
 
 ```bash
-mkdir -p mcp-cn-commerce-0.1.5
-cd mcp-cn-commerce-0.1.5
+mkdir -p mcp-cn-commerce-0.1.6
+cd mcp-cn-commerce-0.1.6
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install "mcp-cn-commerce==0.1.5"
+python -m pip install "mcp-cn-commerce==0.1.6"
 .venv/bin/mcp-cn-commerce --version
 ```
 
-### Pinned engineering acceptance and preparation source snapshot `0.1.6`
+If pip reports only older versions immediately after publication, retry with `python -m pip install --no-cache-dir "mcp-cn-commerce==0.1.6"` to bypass a stale package-index cache.
+
+### Install from the published source tag `v0.1.6`
 
 ```bash
 git clone https://github.com/TonyWang-hub/mcp-cn-commerce.git
 cd mcp-cn-commerce
-git checkout --detach 7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9
+set -e
+git rev-parse --verify 'refs/tags/v0.1.6^{commit}' >/dev/null
+git checkout --detach v0.1.6
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -c requirements-lock.txt .
 .venv/bin/mcp-cn-commerce --version
 ```
 
-This source snapshot has engineering CI evidence tied to this exact commit. Local wheel/sdist preparation is not publication. It is not a stable PyPI release; later source revisions need their own evidence, and merchant API acceptance remains unverified. Do not use an unqualified `pip install mcp-cn-commerce`: it selects the public stable release, currently `0.1.5`.
+The published tag resolves to `27be6444d19ab2d46a54d42cd11c5ecf769b6518`. Its release wheel/sdist hashes and successful clean-install/stdio checks are recorded in [release readiness](docs/release-readiness.md). Merchant API acceptance remains unverified. An unqualified `pip install mcp-cn-commerce` currently selects stable release `0.1.6`.
 
 The package provides these platform commands:
 
@@ -84,7 +88,7 @@ Use the absolute path to the command inside the chosen virtual environment. Acti
 {
   "mcpServers": {
     "oceanengine": {
-      "command": "/absolute/path/to/mcp-cn-commerce-0.1.5/.venv/bin/mcp-cn-oceanengine",
+      "command": "/absolute/path/to/mcp-cn-commerce-0.1.6/.venv/bin/mcp-cn-oceanengine",
       "env": {
         "OCEANENGINE_APP_KEY": "<configured locally>",
         "OCEANENGINE_APP_SECRET": "<configured locally>",
@@ -92,7 +96,7 @@ Use the absolute path to the command inside the chosen virtual environment. Acti
       }
     },
     "doudian": {
-      "command": "/absolute/path/to/mcp-cn-commerce-0.1.5/.venv/bin/mcp-cn-doudian",
+      "command": "/absolute/path/to/mcp-cn-commerce-0.1.6/.venv/bin/mcp-cn-doudian",
       "env": {
         "DOUDIAN_APP_KEY": "<configured locally>",
         "DOUDIAN_APP_SECRET": "<configured locally>",
@@ -104,7 +108,7 @@ Use the absolute path to the command inside the chosen virtual environment. Acti
 }
 ```
 
-If you installed the pinned source candidate, point `command` to the executable under that checkout's `.venv/bin/` instead. On Windows, use the corresponding `.venv\\Scripts\\` executable path.
+If you installed from the `v0.1.6` source tag, point `command` to the executable under that checkout's `.venv/bin/` instead. On Windows, use the corresponding `.venv\\Scripts\\` executable path.
 
 ## Step 5 — Verify discovery
 

@@ -170,10 +170,11 @@ request. Existing error responses remain compatible; the three unmigrated
 OceanEngine report tools now raise MCP `ToolError` before client creation.
 The five common tools are not platform operations and retain their existing
 descriptions. Tool names, input/output schemas and the total of 155 registrations
-remain unchanged. These changes are included in the fixed source snapshot used
-for the 2026-10-10 engineering acceptance but not in the public stable release
-`0.1.5`. Commit-specific CI evidence is
-recorded in [release readiness](release-readiness.md#2026-10-10-core-main-与本地发布准备).
+remain unchanged. These changes are included in the public stable release
+`0.1.6`, whose tag `v0.1.6` targets source commit
+`27be6444d19ab2d46a54d42cd11c5ecf769b6518`. Commit-specific release evidence is
+recorded in [release readiness](release-readiness.md). Merchant API acceptance
+remains unverified; all SDK `live_verified` values are still `false`.
 
 ## Compatibility and validation
 

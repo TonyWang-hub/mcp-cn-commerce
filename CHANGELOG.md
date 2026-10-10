@@ -4,9 +4,18 @@ All notable changes to mcp-cn-commerce will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — 0.1.6 release target
+## [0.1.6] - 2026-10-10
 
-Release target: v0.1.6. The formal release date will be added after publication is complete. Check the [v0.1.6 GitHub Release](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.6), [PyPI 0.1.6](https://pypi.org/project/mcp-cn-commerce/0.1.6/) and [release-readiness record](docs/release-readiness.md) for artifact availability and the corresponding source commit.
+Core `0.1.6` was published at `2026-10-10T10:31:14Z`. The stable [GitHub Release](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.6), [PyPI version](https://pypi.org/project/mcp-cn-commerce/0.1.6/) and MCP Registry specific/latest entries report `0.1.6`. Tag `v0.1.6` targets source commit `27be6444d19ab2d46a54d42cd11c5ecf769b6518`.
+
+The historical verification section below retains older CI evidence for its own candidate and merged-main revisions; it does not attest to the published source commit.
+
+### Release evidence
+
+- [PR 149](https://github.com/TonyWang-hub/mcp-cn-commerce/pull/149) was merged to the release source; its [CI 38044621959](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38044621959) passed all 11 checks. The release source's [main Test CI 38045028472](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38045028472) passed all 11 checks, and [Build & Release CI 38045046835](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38045046835) passed all 13 checks.
+- Published wheel: `mcp_cn_commerce-0.1.6-py3-none-any.whl`, 229,027 bytes, SHA-256 `8920f1153ac2d0d014ffbc1ea51051298a087a8dc119fcaca969f2bbe4bd4b4b`.
+- Published sdist: `mcp_cn_commerce-0.1.6.tar.gz`, 342,454 bytes, SHA-256 `540ea14ecdcfcc1b91d9979d1b8e4cf734cd32908f1c5437d7b86e66496900b1`.
+- The published wheel/sdist bytes match across PyPI downloads, GitHub Release asset digests and Release `SHA256SUMS`. Separately, `CORE_ACCEPTANCE` source/run references were checked against the published source and workflow records. A fresh Python 3.12.13 PyPI venv install passed `pip check`, CLI version verification and all 24 neutral-cwd synthetic stdio scenarios. These release checks do not establish merchant API acceptance, which remains unverified. See [release readiness](docs/release-readiness.md) and the [machine-readable publication receipt](docs/core-release-publication-20261010.json).
 
 ### Added
 

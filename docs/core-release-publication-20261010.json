@@ -1,0 +1,249 @@
+{
+  "schema": "commerce-core-publication/v1",
+  "version": "0.1.6",
+  "verified_at": "2026-10-10T10:41:30.546293+00:00",
+  "source": {
+    "sha": "27be6444d19ab2d46a54d42cd11c5ecf769b6518",
+    "tree": "8b2d631ef655e8a5219fbaab160eb3cc359297dc",
+    "tag": "v0.1.6",
+    "annotated_tag_object": "8e36726abac628ccb8a797547f809839d324890c",
+    "git_identity": "Project Automation",
+    "meaning": "The tag binds the published source. Later documentation commits have their own source and CI; earlier local preparation hashes are historical."
+  },
+  "github_release": {
+    "url": "https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.6",
+    "release_id": 386863657,
+    "published_at": "2026-10-10T10:31:14Z",
+    "draft": false,
+    "prerelease": false,
+    "latest": true,
+    "source_sha": "27be6444d19ab2d46a54d42cd11c5ecf769b6518",
+    "exact_asset_count": 4,
+    "all_historical_assets_replaced": true,
+    "acceptance_matches_release_source_and_workflow": true
+  },
+  "pypi": {
+    "url": "https://pypi.org/project/mcp-cn-commerce/0.1.6/",
+    "api_url": "https://pypi.org/pypi/mcp-cn-commerce/0.1.6/json",
+    "version": "0.1.6",
+    "latest": "0.1.6",
+    "readme_matches_release_source": true,
+    "registry_ownership_marker": "io.github.TonyWang-hub/mcp-cn-commerce"
+  },
+  "mcp_registry": {
+    "url": "https://registry.modelcontextprotocol.io/v0.1/servers/io.github.TonyWang-hub%2Fmcp-cn-commerce/versions/0.1.6",
+    "name": "io.github.TonyWang-hub/mcp-cn-commerce",
+    "version": "0.1.6",
+    "latest": "0.1.6",
+    "published_at": "2026-10-10T10:31:23.01279Z",
+    "status": "active",
+    "manifest_matches_source_after_omitted_false_flags": true
+  },
+  "ci": [
+    {
+      "workflow": "Build & Release",
+      "source_sha": "27be6444d19ab2d46a54d42cd11c5ecf769b6518",
+      "url": "https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38045046835",
+      "conclusion": "success",
+      "passed_jobs": 13
+    },
+    {
+      "workflow": "Test",
+      "source_sha": "27be6444d19ab2d46a54d42cd11c5ecf769b6518",
+      "url": "https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38045028472",
+      "conclusion": "success",
+      "passed_jobs": 11
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "mcp_cn_commerce-0.1.6-py3-none-any.whl",
+      "sha256": "8920f1153ac2d0d014ffbc1ea51051298a087a8dc119fcaca969f2bbe4bd4b4b",
+      "bytes": 229027,
+      "pypi_download_url": "https://files.pythonhosted.org/packages/bb/36/7ee04efda83a83ecd5662c00e2bd78416ca06f5472d2df23066830a3c7c5/mcp_cn_commerce-0.1.6-py3-none-any.whl",
+      "github_download_url": "https://github.com/TonyWang-hub/mcp-cn-commerce/releases/download/v0.1.6/mcp_cn_commerce-0.1.6-py3-none-any.whl",
+      "sha256_agrees_with": [
+        "downloaded PyPI bytes",
+        "PyPI JSON digest",
+        "GitHub asset digest",
+        "GitHub SHA256SUMS"
+      ]
+    },
+    {
+      "name": "mcp_cn_commerce-0.1.6.tar.gz",
+      "sha256": "540ea14ecdcfcc1b91d9979d1b8e4cf734cd32908f1c5437d7b86e66496900b1",
+      "bytes": 342454,
+      "pypi_download_url": "https://files.pythonhosted.org/packages/9a/11/93146af90363ed0a0ff85c4881f8787c2dde151d0e82ce8afcd9c06b0050/mcp_cn_commerce-0.1.6.tar.gz",
+      "github_download_url": "https://github.com/TonyWang-hub/mcp-cn-commerce/releases/download/v0.1.6/mcp_cn_commerce-0.1.6.tar.gz",
+      "sha256_agrees_with": [
+        "downloaded PyPI bytes",
+        "PyPI JSON digest",
+        "GitHub asset digest",
+        "GitHub SHA256SUMS"
+      ]
+    }
+  ],
+  "artifact_validation": {
+    "twine_check": "passed",
+    "public_source_and_distribution_boundary": "passed",
+    "wheel_record": "passed",
+    "wheel_matches_reviewed_candidate_bytes": true,
+    "sdist_file_payloads_match_reviewed_candidate": 100,
+    "sdist_archive_metadata_differs_from_local_build": true,
+    "runtime_python_files_match_release_source": 50,
+    "public_payload_and_archive_header_privacy_review": "passed"
+  },
+  "clean_pypi_install": {
+    "python": "3.12.13",
+    "package_version": "0.1.6",
+    "dependency_set": "unconstrained PyPI installation",
+    "pip_check": "passed",
+    "cli_version": "mcp-cn-commerce 0.1.6",
+    "stdio_scenarios_passed": 24,
+    "runtime_python_files_match_published_wheel": 50,
+    "installed_packages_excluding_pip": [
+      {
+        "name": "annotated-types",
+        "version": "0.8.0"
+      },
+      {
+        "name": "anyio",
+        "version": "4.15.1"
+      },
+      {
+        "name": "attrs",
+        "version": "26.1.0"
+      },
+      {
+        "name": "certifi",
+        "version": "2026.7.22"
+      },
+      {
+        "name": "cffi",
+        "version": "2.1.1"
+      },
+      {
+        "name": "click",
+        "version": "8.5.0"
+      },
+      {
+        "name": "cryptography",
+        "version": "50.0.2"
+      },
+      {
+        "name": "h11",
+        "version": "0.16.0"
+      },
+      {
+        "name": "httpcore",
+        "version": "1.0.9"
+      },
+      {
+        "name": "httpcore2",
+        "version": "2.13.1"
+      },
+      {
+        "name": "httpx",
+        "version": "0.28.1"
+      },
+      {
+        "name": "httpx2",
+        "version": "2.13.1"
+      },
+      {
+        "name": "idna",
+        "version": "3.20"
+      },
+      {
+        "name": "jsonschema",
+        "version": "4.26.0"
+      },
+      {
+        "name": "jsonschema-specifications",
+        "version": "2025.9.1"
+      },
+      {
+        "name": "mcp",
+        "version": "2.3.0"
+      },
+      {
+        "name": "mcp-cn-commerce",
+        "version": "0.1.6"
+      },
+      {
+        "name": "mcp-types",
+        "version": "2.3.0"
+      },
+      {
+        "name": "opentelemetry-api",
+        "version": "1.45.1"
+      },
+      {
+        "name": "pycparser",
+        "version": "3.11"
+      },
+      {
+        "name": "pydantic",
+        "version": "2.14.0"
+      },
+      {
+        "name": "pydantic_core",
+        "version": "2.50.0"
+      },
+      {
+        "name": "PyJWT",
+        "version": "2.15.1"
+      },
+      {
+        "name": "python-multipart",
+        "version": "0.0.32"
+      },
+      {
+        "name": "referencing",
+        "version": "0.37.0"
+      },
+      {
+        "name": "rpds-py",
+        "version": "2026.9.1"
+      },
+      {
+        "name": "sse-starlette",
+        "version": "3.5.0"
+      },
+      {
+        "name": "starlette",
+        "version": "1.7.0"
+      },
+      {
+        "name": "truststore",
+        "version": "0.10.4"
+      },
+      {
+        "name": "typing-inspection",
+        "version": "0.4.4"
+      },
+      {
+        "name": "typing_extensions",
+        "version": "4.16.0"
+      },
+      {
+        "name": "uvicorn",
+        "version": "0.54.0"
+      }
+    ],
+    "merchant_api_requests": false,
+    "initial_index_propagation_retry": "The first attempt observed the old simple index; a no-cache retry after 0.1.6 appeared succeeded.",
+    "fresh_cache_index_download": {
+      "result": "passed",
+      "wheel_sha256": "8920f1153ac2d0d014ffbc1ea51051298a087a8dc119fcaca969f2bbe4bd4b4b",
+      "meaning": "The ordinary PyPI simple index resolves 0.1.6 with an isolated fresh pip cache; the existing cache still listed earlier versions."
+    }
+  },
+  "acceptance_boundary": {
+    "core_publication_completed": true,
+    "merchant_live_accepted": false,
+    "sdk_live_verified": false,
+    "pro_publicly_published": false,
+    "formal_pro_customer_delivery_completed": false
+  }
+}

@@ -32,24 +32,64 @@ jobs:
         with:
           python-version: "3.12"
       - name: Require matching package, manifest and tag versions
+        id: version
         env:
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           python - <<'PY'
-          import json, os
+          import json, os, subprocess
+          from pathlib import Path
           from shared import __version__
           manifest = json.load(open("server.json"))
           assert os.environ["RELEASE_TAG"] == "v" + __version__, "Release tag must match shared.__version__"
           assert manifest["version"] == __version__
           assert all(p["version"] == __version__ for p in manifest["packages"])
+          source = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          notes = Path("docs/releases") / (__version__ + ".md")
+          assert notes.is_file(), "Reviewed release notes are required"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"source={source}\nversion={__version__}\n")
           PY
       - name: Build and check distributions
         run: |
           python -m pip install build twine
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
           python -m build
           python -m twine check dist/*
       - name: Reject private payloads or dependencies before public upload
         run: python scripts/check_public_boundary.py --dist dist
+      - name: Bind release evidence to the built distributions
+        env:
+          SOURCE_SHA: ${{ steps.version.outputs.source }}
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python - <<'PY'
+          import hashlib, os
+          from pathlib import Path
+          version = os.environ["PACKAGE_VERSION"]
+          source = os.environ["SOURCE_SHA"]
+          repository = os.environ["GITHUB_REPOSITORY"]
+          run_url = f"{os.environ['GITHUB_SERVER_URL']}/{repository}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+          source_url = f"{os.environ['GITHUB_SERVER_URL']}/{repository}/commit/{source}"
+          distributions = sorted(Path("dist").iterdir())
+          expected = {f"mcp_cn_commerce-{version}-py3-none-any.whl", f"mcp_cn_commerce-{version}.tar.gz"}
+          assert {p.name for p in distributions} == expected, "Unexpected distribution files"
+          assets = Path("release-assets")
+          assets.mkdir()
+          checksums = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in distributions)
+          (assets / "SHA256SUMS").write_text(checksums)
+          evidence = (
+              f"# Core {version} release evidence\n\n"
+              f"Source: [{source}]({source_url})\n\n"
+              f"Quality and publication workflow: {run_url}\n\n"
+              "The source quality gate, distribution metadata check and public-package boundary check passed before upload.\n\n"
+              "SHA256SUMS records the wheel and sdist from this build. Local preparation records for earlier commits remain historical.\n\n"
+              "Merchant live acceptance has not been performed; live_verified remains false. Pro and Client are separate private deliveries.\n"
+          )
+          (assets / "CORE_ACCEPTANCE.md").write_text(evidence)
+          notes = (Path("docs/releases") / (version + ".md")).read_text()
+          Path("release-notes.md").write_text(notes + "\n\n" + evidence)
+          PY
       - name: Publish to PyPI
         env:
           TWINE_USERNAME: __token__
@@ -59,8 +99,18 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.release_tag || github.ref_name }}
-          files: dist/*
-          generate_release_notes: true
+          name: v${{ steps.version.outputs.version }}
+          target_commitish: ${{ steps.version.outputs.source }}
+          body_path: release-notes.md
+          files: |
+            dist/*
+            release-assets/*
+          overwrite_files: true
+          fail_on_unmatched_files: true
+          generate_release_notes: false
+          append_body: false
+          draft: false
+          prerelease: false
           make_latest: true
 
   # Explicit dependency, because releases created by GITHUB_TOKEN do not

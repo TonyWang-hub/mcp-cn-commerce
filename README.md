@@ -15,7 +15,7 @@
 
 [English](README_en.md) | **简体中文**
 
-> **2026-10-10 状态**：Core `0.1.6` 本轮工程验收和本地制品准备使用的固定源码快照为 [`7e10d2f`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9)，该提交已合入公开 `main`，自身的 [11 项 CI 检查全部通过](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38038270963)。wheel/sdist 已按该快照完成本地准备核对，**尚未发布**；PyPI 和公开稳定 Release 仍为 `0.1.5`，`0.1.6` Release 草稿仍指向历史提交。真实商家验收仍未执行，详见[2026-10-10 工程与本地发布准备记录](docs/release-readiness.md#2026-10-10-core-main-与本地发布准备)。后续状态文档提交有各自的 SHA 和 CI 记录，不表示重建了该快照或 main 仍停在 `7e10d2f`。
+> **Core 0.1.6 版本说明**：实际可用制品与对应源码提交，以 [v0.1.6 GitHub Release](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.6)、[PyPI 0.1.6](https://pypi.org/project/mcp-cn-commerce/0.1.6/) 和[发布准备记录](docs/release-readiness.md)中的信息为准。本版本各 SDK 的 `live_verified` 均为 `false`；真实商家验收和后台对账未完成。
 >
 > [项目与咨询进展](docs/project-status.md) · [工程/发布证据](docs/release-readiness.md) · [更新记录](CHANGELOG.md)
 
@@ -82,53 +82,45 @@
 
 本表是 SDK 摘要，不将历史 MCP 商品、库存、物流等入口全部标为当前已核合同。工具注册、合同已读、SDK 可调用、真实店铺通过分别记录；所有 SDK `live_verified` 仍为 false。当前证据见[平台说明](docs/platforms.md)、[官方接入核查](docs/official-access-status.md)与[候选验收状态](docs/release-readiness.md)。CI 配置覆盖 Python 3.11/3.12/3.13，实际结果绑定具体提交。
 
-已合入的 Core 源码为各平台业务工具的 MCP `tools/list` 描述增加 `contract_status`、`supported` 和 `live_verified`。`supported=false` 的操作在发送平台请求前拒绝；历史兼容工具保留调用入口，明确标为 `unverified`。`supported=true` 只表示保留了调用映射，实际权限、合同范围和真店验收仍需分别确认。五项共享工具保持原有用途和描述，155 个注册工具的名称及输入输出结构不变；上述变化已包含在已验收源码快照中，公开稳定版 `0.1.5` 尚不包含这些变化。
+Core 为各平台业务工具的 MCP `tools/list` 描述提供 `contract_status`、`supported` 和 `live_verified`。`supported=false` 的操作在发送平台请求前拒绝；历史兼容工具保留调用入口，明确标为 `unverified`。`supported=true` 只表示保留了调用映射，实际权限、合同范围和真店验收仍需分别确认。五项共享工具保持原有用途和描述，155 个注册工具的名称及输入输出结构不变。
 
 ## 快速开始
 
 ### 安装
 
-#### 安装本轮验收与本地准备使用的 0.1.6 固定源码快照
+#### 安装 Core 0.1.6
 
-使用 Python 3.11+；以下以已有 Python 3.12 为例，在项目虚拟环境安装。本轮验收和本地制品准备使用的源码快照为
-[`7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9)。
-该提交自己的 11 项工程 CI 检查已通过；本地 wheel/sdist 准备核对不表示正式发布。源码尚不是 PyPI 稳定版，也不代表商家 API live 已通过：
+使用 Python 3.11+；以下以 Python 3.12 为例，在项目虚拟环境安装：
+
+```bash
+mkdir -p mcp-cn-commerce-0.1.6
+cd mcp-cn-commerce-0.1.6
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install "mcp-cn-commerce==0.1.6"
+mcp-cn-commerce --version
+```
+
+从源码安装时，先确认仓库中存在 `v0.1.6` tag（验证命令成功），再检出该 tag：
 
 ```bash
 git clone https://github.com/TonyWang-hub/mcp-cn-commerce.git
 cd mcp-cn-commerce
-git checkout --detach 7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9
+set -e
+git rev-parse --verify 'refs/tags/v0.1.6^{commit}' >/dev/null
+git checkout --detach v0.1.6
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -c requirements-lock.txt .
-mcp-cn-commerce --version
 ```
 
-预期版本为 `0.1.6`。开发者在上述同一项目环境将安装命令替换为：
+开发者可在同一项目虚拟环境中使用可编辑安装：
 
 ```bash
 python -m pip install -c requirements-lock.txt -e ".[dev]"
 ```
 
-这会安装到 `.venv`，不默认改全局 Python。MCP 桌面客户端的 `command` 应填写该项目 `.venv/bin/` 下命令的绝对路径；只在终端激活环境不保证桌面应用能找到它。其他操作系统使用对应的虚拟环境解释器/启动脚本路径。
-
-#### 安装当前 PyPI 稳定版 0.1.5
-
-[PyPI 0.1.5](https://pypi.org/project/mcp-cn-commerce/0.1.5/) 是当前公开稳定版，**不含后续 0.1.6 源码快照的全部变更**。需要该版本时，在单独目录和项目虚拟环境中安装：
-
-```bash
-mkdir -p mcp-cn-commerce-0.1.5
-cd mcp-cn-commerce-0.1.5
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install "mcp-cn-commerce==0.1.5"
-```
-
-#### GitHub Releases 与 main
-
-[公开稳定 Release v0.1.5](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.5) 与 `releases/latest` 仍指向当前公开稳定版。用于本轮工程验收和本地制品准备的固定源码快照 `7e10d2f` 已合入 `main`，有独立的 [CI 证据](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38038270963)和[工程/本地发布准备记录](docs/release-readiness.md#2026-10-10-core-main-与本地发布准备)。本地 wheel/sdist 尚未正式发布到 PyPI；Release 草稿仍指向历史候选 `c32e004`，不能据此认为草稿已包含新修复。后续源码或文档提交各有自己的 SHA 和 CI，不沿用 `7e10d2f` 的 CI 或制品哈希。正式发布前须核对实际 tag、制品哈希、CI、PyPI 和 MCP Registry 状态；后续以[项目进展](docs/project-status.md)及实际 Release 为准。
-
-复现已验候选时使用上面的完整 SHA。当前 `main` 和 HEAD 会继续变化；每个新提交都需绑定自己的验收证据，不要把未固定的 Git 安装、后续 main 或旧 PyPI 包称为同一个候选构建。
+安装会写入项目的 `.venv`，不默认修改全局 Python。MCP 桌面客户端的 `command` 应填写该项目 `.venv/bin/` 下命令的绝对路径；只在终端激活环境不保证桌面应用能找到它。其他操作系统使用对应的虚拟环境解释器/启动脚本路径。实际可安装制品和对应源码提交，以 [v0.1.6 GitHub Release](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.6)、[PyPI 0.1.6](https://pypi.org/project/mcp-cn-commerce/0.1.6/) 及[发布准备记录](docs/release-readiness.md)为准。
 
 ### 配置凭证
 
@@ -334,7 +326,7 @@ mcp-cn-commerce/
 └── LICENSE                           # MIT
 ```
 
-单一包架构：所选 Core 版本包含 8 个平台 server。先按上方说明选择候选或稳定版本，再按实际已核能力配置 MCP 客户端。
+单一包架构：Core 包含 8 个平台 server。按上方版本安装说明和逐操作能力表配置 MCP 客户端。
 
 ## 安全
 
@@ -371,7 +363,7 @@ mcp-cn-commerce/
 
 开源版永久免费，MIT 许可和已经公开的能力保持不变：平台适配、显式凭证 SDK、金额/时间归一化，以及 `build_daily_report` 的多店确定性日报计算都属于 Core。多店算法无需 Pro；宿主需提供已采集记录和准确的完整性声明。**代运营公司 / 电商 SaaS / 多店铺商家**可参加 Pro 内测，验证授权治理和持续运行能力；平台范围按当前合同逐操作确认。
 
-当前配套组合为 Pro `0.1.5b2` / Core `0.1.6` / Client `0.1.0b1`，固定使用 Core 源码快照 `7e10d2f`。Pro 自身 9 项工程 CI 检查通过，已合入 Pro `main`。真实商家 `live_verified` 仍为 false，业务验收与后台对账尚未完成；合成演练已通过，尚未提供正式客户制品。正式客户制品还需正式签名密钥、许可和接收方信息。历史 Pro `v0.1.1b1` Release 不代表当前组合。
+Pro 与 Core 分开维护、验证和发布，属于独立私有交付；Pro 的版本、能力和验收状态不由 Core 的版本或 CI 代表。Core 0.1.6 不包含 Pro 私有源码或制品。真实商家 `live_verified` 仍为 false，业务验收与后台对账尚未完成。
 
 | 能力 | 开源版 | Pro 版 |
 |---|---|---|

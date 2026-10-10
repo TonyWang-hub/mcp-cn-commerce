@@ -14,7 +14,7 @@
 
 **English** | [简体中文](README.md)
 
-> **Status — 2026-10-10:** The fixed Core `0.1.6` source snapshot used for this engineering acceptance and local artifact preparation is [`7e10d2f`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9). It has merged into public `main`, and its own [11 CI checks passed](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38038270963). A wheel and sdist were prepared and checked locally from this snapshot; **they have not been published**. PyPI and the public stable release remain `0.1.5`, and the `0.1.6` release draft still points to a historical commit. Merchant live acceptance has not been performed. See the [2026-10-10 engineering and local release preparation record](docs/release-readiness.md#2026-10-10-core-main-与本地发布准备). Later status-document commits have their own SHAs and CI records; this entry does not say that `main` still points to `7e10d2f` or that later commits were rebuilt from it.
+> **Core 0.1.6 release notes:** Check the [v0.1.6 GitHub Release](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.6), [PyPI 0.1.6](https://pypi.org/project/mcp-cn-commerce/0.1.6/) and [release-readiness record](docs/release-readiness.md) for artifact availability and the corresponding source commit. Every SDK in Core 0.1.6 has `live_verified=false`; real merchant acceptance and back-office reconciliation have not been completed.
 >
 > [Project and inquiry status](docs/project-status.md) · [Engineering/release evidence](docs/release-readiness.md) · [Changelog](CHANGELOG.md)
 
@@ -78,51 +78,43 @@ The [current SDK operation table](docs/sdk-integration.md#catalogue-and-evidence
 
 Product, inventory, logistics, reviews, marketing and billing registrations are not a claim of complete current API support. See [platform contracts](docs/platforms.md), [official evidence](docs/official-access-status.md) and [release readiness](docs/release-readiness.md).
 
-The merged Core source adds `contract_status`, `supported` and `live_verified` to each platform business tool's MCP `tools/list` description. Operations marked `supported=false` reject before any platform request. Retained historical tools are labelled `unverified`; `supported=true` only denotes a retained callable mapping, with permissions, contract scope and merchant acceptance checked separately. The five shared tools keep their existing descriptions, and all 155 tool names and input/output schemas remain compatible. These changes are included in the accepted source snapshot; the public stable release `0.1.5` does not include them.
+Core provides `contract_status`, `supported` and `live_verified` in each platform business tool's MCP `tools/list` description. Operations marked `supported=false` reject before any platform request. Retained historical tools are labelled `unverified`; `supported=true` only denotes a retained callable mapping, with permissions, contract scope and merchant acceptance checked separately. The five shared tools keep their existing descriptions, and all 155 tool names and input/output schemas remain compatible.
 
 ## Quick Start
 
-### Install the pinned 0.1.6 acceptance and preparation source snapshot
+### Install Core 0.1.6
 
-Use Python 3.11+; the commands below use an existing Python 3.12 installation and a project virtual environment. The fixed source snapshot used for engineering acceptance and local artifact preparation is
-[`7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9).
-Its own 11 engineering CI checks passed. Local wheel/sdist preparation does not mean formal publication; this source is not a stable PyPI release and does not establish merchant live acceptance:
+Use Python 3.11+; the commands below use Python 3.12 and a project virtual environment:
+
+```bash
+mkdir -p mcp-cn-commerce-0.1.6
+cd mcp-cn-commerce-0.1.6
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install "mcp-cn-commerce==0.1.6"
+mcp-cn-commerce --version
+```
+
+To install from source, first confirm that the `v0.1.6` tag exists in the repository (the verification command must succeed), then check out that tag:
 
 ```bash
 git clone https://github.com/TonyWang-hub/mcp-cn-commerce.git
 cd mcp-cn-commerce
-git checkout --detach 7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9
+set -e
+git rev-parse --verify 'refs/tags/v0.1.6^{commit}' >/dev/null
+git checkout --detach v0.1.6
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -c requirements-lock.txt .
-mcp-cn-commerce --version
 ```
 
-The expected version is `0.1.6`. For development, replace the install command above within the same project environment with:
+For development, use an editable install in the same project virtual environment:
 
 ```bash
 python -m pip install -c requirements-lock.txt -e ".[dev]"
 ```
 
-This uses `.venv`, not a global Python installation. Configure a desktop MCP client's `command` with the absolute path to the executable in the project's `.venv/bin/`; activating a terminal environment alone does not change a desktop application's PATH. Use the equivalent virtual-environment paths on other operating systems.
-
-### Install the current PyPI stable version
-
-[PyPI 0.1.5](https://pypi.org/project/mcp-cn-commerce/0.1.5/) is the current public stable version and **does not contain all changes in the later 0.1.6 source snapshots**. If you need that release, install it in a separate directory and project virtual environment:
-
-```bash
-mkdir -p mcp-cn-commerce-0.1.5
-cd mcp-cn-commerce-0.1.5
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install "mcp-cn-commerce==0.1.5"
-```
-
-### GitHub Releases and main
-
-The [public stable release v0.1.5](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.5) and `releases/latest` still point to the current public stable version. The fixed Core `0.1.6` source snapshot used for this engineering acceptance and local artifact preparation, `7e10d2f`, has merged into `main` and has its own [CI evidence](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38038270963) and [engineering/local preparation record](docs/release-readiness.md#2026-10-10-core-main-与本地发布准备). The locally prepared wheel and sdist have not been published to PyPI. The `0.1.6` release draft still targets the historical candidate `c32e004` and does not establish inclusion of the newer fixes. Later source and documentation commits have their own SHAs and CI records; the fixed snapshot's CI and artifact hashes do not transfer to them. Before publication, verify the actual tag, artifact hashes, CI, PyPI and MCP Registry status.
-
-Public `main` continues to change. Pin the full SHA above to reproduce this source snapshot; each later revision needs its own acceptance evidence. For container deployment in an environment that permits it, see the existing [deployment guide](docs/docker.md); containers are not required for the source installation above.
+The install stays in `.venv` and does not default to changing global Python. Set a desktop MCP client's `command` to the executable's absolute path under the project `.venv/bin/`; activating a terminal environment alone does not change a desktop application's PATH. Use the equivalent virtual-environment paths on other operating systems. Check the [v0.1.6 GitHub Release](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.6), [PyPI 0.1.6](https://pypi.org/project/mcp-cn-commerce/0.1.6/) and [release-readiness record](docs/release-readiness.md) for artifact availability and the corresponding source commit. For container deployment, see the [deployment guide](docs/docker.md); containers are not required for source installation.
 
 ### Configuration
 
@@ -301,7 +293,7 @@ Core remains free under the unchanged MIT license. Platform adapters, explicit-c
 
 Pro reuses those public capabilities and adds authorization lifecycle governance, encrypted application/grant storage, tenant/shop ACLs, persistent collection with page evidence and restart recovery, report history, scheduling and audit. It does not make the public multi-shop algorithm exclusive or imply support for every historical MCP registration. Supported providers and collection sources remain subject to their documented limits and merchant acceptance.
 
-The current companion versions are Pro `0.1.5b2` / Core `0.1.6` / Client `0.1.0b1`, pinned to Core source snapshot `7e10d2f`. Pro's own nine engineering CI checks passed, and this version is merged into Pro `main`. Merchant `live_verified` remains false; business acceptance and back-office reconciliation are unverified. Synthetic rehearsal passed; formal customer artifacts have not been delivered. Formal customer artifacts still require the official signing key, a license and recipient details. The historical Pro `v0.1.1b1` release does not represent this version combination.
+Pro is maintained, validated and released separately from Core as a private offering; its version, capabilities and acceptance status are not established by a Core version or CI run. Core 0.1.6 contains no private Pro source or artifacts. Real merchant `live_verified` remains false; business acceptance and back-office reconciliation have not been completed.
 
 A permitted, registered loopback callback can use the CLI authorization flow; HTTPS partner callbacks and user identity require server integration. Pro does not currently promise Ocean Engine/Qianchuan automatic renewal or reports. Old `shops.yaml` files are not automatically imported. Data flow depends on deployment: platform requests, remote partner APIs and explicitly configured notifications are separate from local storage and offline licensing.
 

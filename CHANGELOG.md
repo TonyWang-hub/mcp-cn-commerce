@@ -4,19 +4,9 @@ All notable changes to mcp-cn-commerce will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] — 0.1.6 engineering candidate
+## [Unreleased] — 0.1.6 release target
 
-Status checked on 2026-10-10: the Core source snapshot used for this engineering acceptance and local artifact preparation is
-[`7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9`](https://github.com/TonyWang-hub/mcp-cn-commerce/commit/7e10d2f80a0bafa333c10282edbc7af6f0b2cbb9), which has merged into public `main`.
-Its own [11 CI checks passed](https://github.com/TonyWang-hub/mcp-cn-commerce/actions/runs/38038270963). A wheel and sdist were prepared and checked locally from this exact source; this is preparation evidence, not publication. See the
-[2026-10-10 Core engineering and local release preparation record](docs/release-readiness.md#2026-10-10-core-main-与本地发布准备).
-Later status-document commits have their own SHAs and CI records; the `7e10d2f` CI and local artifact hashes do not transfer to them or imply that `main` still points to `7e10d2f`. The previous accepted Core snapshot `34082f0` and its CI, the historical `c32e004` and `67c8fc9` CI results, and the 2026-10-08 pre-commit
-local acceptance remain separately scoped in [release readiness](docs/release-readiness.md).
-The `0.1.6` release draft still targets `c32e004` and does not establish publication
-of the newer source snapshot. PyPI and the public stable release remain `0.1.5`; the locally prepared wheel and sdist have not been published.
-**PyPI and the public stable release remain 0.1.5.** Version 0.1.6 is an engineering
-candidate for a release draft, not a completed stable PyPI/Registry publication.
-See [installation choices](README.md#安装) and [release evidence](docs/release-readiness.md).
+Release target: v0.1.6. The formal release date will be added after publication is complete. Check the [v0.1.6 GitHub Release](https://github.com/TonyWang-hub/mcp-cn-commerce/releases/tag/v0.1.6), [PyPI 0.1.6](https://pypi.org/project/mcp-cn-commerce/0.1.6/) and [release-readiness record](docs/release-readiness.md) for artifact availability and the corresponding source commit.
 
 ### Added
 
@@ -49,7 +39,7 @@ See [installation choices](README.md#安装) and [release evidence](docs/release
 - PDD's identified merchant SDK reads remain unsupported pending complete official business schemas. Xiaohongshu's retained unsupported review/shop/promotion/coupon MCP entries send no request; other historical registrations do not imply a verified current contract.
 - Ocean Engine's reviewed SDK scope is advertiser information and balance; report operations remain closed pending current reporting/account-scope contracts.
 - SDK metadata keeps `live_verified=false`. Generic JD refunds remain unsupported; XHS Source timestamp units, JD cancellation/after-sale funds coverage, Pro Kuaishou identity and shared WeChat component delegation still have explicit gaps.
-- Bilingual installation instructions separate the pinned, tested 0.1.6 source candidate from PyPI 0.1.5 and use project virtual environments. The free Pro seed-user beta commitment is preserved.
+- Bilingual installation instructions use a project virtual environment and install `mcp-cn-commerce==0.1.6`; source installation checks for the `v0.1.6` tag before checkout. The free Pro seed-user beta commitment is preserved, and Pro remains a separate private offering.
 
 ### Historical engineering verification
 

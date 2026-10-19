@@ -45,7 +45,7 @@ referencing==0.37.0
 rpds-py==2026.9.1
 sse-starlette==3.5.0
 starlette==1.8.0
-truststore==0.10.4
+truststore==0.10.5
 typing_extensions==4.16.0
 typing-inspection==0.4.4
 uvicorn==0.54.0

@@ -35,7 +35,7 @@ idna==3.20
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 opentelemetry-api==1.45.1
-pycparser==3.11
+pycparser==3.12
 # pydantic-core is pinned exactly by the pydantic release metadata.
 # Update the parent to move core to its required compatible version.
 pydantic==2.14.1
